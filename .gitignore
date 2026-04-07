@@ -1,0 +1,73 @@
+# Build and CMake artifacts
+build/
+build_*/
+out/
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+CMakeFiles/
+CMakeCache.txt
+CMakeDoxyfile.in
+CMakeDoxygenDefaults.cmake
+CMakeScripts/
+Testing/
+Makefile
+cmake_install.cmake
+compile_commands.json
+CMakeUserPresets.json
+CMakePresets.json
+
+# Generated binaries and objects
+*.exe
+*.out
+*.pdb
+*.ilk
+*.obj
+*.o
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+
+# Visual Studio specific
+.vs/
+.vscode/
+*.sln
+*.vcxproj
+*.vcxproj.user
+*.vcxproj.filters
+*.db
+*.opendb
+*.suo
+*.user
+.vsconfig
+
+# IDE and editor files
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# GitHub / Copilot / AI tools
+.github/copilot/
+.copilot/
+copilot.log
+*.code-workspace
+
+# Submodules and third-party (we manage them explicitly)
+external/
+third_party/
+
+# Temporary / log files
+*.log
+*.tmp
+*.temp
+
+# Package managers / dependencies we don't want
+node_modules/
+package-lock.json
+yarn.lock
