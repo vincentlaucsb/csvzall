@@ -90,8 +90,11 @@ int Run(std::size_t row_limit, std::istream& input, std::ostream& output, bool i
     std::vector<std::vector<std::string>> rows;
     rows.reserve(row_limit);
 
-    csv::CSVRow row;
-    while (rows.size() < row_limit && reader.read_row(row)) {
+    for (auto& row : reader) {
+      if (rows.size() >= row_limit) {
+        break;
+      }
+
       std::vector<std::string> values;
       values.reserve(headers.size());
 

@@ -1,29 +1,13 @@
 #pragma once
 
-#include <cstdint>
-#include <functional>
+#include "../../transform_pipeline.hpp"
+
 #include <istream>
 #include <ostream>
 #include <string>
 #include <vector>
 
-namespace csvzall::pipeline {
-
-struct RunOptions {
-  bool single_threaded = false;
-  bool input_is_stdin = false;
-  bool exact_column_matching = false;
-};
-
-struct RunStats {
-  std::uint64_t rows_processed = 0;
-  std::uint64_t bytes_processed = 0;
-};
-
-struct LoggerCallbacks {
-  std::function<void(const std::string&)> error;
-  std::function<void(const std::string&)> verbose;
-};
+namespace csvzall::pipeline::commands {
 
 int RunDerive(const std::string& assignment, std::istream& input, std::ostream& output,
               const RunOptions& options, const LoggerCallbacks& logger, RunStats& stats);
@@ -42,4 +26,4 @@ int RunTimeseries(const std::string& x_column, const std::string& y_column,
                   std::istream& input, std::ostream& output,
                   const RunOptions& options, const LoggerCallbacks& logger, RunStats& stats);
 
-}  // namespace csvzall::pipeline
+}  // namespace csvzall::pipeline::commands

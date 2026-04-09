@@ -28,14 +28,16 @@
 - [x] Add clear error reporting for missing columns and expression failures.
 - [x] Replace TinyExpr with ExprTk for full comparison and boolean operator support.
 - [x] Add `summarize` command: `--group-by`, `--max`, `--show` for per-group aggregation.
-- [ ] Set up a test framework (Google Test or Catch2) with CTest integration.
-- [ ] Add case-insensitive column matching for `derive`, `filter`, and `summarize`:
-  - Lowercase lookup at compile/setup time only — hot path (per-row eval) is untouched.
-  - ExprTk variables registered under the user's spelling; column index resolved case-insensitively.
-  - Warn (do not error) if a case-insensitive lookup is ambiguous (e.g. headers `Weight` and `weight` both present).
-  - Test: correct output when expression uses wrong case; ambiguity warning fires correctly.
+- [x] Set up a test framework (Catch2) with CTest integration. (17 integration tests: filter, derive, summarize, timeseries — covers column matching, reducers, formatters)
+- [x] Add case-insensitive column matching for `derive`, `filter`, and `summarize`:
+	- Default behavior is case-insensitive for user-friendly lookup.
+	- `--exact` flag enables strict case-sensitive matching per command.
+	- Lookup precedence: exact match first, then case-insensitive fallback.
+	- Ambiguous case-insensitive matches resolve to the first header in file order.
+	- Verified: wrong-case expressions succeed by default and fail under `--exact`.
 - [ ] Emit throughput stats on `--verbose` (rows, time, MiB/s).
 - [ ] Add smoke tests for stdin piping, file input, derive/filter basics.
+- [ ] Add generic `timeseries` command for x/y(+series) analytics output.
 
 ## Notes
 - `csv-parser` can come from `-DCSV_PARSER_ROOT`, `external/csv-parser`, or sibling `../csv-parser`.
@@ -57,3 +59,33 @@
 - No hot-path cost — the map is built at header parse time, and all per-row access in csvzall already goes through integer indexes after that.
 - Once merged upstream, csvzall can remove its own `ToLower` workaround and rely on `index_of` directly.
 - **Note:** csvzall's `../csv-parser` is a local fork. Re-apply this patch if pulling upstream changes.
+
+## Timeseries Command (Planned)
+
+### Goal
+- Add a generic analytics primitive for time series extraction without introducing domain-specific commands.
+- Keep rendering concerns (Obsidian chart code blocks, append behavior) in shell scripts, not in csvzall.
+
+### Proposed CLI
+- `timeseries --x <col> --y <col> [input]`
+- `timeseries --x <col> --y <col> --series <col> [input]`
+- `timeseries --x <col> --y <col> --series <col> --reduce <max|min|sum|avg|last> [input]`
+- `timeseries --x <col> --y <col> --series <col> --format <csv|markdown> [input]`
+- `timeseries --x <col> --y <col> --series <col> --exact [input]`
+
+### Output Contract
+- Without `--series`: output columns are `x,y`.
+- With `--series`: output columns are `series,x,y`.
+- Duplicate key behavior for `(series, x)` is controlled by `--reduce`.
+
+### Implementation Notes
+- Use default case-insensitive column matching with `--exact` opt-in for strict mode.
+- For date-like values in `YYYY-MM-DD`, lexical ordering is chronological.
+- Rows with non-numeric `y` are skipped with verbose diagnostics.
+- Keep this command chart-tool agnostic; the PowerShell layer injects Obsidian chart code blocks.
+
+### Validation
+- Verify default case-insensitive lookups for `--x`, `--y`, and `--series`.
+- Verify `--exact` fails on wrong-case column names.
+- Verify reducer correctness on duplicate `(series, x)` rows.
+- Verify markdown output renders valid Obsidian tables.

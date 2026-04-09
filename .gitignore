@@ -59,7 +59,10 @@ copilot.log
 *.code-workspace
 
 # Submodules and third-party (we manage them explicitly)
-external/
+external/*
+!external/csv-parser
+!external/csv-parser/
+!external/csv-parser/**
 third_party/
 
 # Temporary / log files

@@ -30,8 +30,11 @@ csvzall filter "Weight > 0 && Reps > 0" FitNotes_Export.csv \
 
 Keep rows where the expression evaluates to non-zero. Supports arithmetic, comparisons (`>`, `<`, `>=`, `<=`, `==`, `!=`), and boolean logic (`&&`/`and`, `||`/`or`).
 
+Column matching is case-insensitive by default. Use `--exact` to require exact case-sensitive column names.
+
 ```sh
 csvzall filter "Salary > 50000 && Department == 1" employees.csv
+csvzall filter --exact "Salary > 50000 && Department == 1" employees.csv
 csvzall filter "Score >= 90 || Bonus > 0" -          # read from stdin
 ```
 
@@ -39,8 +42,11 @@ csvzall filter "Score >= 90 || Bonus > 0" -          # read from stdin
 
 Add a new column computed from an expression. The expression can reference any existing numeric column.
 
+Column matching is case-insensitive by default. Use `--exact` to require exact case-sensitive column names.
+
 ```sh
 csvzall derive "Tax = Salary * 0.22" employees.csv
+csvzall derive --exact "Tax = Salary * 0.22" employees.csv
 csvzall derive "BMI = Weight / (Height * Height)" -
 ```
 
@@ -52,10 +58,12 @@ Group rows and compute per-group aggregates. The row that produced the winning v
 --group-by <col>     Column to group on (required)
 --max <col>          Column to compute the maximum of (required)
 --show <col>         Additional columns to carry from the winning row (repeatable)
+--exact              Use exact case-sensitive column matching
 ```
 
 ```sh
 csvzall summarize --group-by Region --max Revenue --show Quarter sales.csv
+csvzall summarize --exact --group-by Region --max Revenue --show Quarter sales.csv
 ```
 
 Output column is named `max_<col>`.
@@ -108,11 +116,12 @@ The binary is at `build/Release/csvzall.exe` (Windows) or `build/csvzall` (Linux
 - Data flows on **stdout**, diagnostics on **stderr**. Every command is safe to pipe.
 - `-` as the input path means stdin. All commands accept it.
 - Expressions support both C-style `&&`/`||` and ExprTk's `and`/`or` keywords interchangeably.
-- Column matching will be **case-insensitive** (planned — see roadmap).
+- Column matching is case-insensitive by default for `filter`, `derive`, and `summarize`.
+- `--exact` switches those commands back to strict case-sensitive matching.
 
 ## Roadmap
 
-- [ ] Case-insensitive column matching across all commands
+- [x] Case-insensitive column matching by default (`filter`, `derive`, `summarize`)
 - [ ] Test suite (Google Test / Catch2 via CTest)
 - [ ] Throughput stats on `--verbose` (rows/s, MiB/s)
 - [ ] Richer `summarize` aggregations: `--min`, `--mean`, `--sum`, `--count`

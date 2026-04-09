@@ -13,6 +13,7 @@ endif()
 
 include(FetchContent)
 include(GNUInstallDirs)
+include(CTest)
 
 option(CSVZALL_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 
@@ -70,9 +71,8 @@ FetchContent_Declare(
   GIT_TAG master
   GIT_SHALLOW TRUE
 )
-FetchContent_GetProperties(exprtk)
-if(NOT exprtk_POPULATED)
-  FetchContent_Populate(exprtk)
+FetchContent_MakeAvailable(exprtk)
+if(NOT TARGET exprtk)
   add_library(exprtk INTERFACE)
   target_include_directories(exprtk SYSTEM INTERFACE
     "${exprtk_SOURCE_DIR}")
@@ -82,7 +82,14 @@ find_package(Threads REQUIRED)
 
 add_executable(csvzall
   src/main.cpp
-  src/transform_pipeline.cpp)
+  src/transform_pipeline.cpp
+  src/pipeline/common/column_lookup.cpp
+  src/pipeline/common/row_utils.cpp
+  src/pipeline/expression/expr_engine.cpp
+  src/pipeline/commands/derive.cpp
+  src/pipeline/commands/filter.cpp
+  src/pipeline/commands/summarize.cpp
+  src/pipeline/commands/timeseries.cpp)
 
 target_link_libraries(csvzall
   PRIVATE
@@ -107,3 +114,7 @@ endif()
 
 install(TARGETS csvzall
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()
