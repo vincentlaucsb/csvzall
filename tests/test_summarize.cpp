@@ -19,8 +19,8 @@ TEST_CASE("Summarize: group by and max") {
   std::istringstream input(csv);
   std::ostringstream output;
   
-  pipeline::RunOptions options{false, true, false};
-  pipeline::LoggerCallbacks logger{nullptr, nullptr};
+  auto options = tests::MakeTestOptions();
+  auto logger = tests::MakeNullLogger();
   pipeline::RunStats stats;
   
   int rc = pipeline::RunSummarize("exercise", "weight", {}, input, output, options, logger, stats);
@@ -60,8 +60,8 @@ TEST_CASE("Summarize: with --show columns") {
   std::istringstream input(csv);
   std::ostringstream output;
   
-  pipeline::RunOptions options{false, true, false};
-  pipeline::LoggerCallbacks logger{nullptr, nullptr};
+  auto options = tests::MakeTestOptions();
+  auto logger = tests::MakeNullLogger();
   pipeline::RunStats stats;
   
   int rc = pipeline::RunSummarize("exercise", "weight", {"date"}, input, output, options, logger, stats);
@@ -94,8 +94,8 @@ TEST_CASE("Summarize: insertion order preserved for groups") {
   std::istringstream input(csv);
   std::ostringstream output;
   
-  pipeline::RunOptions options{false, true, false};
-  pipeline::LoggerCallbacks logger{nullptr, nullptr};
+  auto options = tests::MakeTestOptions();
+  auto logger = tests::MakeNullLogger();
   pipeline::RunStats stats;
   
   int rc = pipeline::RunSummarize("exercise", "weight", {}, input, output, options, logger, stats);
@@ -122,8 +122,8 @@ TEST_CASE("Summarize: case-insensitive column matching") {
   std::istringstream input(csv);
   std::ostringstream output;
   
-  pipeline::RunOptions options{false, true, false};
-  pipeline::LoggerCallbacks logger{nullptr, nullptr};
+  auto options = tests::MakeTestOptions();
+  auto logger = tests::MakeNullLogger();
   pipeline::RunStats stats;
   
   // Use lowercase column names

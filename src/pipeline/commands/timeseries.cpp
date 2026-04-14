@@ -1,5 +1,6 @@
 #include "commands.hpp"
 
+#include "../common/column_lookup.hpp"
 #include "../common/row_utils.hpp"
 
 #include <csv.hpp>
@@ -7,9 +8,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
-#include <memory>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -99,118 +98,122 @@ void WriteMarkdownTable(std::ostream& output,
 
 }  // namespace
 
-int RunTimeseries(const std::string& x_column,
-                  const std::string& y_column,
-                  const std::string& series_column,
-                  const std::string& reduce_str,
+class TimeseriesCommand : public CsvTransformCommand {
+public:
+  TimeseriesCommand(const std::string& x_column, const std::string& y_column,
+                    const std::string& series_column, const std::string& reduce,
+                    const std::string& format,
+                    std::istream& input, std::ostream& output,
+                    const RunOptions& options, const LoggerCallbacks& logger,
+                    RunStats& stats)
+      : CsvTransformCommand(input, output, options, logger, stats),
+        x_column_(x_column), y_column_(y_column),
+        series_column_(series_column), reduce_str_(reduce),
+        format_(format) {}
+
+protected:
+  int run() override {
+    const auto x_idx_opt = common::FindColumnIndex(headers(), x_column_, options().exact_column_matching);
+    if (!x_idx_opt) {
+      if (logger().error) logger().error("x column not found: " + x_column_);
+      return 1;
+    }
+    const std::size_t x_idx = *x_idx_opt;
+
+    const auto y_idx_opt = common::FindColumnIndex(headers(), y_column_, options().exact_column_matching);
+    if (!y_idx_opt) {
+      if (logger().error) logger().error("y column not found: " + y_column_);
+      return 1;
+    }
+    const std::size_t y_idx = *y_idx_opt;
+
+    std::optional<std::size_t> series_idx;
+    const bool has_series = !series_column_.empty();
+    if (has_series) {
+      const auto series_idx_opt = common::FindColumnIndex(headers(), series_column_, options().exact_column_matching);
+      if (!series_idx_opt) {
+        if (logger().error) logger().error("series column not found: " + series_column_);
+        return 1;
+      }
+      series_idx = series_idx_opt;
+    }
+
+    const ReduceOp op = ParseReduceOp(reduce_str_);
+
+    std::vector<std::string> series_order;
+    std::unordered_map<std::string, std::map<std::string, AggRecord>> data;
+
+    for (auto& row : reader()) {
+      const std::string x_val = row[x_idx].get<std::string>();
+      double y_val = 0.0;
+      if (!row[y_idx].try_get(y_val)) {
+        if (logger().verbose) logger().verbose("Skipping row with non-numeric y at x=" + x_val);
+        stats().rows_processed++;
+        common::AccumulateRowBytes(row, stats());
+        continue;
+      }
+
+      const std::string series_key = has_series
+          ? row[*series_idx].get<std::string>()
+          : std::string{};
+
+      if (data.find(series_key) == data.end()) {
+        series_order.push_back(series_key);
+      }
+
+      ApplyReduce(data[series_key][x_val], y_val, op);
+      stats().rows_processed++;
+      common::AccumulateRowBytes(row, stats());
+    }
+
+    std::vector<std::string> out_headers;
+    if (has_series) out_headers.push_back("series");
+    out_headers.push_back("x");
+    out_headers.push_back("y");
+
+    std::vector<std::vector<std::string>> out_rows;
+    for (const auto& series_key : series_order) {
+      const auto& x_map = data.at(series_key);
+      for (const auto& [x_val, rec] : x_map) {
+        std::vector<std::string> out_row;
+        if (has_series) out_row.push_back(series_key);
+        out_row.push_back(x_val);
+        out_row.push_back(common::DoubleToString(FinalValue(rec, op)));
+        out_rows.push_back(std::move(out_row));
+      }
+    }
+
+    if (format_ == "markdown") {
+      WriteMarkdownTable(output(), out_headers, out_rows);
+    } else {
+      auto writer = csv::make_csv_writer_buffered(output());
+      writer << out_headers;
+      for (auto& r : out_rows) {
+        writer << r;
+      }
+      writer.flush();
+    }
+
+    return 0;
+  }
+
+private:
+  std::string x_column_;
+  std::string y_column_;
+  std::string series_column_;
+  std::string reduce_str_;
+  std::string format_;
+};
+
+int RunTimeseries(const std::string& x_column, const std::string& y_column,
+                  const std::string& series_column, const std::string& reduce,
                   const std::string& format,
                   std::istream& input, std::ostream& output,
                   const RunOptions& options, const LoggerCallbacks& logger,
                   RunStats& stats) {
-  std::unique_ptr<std::istringstream> buffered_stdin;
-  std::istream* parse_input = &input;
-  if (options.input_is_stdin) {
-    std::ostringstream raw;
-    raw << input.rdbuf();
-    buffered_stdin = std::make_unique<std::istringstream>(raw.str());
-    parse_input = buffered_stdin.get();
-  }
-
-  csv::CSVFormat fmt;
-  fmt.delimiter(',').quote('"').header_row(0);
-  if (!options.exact_column_matching) {
-    fmt.column_names_policy(csv::ColumnNamePolicy::CASE_INSENSITIVE);
-  }
-  csv::CSVReader reader(*parse_input, fmt);
-  const auto headers = reader.get_col_names();
-  if (headers.empty()) {
-    if (logger.error) logger.error("Input appears to have no header row.");
-    return 1;
-  }
-
-  const int x_pos = reader.index_of(x_column);
-  if (x_pos == csv::CSV_NOT_FOUND) {
-    if (logger.error) logger.error("x column not found: " + x_column);
-    return 1;
-  }
-  const std::size_t x_idx = static_cast<std::size_t>(x_pos);
-
-  const int y_pos = reader.index_of(y_column);
-  if (y_pos == csv::CSV_NOT_FOUND) {
-    if (logger.error) logger.error("y column not found: " + y_column);
-    return 1;
-  }
-  const std::size_t y_idx = static_cast<std::size_t>(y_pos);
-
-  std::optional<std::size_t> series_idx;
-  const bool has_series = !series_column.empty();
-  if (has_series) {
-    const int series_pos = reader.index_of(series_column);
-    if (series_pos == csv::CSV_NOT_FOUND) {
-      if (logger.error) logger.error("series column not found: " + series_column);
-      return 1;
-    }
-    series_idx = static_cast<std::size_t>(series_pos);
-  }
-
-  const ReduceOp op = ParseReduceOp(reduce_str);
-
-  // Preserve insertion order for series; std::map gives lexical/chronological x ordering.
-  std::vector<std::string> series_order;
-  std::unordered_map<std::string, std::map<std::string, AggRecord>> data;
-
-  for (auto& row : reader) {
-    const std::string x_val = row[x_idx].get<std::string>();
-    double y_val = 0.0;
-    if (!row[y_idx].try_get(y_val)) {
-      if (logger.verbose) logger.verbose("Skipping row with non-numeric y at x=" + x_val);
-      stats.rows_processed++;
-      common::AccumulateRowBytes(row, stats);
-      continue;
-    }
-
-    const std::string series_key = has_series
-        ? row[*series_idx].get<std::string>()
-        : std::string{};
-
-    if (data.find(series_key) == data.end()) {
-      series_order.push_back(series_key);
-    }
-
-    ApplyReduce(data[series_key][x_val], y_val, op);
-    stats.rows_processed++;
-    common::AccumulateRowBytes(row, stats);
-  }
-
-  std::vector<std::string> out_headers;
-  if (has_series) out_headers.push_back("series");
-  out_headers.push_back("x");
-  out_headers.push_back("y");
-
-  std::vector<std::vector<std::string>> out_rows;
-  for (const auto& series_key : series_order) {
-    const auto& x_map = data.at(series_key);
-    for (const auto& [x_val, rec] : x_map) {
-      std::vector<std::string> out_row;
-      if (has_series) out_row.push_back(series_key);
-      out_row.push_back(x_val);
-      out_row.push_back(common::DoubleToString(FinalValue(rec, op)));
-      out_rows.push_back(std::move(out_row));
-    }
-  }
-
-  if (format == "markdown") {
-    WriteMarkdownTable(output, out_headers, out_rows);
-  } else {
-    auto writer = csv::make_csv_writer_buffered(output);
-    writer << out_headers;
-    for (auto& r : out_rows) {
-      writer << r;
-    }
-    writer.flush();
-  }
-
-  return 0;
+  TimeseriesCommand cmd(x_column, y_column, series_column, reduce, format,
+                        input, output, options, logger, stats);
+  return cmd.execute();
 }
 
 }  // namespace csvzall::pipeline::commands

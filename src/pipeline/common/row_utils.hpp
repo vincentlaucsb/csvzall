@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../transform_pipeline.hpp"
+#include "../../pipeline_types.hpp"
 
 #include <csv.hpp>
 

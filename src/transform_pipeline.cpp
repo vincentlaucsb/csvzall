@@ -30,4 +30,14 @@ int RunTimeseries(const std::string& x_column, const std::string& y_column,
                                  input, output, options, logger, stats);
 }
 
+int RunSqlExport(const std::string& input_path,
+                 const std::string& dest_path,
+                 const std::string& table_name,
+                 std::istream& input,
+                 const RunOptions& options,
+                 const LoggerCallbacks& logger,
+                 RunStats& stats) {
+  return commands::RunSqlExport(input_path, dest_path, table_name, input, options, logger, stats);
+}
+
 }  // namespace csvzall::pipeline

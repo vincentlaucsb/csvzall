@@ -1,21 +1,49 @@
 # csvzall MVP Plan
 
 ## Scope
-- Build a fast, single-binary CSV transform CLI with `derive` and `filter` commands.
+- Build a fast, single-binary CSV transform CLI for common CSV manipulations and ETL.
 - Keep data flow Unix-style: stdin/stdout for data, stderr for logs/errors.
-- Use `csv-parser` v3.0.0, `argparse`, and `TinyExpr` only.
+- Use `csv-parser`, `argparse`, and `SQLiteCpp` as core dependencies.
+- Primary ETL target: Postgres-ready output (type-inferred DDL + `COPY`-ready payload).
+
+## Architecture: Streaming vs SQLite Commands
+
+Commands fall into two categories:
+
+### Streaming (no buffering)
+- `head`, `reorder`, `reformat` (CSV → TSV, Markdown, etc.)
+- These never need random access; process row by row and emit.
+
+### SQLite-backed (buffered)
+- `filter` (`WHERE` clause), `derive` (computed columns), `summarize` (`GROUP BY`), `sort`
+- Load the CSV into a SQLite table, execute SQL, stream results back out.
+
+### SQLite memory strategy
+- **Input is a file and size ≤ threshold**: load into an in-memory SQLite database (`:memory:`).
+- **Input is a file and size > threshold**: create a named temp-file database in the system temp dir (`csvzall_<pid>_<random>.db`), deleted on exit via RAII.
+- **Input is stdin**: always use in-memory unless `--sqlite-db <path>` is explicitly provided. Stdin size is unknown upfront so the user must opt into temp-file mode manually.
+- Default threshold: **256 MB**, configurable via `--sqlite-threshold-mb <n>` (global option, clearly documented).
+
+### SQLite schema conventions
+- All columns loaded as `TEXT`; SQLite type affinity handles `WHERE weight > 100` naturally.
+- All column names quoted with `"` in generated SQL to handle spaces and reserved words.
+- No type inference at load time.
+
+### SQLite wrapper
+- Use [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) (`FetchContent`, internal SQLite bundled).
+- RAII temp-file cleanup in destructor; handles `SIGINT`/`SIGTERM` via `std::atexit` registration.
 
 ## FitNotes Summary
 - Goal: compute per-set Epley estimates and prepare a summary-ready stream from FitNotes exports.
 - Formula: `Epley1RM = Weight * (1 + Reps / 30)`.
-- Command sequence target:
-	- `filter "Weight > 0 && Reps > 0"`
-	- `derive "Epley1RM = Weight * (1 + Reps / 30)"`
-	- (next) add aggregation command to get `max(Epley1RM)` by `Exercise`.
-- Implementation focus now:
-	- Robust numeric parsing for `Weight` and `Reps`.
-	- Clear errors for missing columns and non-numeric expression inputs.
-	- Preserve stdin/stdout pipeline behavior for large CSVs.
+- Command sequence target (SQL syntax, SQLite-backed):
+	- `filter "Weight > 0 AND Reps > 0"`
+	- `derive "Epley1RM = Weight * (1.0 + Reps / 30.0)"`
+	- `summarize --group-by Exercise --max Epley1RM`
+- Implementation focus:
+	- Load CSV into SQLite, execute SQL, stream results back out.
+	- Clear errors for missing columns and SQL failures.
+	- Preserve stdin/stdout pipeline behavior; respect memory threshold for large files.
 
 ## Milestones
 - [x] Bootstrap build system with CMake and dependencies wired.
@@ -35,6 +63,16 @@
 	- Lookup precedence: exact match first, then case-insensitive fallback.
 	- Ambiguous case-insensitive matches resolve to the first header in file order.
 	- Verified: wrong-case expressions succeed by default and fail under `--exact`.
+- [x] **[PIVOT]** Wire SQLiteCpp into CMake (`FetchContent`, internal SQLite bundled); drop ExprTk.
+- [x] **[PIVOT]** Implement SQLite loader: CSV → SQLite table (NUMERIC affinity, quoted column names, streaming insert).
+- [x] **[PIVOT]** Implement memory strategy: in-memory vs temp-file database based on `--sqlite-threshold-mb`.
+- [x] **[PIVOT]** Port `filter` to SQLite `WHERE` clause; deleted `expression/` layer.
+- [x] **[PIVOT]** Port `derive` to SQLite computed column (`SELECT *, <expr> AS col`); deleted `expression/` layer.
+- [ ] **[PIVOT]** Port `summarize` to SQLite `GROUP BY` with standard SQL aggregates.
+- [ ] **[PIVOT]** Add `sort` command (SQLite-backed, `ORDER BY`).
+- [ ] **[PIVOT]** Add `reorder` command (streaming, no SQLite).
+- [ ] **[PIVOT]** Add `reformat` command (streaming: CSV → TSV, Markdown table, etc.).
+- [ ] **[POSTGRES]** Add `pg-dump` command: type-infer columns → emit `CREATE TABLE` DDL + `\COPY`-ready CSV.
 - [ ] Emit throughput stats on `--verbose` (rows, time, MiB/s).
 - [ ] Add smoke tests for stdin piping, file input, derive/filter basics.
 - [ ] Add generic `timeseries` command for x/y(+series) analytics output.
@@ -45,7 +83,7 @@
 
 ## DataFrame Uses
 - The csv-parser `DataFrame` stores columns as contiguous vectors (column-vectorized layout), which is cache-friendly for column-wise operations.
-- This does **not** benefit the current `derive` and `filter` commands, which are row-oriented: ExprTk evaluates one expression per row, so column layout is irrelevant.
+- This does **not** benefit `derive` and `filter`, which are now SQLite-backed: all rows are loaded into SQLite and the query runs server-side.
 - The current single-pass streaming `summarize` is already optimal for single aggregations: O(n) time, O(groups) memory, and works on stdin without loading the full file.
 - The crossover point where the DataFrame earns its keep is **multiple aggregations on the same groups** — e.g. `--max`, `--mean`, `--sum`, `--count` in one `summarize` call. A streaming implementation would require multiple passes; the DataFrame loads once and computes all aggregates together.
 - Suggested approach when richer aggregations are added: if input is a file (bounded, seekable) load into DataFrame and use `group_by`; if input is stdin stay streaming. `RunOptions::input_is_stdin` already provides the branch condition.

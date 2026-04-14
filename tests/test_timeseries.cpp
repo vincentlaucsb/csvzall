@@ -18,8 +18,8 @@ TEST_CASE("Timeseries: basic x/y without series") {
   std::istringstream input(csv);
   std::ostringstream output;
   
-  pipeline::RunOptions options{false, true, false};
-  pipeline::LoggerCallbacks logger{nullptr, nullptr};
+  auto options = tests::MakeTestOptions();
+  auto logger = tests::MakeNullLogger();
   pipeline::RunStats stats;
   
   int rc = pipeline::RunTimeseries("date", "value", "", "max", "csv", 
@@ -52,8 +52,8 @@ TEST_CASE("Timeseries: with series grouping") {
   std::istringstream input(csv);
   std::ostringstream output;
   
-  pipeline::RunOptions options{false, true, false};
-  pipeline::LoggerCallbacks logger{nullptr, nullptr};
+  auto options = tests::MakeTestOptions();
+  auto logger = tests::MakeNullLogger();
   pipeline::RunStats stats;
   
   int rc = pipeline::RunTimeseries("date", "value", "exercise", "max", "csv",
@@ -92,8 +92,8 @@ TEST_CASE("Timeseries: reduce operators (max, min, sum, avg, last)") {
   
   std::ostringstream output_max, output_min, output_sum, output_avg, output_last;
   
-  pipeline::RunOptions options{false, true, false};
-  pipeline::LoggerCallbacks logger{nullptr, nullptr};
+  auto options = tests::MakeTestOptions();
+  auto logger = tests::MakeNullLogger();
   pipeline::RunStats stats;
   
   // Test max
@@ -141,8 +141,8 @@ TEST_CASE("Timeseries: markdown output format") {
   std::istringstream input(csv);
   std::ostringstream output;
   
-  pipeline::RunOptions options{false, true, false};
-  pipeline::LoggerCallbacks logger{nullptr, nullptr};
+  auto options = tests::MakeTestOptions();
+  auto logger = tests::MakeNullLogger();
   pipeline::RunStats stats;
   
   int rc = pipeline::RunTimeseries("date", "value", "", "max", "markdown",
@@ -167,8 +167,8 @@ TEST_CASE("Timeseries: case-insensitive column matching") {
   std::istringstream input(csv);
   std::ostringstream output;
   
-  pipeline::RunOptions options{false, true, false};
-  pipeline::LoggerCallbacks logger{nullptr, nullptr};
+  auto options = tests::MakeTestOptions();
+  auto logger = tests::MakeNullLogger();
   pipeline::RunStats stats;
   
   // Use lowercase column names

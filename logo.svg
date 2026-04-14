@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="gridGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4CAF50" />
+      <stop offset="100%" style="stop-color:#2E7D32" />
+    </linearGradient>
+    <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#757575" />
+      <stop offset="100%" style="stop-color:#424242" />
+    </linearGradient>
+    <linearGradient id="handleGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF9800" />
+      <stop offset="100%" style="stop-color:#E65100" />
+    </linearGradient>
+    <linearGradient id="bladeGrad" x1="100%" y1="0%" x2="0%" y2="0%">
+      <stop offset="0%" style="stop-color:#CFD8DC" />
+      <stop offset="100%" style="stop-color:#90A4AE" />
+    </linearGradient>
+  </defs>
+
+  <!-- Green spreadsheet background (slightly left of center) -->
+  <rect x="46" y="86" width="300" height="340" rx="20" ry="20"
+        fill="url(#gridGrad)" stroke="#1B5E20" stroke-width="4"/>
+  <!-- Grid lines - vertical -->
+  <line x1="106" y1="86" x2="106" y2="426" stroke="#388E3C" stroke-width="2" opacity="0.55"/>
+  <line x1="166" y1="86" x2="166" y2="426" stroke="#388E3C" stroke-width="2" opacity="0.55"/>
+  <line x1="226" y1="86" x2="226" y2="426" stroke="#388E3C" stroke-width="2" opacity="0.55"/>
+  <line x1="286" y1="86" x2="286" y2="426" stroke="#388E3C" stroke-width="2" opacity="0.55"/>
+  <!-- Grid lines - horizontal -->
+  <line x1="46" y1="143" x2="346" y2="143" stroke="#388E3C" stroke-width="2" opacity="0.55"/>
+  <line x1="46" y1="200" x2="346" y2="200" stroke="#388E3C" stroke-width="2" opacity="0.55"/>
+  <line x1="46" y1="256" x2="346" y2="256" stroke="#388E3C" stroke-width="2" opacity="0.55"/>
+  <line x1="46" y1="313" x2="346" y2="313" stroke="#388E3C" stroke-width="2" opacity="0.55"/>
+  <line x1="46" y1="370" x2="346" y2="370" stroke="#388E3C" stroke-width="2" opacity="0.55"/>
+
+  <!-- === RECIPROCATING SAW — side profile, blade points LEFT === -->
+
+  <!-- Blade (extends left from body) -->
+  <rect x="32" y="237" width="175" height="14" rx="1" fill="url(#bladeGrad)"
+        stroke="#546E7A" stroke-width="1.5"/>
+  <!-- Blade tip -->
+  <polygon points="32,238 18,244 32,250" fill="#CFD8DC" stroke="#546E7A" stroke-width="1.5"/>
+  <!-- Teeth along bottom of blade -->
+  <polyline points="42,251 48,259 54,251 60,259 66,251 72,259 78,251 84,259 90,251 96,259 102,251 108,259 114,251 120,259 126,251 132,259 138,251 144,259 150,251 156,259 162,251 168,259 174,251 180,259 186,251 192,259 198,251"
+            fill="none" stroke="#546E7A" stroke-width="2" stroke-linejoin="round"/>
+
+  <!-- Shoe / base plate (under blade at body junction) -->
+  <rect x="185" y="252" width="40" height="8" rx="2" fill="#616161" stroke="#424242" stroke-width="1"/>
+
+  <!-- Body / motor housing -->
+  <path d="M 200,218 L 370,218 C 378,218 384,224 384,232 L 384,258 C 384,266 378,272 370,272 L 200,272 C 194,272 190,266 190,258 L 190,232 C 190,224 194,218 200,218 Z"
+        fill="url(#bodyGrad)" stroke="#333" stroke-width="3"/>
+  <!-- Vent lines on body -->
+  <line x1="220" y1="228" x2="220" y2="262" stroke="#555" stroke-width="1.5" opacity="0.5"/>
+  <line x1="235" y1="228" x2="235" y2="262" stroke="#555" stroke-width="1.5" opacity="0.5"/>
+  <line x1="250" y1="228" x2="250" y2="262" stroke="#555" stroke-width="1.5" opacity="0.5"/>
+  <line x1="265" y1="228" x2="265" y2="262" stroke="#555" stroke-width="1.5" opacity="0.5"/>
+
+  <!-- Trigger area / grip transition -->
+  <rect x="340" y="222" width="16" height="46" rx="4" fill="#555" stroke="#333" stroke-width="1.5"/>
+
+  <!-- Handle (D-grip, side profile) -->
+  <path d="M 356,215 C 370,195 430,192 460,210 L 468,222 C 474,235 474,255 468,268 L 460,280 C 430,298 370,295 356,275 Z"
+        fill="url(#handleGrad)" stroke="#BF360C" stroke-width="3"/>
+  <!-- Handle grip hole -->
+  <path d="M 375,225 C 385,210 430,208 448,220 L 452,230 C 456,240 456,250 452,260 L 448,270 C 430,282 385,280 375,265 Z"
+        fill="#2D2D2D" stroke="#1A1A1A" stroke-width="2"/>
+
+  <!-- Trigger -->
+  <path d="M 348,250 L 352,250 L 356,270 L 346,270 Z"
+        fill="#444" stroke="#333" stroke-width="1"/>
+
+  <!-- Small accent detail on body -->
+  <circle cx="310" cy="245" r="6" fill="#555" stroke="#666" stroke-width="1.5"/>
+  <circle cx="310" cy="245" r="2.5" fill="#333"/>
+
+  <!-- Debris particles flying from blade -->
+  <g opacity="0.85">
+    <rect x="22" y="270" width="11" height="11" fill="#66BB6A" transform="rotate(20,27,275)"/>
+    <rect x="40" y="285" width="8"  height="8"  fill="#4CAF50" transform="rotate(-15,44,289)"/>
+    <rect x="10" y="290" width="9"  height="9"  fill="#81C784" transform="rotate(40,14,294)"/>
+    <rect x="55" y="300" width="6"  height="6"  fill="#A5D6A7" transform="rotate(55,58,303)"/>
+    <rect x="28" y="308" width="5"  height="5"  fill="#66BB6A" transform="rotate(-30,30,310)"/>
+    <rect x="48" y="315" width="4"  height="4"  fill="#4CAF50" transform="rotate(10,50,317)"/>
+    <rect x="15" y="318" width="4"  height="4"  fill="#81C784" transform="rotate(65,17,320)"/>
+    <rect x="62" y="275" width="7"  height="7"  fill="#A5D6A7" transform="rotate(-25,65,278)"/>
+  </g>
+</svg>

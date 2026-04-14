@@ -1,102 +1,98 @@
 #include "commands.hpp"
 
 #include "../common/column_lookup.hpp"
-#include "../common/row_utils.hpp"
-#include "../expression/expr_engine.hpp"
+#include "../sqlite/csv_loader.hpp"
+#include "../sqlite/sqlite_db.hpp"
 
+#include <SQLiteCpp/SQLiteCpp.h>
 #include <csv.hpp>
 
-#include <cmath>
-#include <memory>
-#include <sstream>
 #include <string>
 #include <vector>
 
 namespace csvzall::pipeline::commands {
+class DeriveCommand : public CsvTransformCommand {
+public:
+  DeriveCommand(const std::string& assignment, std::istream& input,
+                std::ostream& output, const RunOptions& options,
+                const LoggerCallbacks& logger, RunStats& stats)
+      : CsvTransformCommand(input, output, options, logger, stats),
+        assignment_(assignment) {}
 
-int RunDerive(const std::string& assignment, std::istream& input, std::ostream& output,
-              const RunOptions& options, const LoggerCallbacks& logger, RunStats& stats) {
-  const auto equals_pos = assignment.find('=');
-  if (equals_pos == std::string::npos) {
-    if (logger.error) {
-      logger.error("Invalid derive assignment. Expected format: NewCol = expression");
-    }
-    return 1;
-  }
-
-  const std::string new_column = common::Trim(assignment.substr(0, equals_pos));
-  const std::string expression_text = common::Trim(assignment.substr(equals_pos + 1));
-
-  if (new_column.empty() || expression_text.empty()) {
-    if (logger.error) {
-      logger.error("Invalid derive assignment. Both column name and expression are required.");
-    }
-    return 1;
-  }
-
-  std::unique_ptr<std::istringstream> buffered_stdin;
-  std::istream* parse_input = &input;
-  if (options.input_is_stdin) {
-    std::ostringstream raw;
-    raw << input.rdbuf();
-    buffered_stdin = std::make_unique<std::istringstream>(raw.str());
-    parse_input = buffered_stdin.get();
-  }
-
-  csv::CSVFormat format;
-  format.delimiter(',').quote('"').header_row(0);
-  csv::CSVReader reader(*parse_input, format);
-  const auto headers = reader.get_col_names();
-  if (headers.empty()) {
-    if (logger.error) {
-      logger.error("Input appears to have no header row.");
-    }
-    return 1;
-  }
-
-  if (common::FindColumnIndex(headers, new_column, options.exact_column_matching).has_value()) {
-    if (logger.error) {
-      logger.error("Derived column already exists: " + new_column);
-    }
-    return 1;
-  }
-
-  auto ctx = expression::CompileExpression(expression_text, headers, options, logger);
-  if (!ctx.has_value()) {
-    return 1;
-  }
-
-  auto writer = csv::make_csv_writer_buffered(output);
-  std::vector<std::string> output_headers = headers;
-  output_headers.push_back(new_column);
-  writer << output_headers;
-
-  std::size_t row_number = 1;
-  for (auto& row : reader) {
-    ++row_number;
-    if (!expression::BindRowValues(row, *ctx, row_number, logger,
-                                   expression::NumericParseMode::Strict)) {
-      return 1;
-    }
-
-    const double result = ctx->expression.value();
-    if (!std::isfinite(result)) {
-      if (logger.error) {
-        logger.error("Expression evaluated to non-finite value at row " + std::to_string(row_number) + ".");
+protected:
+  int run() override {
+    const auto equals_pos = assignment_.find('=');
+    if (equals_pos == std::string::npos) {
+      if (logger().error) {
+        logger().error("Invalid derive assignment. Expected format: NewCol = expression");
       }
       return 1;
     }
 
-    auto out_row = std::vector<std::string>(row);
-    out_row.push_back(common::DoubleToString(result));
-    writer << out_row;
+    const std::string new_column = common::Trim(assignment_.substr(0, equals_pos));
+    const std::string expr_text  = common::Trim(assignment_.substr(equals_pos + 1));
 
-    stats.rows_processed++;
-    common::AccumulateRowBytes(row, stats);
+    if (new_column.empty() || expr_text.empty()) {
+      if (logger().error) {
+        logger().error("Invalid derive assignment. Both column name and expression are required.");
+      }
+      return 1;
+    }
+
+    if (common::FindColumnIndex(headers(), new_column, options().exact_column_matching).has_value()) {
+      if (logger().error) {
+        logger().error("Derived column already exists: " + new_column);
+      }
+      return 1;
+    }
+
+    sqlite::SqliteDb sdb = sqlite::OpenSqliteDb(options());
+
+    if (!sqlite::LoadCsvIntoTable(reader(), headers(), sdb.db(), "t", logger())) {
+      return 1;
+    }
+
+    const std::string sql =
+        "SELECT *, " + expr_text + " AS " + sqlite::QuoteIdentifier(new_column) + " FROM \"t\"";
+
+    try {
+      SQLite::Statement query(sdb.db(), sql);
+
+      auto writer = csv::make_csv_writer_buffered(output());
+      std::vector<std::string> out_headers = headers();
+      out_headers.push_back(new_column);
+      writer << out_headers;
+
+      while (query.executeStep()) {
+        std::vector<std::string> out_row;
+        out_row.reserve(static_cast<std::size_t>(query.getColumnCount()));
+        for (int i = 0; i < query.getColumnCount(); ++i) {
+          out_row.emplace_back(
+              query.getColumn(i).isNull() ? std::string{} : query.getColumn(i).getString());
+        }
+        writer << out_row;
+        stats().rows_processed++;
+      }
+
+      writer.flush();
+    } catch (const SQLite::Exception& ex) {
+      if (logger().error) {
+        logger().error(std::string("SQLite derive error: ") + ex.what());
+      }
+      return 1;
+    }
+
+    return 0;
   }
 
-  writer.flush();
-  return 0;
+private:
+  std::string assignment_;
+};
+
+int RunDerive(const std::string& assignment, std::istream& input, std::ostream& output,
+              const RunOptions& options, const LoggerCallbacks& logger, RunStats& stats) {
+  DeriveCommand cmd(assignment, input, output, options, logger, stats);
+  return cmd.execute();
 }
 
 }  // namespace csvzall::pipeline::commands

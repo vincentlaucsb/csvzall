@@ -64,19 +64,20 @@ if(TARGET argparse::argparse)
   set(CSVZALL_ARGPARSE_TARGET argparse::argparse)
 endif()
 
-# ExprTk (header-only expression engine)
+# SQLiteCpp — RAII C++ wrapper with bundled internal SQLite.
+# Used by all SQLite-backed commands (filter, derive, summarize, sort).
+# SQLITECPP_INTERNAL_SQLITE is ON by default; no system SQLite required.
 FetchContent_Declare(
-  exprtk
-  GIT_REPOSITORY https://github.com/ArashPartow/exprtk.git
-  GIT_TAG master
+  SQLiteCpp
+  GIT_REPOSITORY https://github.com/SRombauts/SQLiteCpp.git
+  GIT_TAG 3.3.2
   GIT_SHALLOW TRUE
 )
-FetchContent_MakeAvailable(exprtk)
-if(NOT TARGET exprtk)
-  add_library(exprtk INTERFACE)
-  target_include_directories(exprtk SYSTEM INTERFACE
-    "${exprtk_SOURCE_DIR}")
-endif()
+set(SQLITECPP_RUN_CPPCHECK OFF CACHE BOOL "" FORCE)
+set(SQLITECPP_RUN_CPPLINT  OFF CACHE BOOL "" FORCE)
+set(SQLITECPP_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
+set(SQLITECPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(SQLiteCpp)
 
 find_package(Threads REQUIRED)
 
@@ -85,9 +86,13 @@ add_executable(csvzall
   src/transform_pipeline.cpp
   src/pipeline/common/column_lookup.cpp
   src/pipeline/common/row_utils.cpp
-  src/pipeline/expression/expr_engine.cpp
+  src/pipeline/sqlite/sqlite_db.cpp
+  src/pipeline/sqlite/csv_loader.cpp
+  src/pipeline/commands/CsvInputCommand.cpp
+  src/pipeline/commands/CsvTransformCommand.cpp
   src/pipeline/commands/derive.cpp
   src/pipeline/commands/filter.cpp
+  src/pipeline/commands/sql_export.cpp
   src/pipeline/commands/summarize.cpp
   src/pipeline/commands/timeseries.cpp)
 
@@ -95,7 +100,7 @@ target_link_libraries(csvzall
   PRIVATE
     ${CSVZALL_ARGPARSE_TARGET}
     csv
-    exprtk
+    SQLiteCpp
     Threads::Threads)
 
 target_compile_features(csvzall PRIVATE cxx_std_20)

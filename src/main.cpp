@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -33,14 +34,6 @@ class Logger {
 
  private:
   bool verbose_ = false;
-};
-
-struct RunContext {
-  std::istream* input = nullptr;
-  std::ostream* output = nullptr;
-  std::string input_name;
-  bool single_threaded = false;
-  bool verbose = false;
 };
 
 struct ThroughputStats {
@@ -81,6 +74,64 @@ void MaybePrintVerboseStats(const ThroughputStats& stats, const Logger& logger) 
   logger.Verbose(oss.str());
 }
 
+// Empty string → nullopt (auto-detect). "tab" or "\t" → '\t'. "pipe" → '|'.
+// Any other non-empty string → its first character.
+std::optional<char> ParseDelimiter(const std::string& s) {
+  if (s.empty()) return std::nullopt;
+  if (s == "tab" || s == "\\t") return '\t';
+  if (s == "pipe") return '|';
+  return s[0];
+}
+
+// Register arguments shared by all CSV-consuming subcommands:
+// positional input, --single-threaded, --verbose, -d/--delimiter.
+void AddCsvInputArguments(argparse::ArgumentParser& cmd) {
+  cmd.add_argument("input")
+      .help("Input CSV file path, or '-' for stdin")
+      .default_value(std::string{"-"})
+      .nargs(argparse::nargs_pattern::optional);
+  cmd.add_argument("--single-threaded")
+      .help("Disable csv-parser multithreading")
+      .default_value(false)
+      .implicit_value(true);
+  cmd.add_argument("--verbose")
+      .help("Print throughput and diagnostic logs to stderr")
+      .default_value(false)
+      .implicit_value(true);
+  cmd.add_argument("-d", "--delimiter")
+      .help("Input field delimiter: single char, 'tab', or '\\t' (default: auto-detect)")
+      .default_value(std::string{""});
+}
+
+// Register --exact for commands that perform column name lookups.
+void AddExactArgument(argparse::ArgumentParser& cmd) {
+  cmd.add_argument("--exact")
+      .help("Use exact case-sensitive column name matching")
+      .default_value(false)
+      .implicit_value(true);
+}
+
+csvzall::pipeline::LoggerCallbacks BuildCallbacks(const Logger& logger) {
+  return {
+    [&logger](const std::string& msg) { logger.Error(msg); },
+    [&logger](const std::string& msg) { logger.Verbose(msg); }};
+}
+
+csvzall::pipeline::RunOptions BuildTransformOptions(
+    const argparse::ArgumentParser& cmd, std::istream* input) {
+  return {
+    cmd.get<bool>("--single-threaded"),
+    input == &std::cin,
+    cmd.get<bool>("--exact"),
+    ParseDelimiter(cmd.get<std::string>("--delimiter"))};
+}
+
+ThroughputStats FinishStats(const csvzall::pipeline::RunStats& ps,
+                             std::chrono::steady_clock::time_point start) {
+  return {ps.rows_processed, ps.bytes_processed,
+          std::chrono::steady_clock::now() - start};
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -90,42 +141,14 @@ int main(int argc, char** argv) {
   argparse::ArgumentParser derive_cmd("derive");
   derive_cmd.add_description("Add or overwrite a column using an expression");
   derive_cmd.add_argument("assignment").help("Format: NewCol = expression");
-  derive_cmd.add_argument("input")
-      .help("Input CSV file path, or '-' for stdin")
-      .default_value(std::string{"-"})
-      .nargs(argparse::nargs_pattern::optional);
-  derive_cmd.add_argument("--single-threaded")
-      .help("Disable csv-parser multithreading")
-      .default_value(false)
-      .implicit_value(true);
-  derive_cmd.add_argument("--verbose")
-      .help("Print throughput and diagnostic logs to stderr")
-      .default_value(false)
-      .implicit_value(true);
-    derive_cmd.add_argument("--exact")
-      .help("Use exact case-sensitive column matching")
-      .default_value(false)
-      .implicit_value(true);
+  AddCsvInputArguments(derive_cmd);
+  AddExactArgument(derive_cmd);;
 
   argparse::ArgumentParser filter_cmd("filter");
   filter_cmd.add_description("Keep rows where expression is truthy");
   filter_cmd.add_argument("expression").help("Filter expression evaluated per row");
-  filter_cmd.add_argument("input")
-      .help("Input CSV file path, or '-' for stdin")
-      .default_value(std::string{"-"})
-      .nargs(argparse::nargs_pattern::optional);
-  filter_cmd.add_argument("--single-threaded")
-      .help("Disable csv-parser multithreading")
-      .default_value(false)
-      .implicit_value(true);
-  filter_cmd.add_argument("--verbose")
-      .help("Print throughput and diagnostic logs to stderr")
-      .default_value(false)
-      .implicit_value(true);
-    filter_cmd.add_argument("--exact")
-      .help("Use exact case-sensitive column matching")
-      .default_value(false)
-      .implicit_value(true);
+  AddCsvInputArguments(filter_cmd);
+  AddExactArgument(filter_cmd);;
 
     argparse::ArgumentParser head_cmd("head");
     head_cmd.add_description("Print header and first rows as a neat table");
@@ -141,6 +164,9 @@ int main(int argc, char** argv) {
       .help("Print throughput and diagnostic logs to stderr")
       .default_value(false)
       .implicit_value(true);
+    head_cmd.add_argument("-d", "--delimiter")
+      .help("Input field delimiter: single char, 'tab', or '\\t' (default: auto-detect)")
+      .default_value(std::string{""});
 
   argparse::ArgumentParser summarize_cmd("summarize");
   summarize_cmd.add_description("Group rows and compute aggregate statistics");
@@ -154,22 +180,8 @@ int main(int argc, char** argv) {
       .help("Additional columns to include from the winning row (repeatable)")
       .default_value(std::vector<std::string>{})
       .append();
-  summarize_cmd.add_argument("input")
-      .help("Input CSV file path, or '-' for stdin")
-      .default_value(std::string{"-"})
-      .nargs(argparse::nargs_pattern::optional);
-  summarize_cmd.add_argument("--single-threaded")
-      .help("Disable csv-parser multithreading")
-      .default_value(false)
-      .implicit_value(true);
-  summarize_cmd.add_argument("--verbose")
-      .help("Print throughput and diagnostic logs to stderr")
-      .default_value(false)
-      .implicit_value(true);
-    summarize_cmd.add_argument("--exact")
-      .help("Use exact case-sensitive column matching")
-      .default_value(false)
-      .implicit_value(true);
+  AddCsvInputArguments(summarize_cmd);
+  AddExactArgument(summarize_cmd);;
 
   argparse::ArgumentParser timeseries_cmd("timeseries");
   timeseries_cmd.add_description("Extract an x/y time series with optional grouping and reduction");
@@ -188,28 +200,26 @@ int main(int argc, char** argv) {
   timeseries_cmd.add_argument("--format")
       .help("Output format: csv|markdown")
       .default_value(std::string{"csv"});
-  timeseries_cmd.add_argument("input")
-      .help("Input CSV file path, or '-' for stdin")
-      .default_value(std::string{"-"})
-      .nargs(argparse::nargs_pattern::optional);
-  timeseries_cmd.add_argument("--single-threaded")
-      .help("Disable csv-parser multithreading")
-      .default_value(false)
-      .implicit_value(true);
-  timeseries_cmd.add_argument("--verbose")
-      .help("Print throughput and diagnostic logs to stderr")
-      .default_value(false)
-      .implicit_value(true);
-  timeseries_cmd.add_argument("--exact")
-      .help("Use exact case-sensitive column matching")
-      .default_value(false)
-      .implicit_value(true);
+  AddCsvInputArguments(timeseries_cmd);
+  AddExactArgument(timeseries_cmd);;
 
   program.add_subparser(derive_cmd);
   program.add_subparser(filter_cmd);
     program.add_subparser(head_cmd);
   program.add_subparser(summarize_cmd);
   program.add_subparser(timeseries_cmd);
+
+  argparse::ArgumentParser sql_cmd("sql");
+  sql_cmd.add_description("Convert a CSV file to a SQLite database");
+  AddCsvInputArguments(sql_cmd);
+  sql_cmd.add_argument("--dest")
+      .help("Destination .db file path (default: input filename with .db extension)")
+      .default_value(std::string{});
+  sql_cmd.add_argument("--table")
+      .help("Table name to create inside the database")
+      .default_value(std::string{"data"});;
+
+  program.add_subparser(sql_cmd);
 
   try {
     program.parse_args(argc, argv);
@@ -221,7 +231,7 @@ int main(int argc, char** argv) {
 
   if (!program.is_subcommand_used("derive") && !program.is_subcommand_used("filter") &&
       !program.is_subcommand_used("head") && !program.is_subcommand_used("summarize") &&
-      !program.is_subcommand_used("timeseries")) {
+      !program.is_subcommand_used("timeseries") && !program.is_subcommand_used("sql")) {
     std::cerr << program;
     return 1;
   }
@@ -232,137 +242,101 @@ int main(int argc, char** argv) {
 
   if (program.is_subcommand_used("derive")) {
     Logger logger(derive_cmd.get<bool>("--verbose"));
-    RunContext ctx;
-    ctx.input_name = derive_cmd.get<std::string>("input");
-    ctx.single_threaded = derive_cmd.get<bool>("--single-threaded");
-    ctx.verbose = derive_cmd.get<bool>("--verbose");
-    ctx.input = ResolveInput(ctx.input_name, input_file, logger);
-    ctx.output = &std::cout;
-
-    if (ctx.input == nullptr) {
-      logger.Error("Unable to open input file: " + ctx.input_name);
+    const std::string input_name = derive_cmd.get<std::string>("input");
+    auto* input = ResolveInput(input_name, input_file, logger);
+    if (!input) {
+      logger.Error("Unable to open input file: " + input_name);
       return 1;
     }
-
-    csvzall::pipeline::RunStats pipeline_stats;
-    const csvzall::pipeline::LoggerCallbacks callbacks{
-      [&](const std::string& msg) { logger.Error(msg); },
-      [&](const std::string& msg) { logger.Verbose(msg); }};
-    const csvzall::pipeline::RunOptions options{
-      ctx.single_threaded,
-      ctx.input == &std::cin,
-      derive_cmd.get<bool>("--exact")};
-
-    const auto rc = csvzall::pipeline::RunDerive(derive_cmd.get<std::string>("assignment"),
-                           *ctx.input, *ctx.output, options, callbacks,
-                           pipeline_stats);
-    stats.rows_processed = pipeline_stats.rows_processed;
-    stats.bytes_processed = pipeline_stats.bytes_processed;
-    stats.elapsed = std::chrono::steady_clock::now() - start;
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunDerive(
+        derive_cmd.get<std::string>("assignment"),
+        *input, std::cout, BuildTransformOptions(derive_cmd, input),
+        BuildCallbacks(logger), ps);
+    stats = FinishStats(ps, start);
     MaybePrintVerboseStats(stats, logger);
     return rc;
   }
 
   if (program.is_subcommand_used("filter")) {
     Logger logger(filter_cmd.get<bool>("--verbose"));
-    RunContext ctx;
-    ctx.input_name = filter_cmd.get<std::string>("input");
-    ctx.single_threaded = filter_cmd.get<bool>("--single-threaded");
-    ctx.verbose = filter_cmd.get<bool>("--verbose");
-    ctx.input = ResolveInput(ctx.input_name, input_file, logger);
-    ctx.output = &std::cout;
-
-    if (ctx.input == nullptr) {
-      logger.Error("Unable to open input file: " + ctx.input_name);
+    const std::string input_name = filter_cmd.get<std::string>("input");
+    auto* input = ResolveInput(input_name, input_file, logger);
+    if (!input) {
+      logger.Error("Unable to open input file: " + input_name);
       return 1;
     }
-
-    csvzall::pipeline::RunStats pipeline_stats;
-    const csvzall::pipeline::LoggerCallbacks callbacks{
-      [&](const std::string& msg) { logger.Error(msg); },
-      [&](const std::string& msg) { logger.Verbose(msg); }};
-    const csvzall::pipeline::RunOptions options{
-      ctx.single_threaded,
-      ctx.input == &std::cin,
-      filter_cmd.get<bool>("--exact")};
-
-    const auto rc = csvzall::pipeline::RunFilter(filter_cmd.get<std::string>("expression"),
-                           *ctx.input, *ctx.output, options, callbacks,
-                           pipeline_stats);
-    stats.rows_processed = pipeline_stats.rows_processed;
-    stats.bytes_processed = pipeline_stats.bytes_processed;
-    stats.elapsed = std::chrono::steady_clock::now() - start;
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunFilter(
+        filter_cmd.get<std::string>("expression"),
+        *input, std::cout, BuildTransformOptions(filter_cmd, input),
+        BuildCallbacks(logger), ps);
+    stats = FinishStats(ps, start);
     MaybePrintVerboseStats(stats, logger);
     return rc;
   }
 
   if (program.is_subcommand_used("summarize")) {
     Logger logger(summarize_cmd.get<bool>("--verbose"));
-    RunContext ctx;
-    ctx.input_name = summarize_cmd.get<std::string>("input");
-    ctx.single_threaded = summarize_cmd.get<bool>("--single-threaded");
-    ctx.verbose = summarize_cmd.get<bool>("--verbose");
-    ctx.input = ResolveInput(ctx.input_name, input_file, logger);
-    ctx.output = &std::cout;
-
-    if (ctx.input == nullptr) {
-      logger.Error("Unable to open input file: " + ctx.input_name);
+    const std::string input_name = summarize_cmd.get<std::string>("input");
+    auto* input = ResolveInput(input_name, input_file, logger);
+    if (!input) {
+      logger.Error("Unable to open input file: " + input_name);
       return 1;
     }
-
-    csvzall::pipeline::RunStats pipeline_stats;
-    const csvzall::pipeline::LoggerCallbacks callbacks{
-      [&](const std::string& msg) { logger.Error(msg); },
-      [&](const std::string& msg) { logger.Verbose(msg); }};
-    const csvzall::pipeline::RunOptions options{
-      ctx.single_threaded,
-      ctx.input == &std::cin,
-      summarize_cmd.get<bool>("--exact")};
-
+    csvzall::pipeline::RunStats ps;
     const auto rc = csvzall::pipeline::RunSummarize(
         summarize_cmd.get<std::string>("--group-by"),
         summarize_cmd.get<std::string>("--max"),
         summarize_cmd.get<std::vector<std::string>>("--show"),
-        *ctx.input, *ctx.output, options, callbacks, pipeline_stats);
-    stats.rows_processed = pipeline_stats.rows_processed;
-    stats.bytes_processed = pipeline_stats.bytes_processed;
-    stats.elapsed = std::chrono::steady_clock::now() - start;
+        *input, std::cout, BuildTransformOptions(summarize_cmd, input),
+        BuildCallbacks(logger), ps);
+    stats = FinishStats(ps, start);
     MaybePrintVerboseStats(stats, logger);
     return rc;
   }
 
   if (program.is_subcommand_used("timeseries")) {
     Logger logger(timeseries_cmd.get<bool>("--verbose"));
-    RunContext ctx;
-    ctx.input_name = timeseries_cmd.get<std::string>("input");
-    ctx.single_threaded = timeseries_cmd.get<bool>("--single-threaded");
-    ctx.verbose = timeseries_cmd.get<bool>("--verbose");
-    ctx.input = ResolveInput(ctx.input_name, input_file, logger);
-    ctx.output = &std::cout;
-
-    if (ctx.input == nullptr) {
-      logger.Error("Unable to open input file: " + ctx.input_name);
+    const std::string input_name = timeseries_cmd.get<std::string>("input");
+    auto* input = ResolveInput(input_name, input_file, logger);
+    if (!input) {
+      logger.Error("Unable to open input file: " + input_name);
       return 1;
     }
-
-    csvzall::pipeline::RunStats pipeline_stats;
-    const csvzall::pipeline::LoggerCallbacks callbacks{
-      [&](const std::string& msg) { logger.Error(msg); },
-      [&](const std::string& msg) { logger.Verbose(msg); }};
-    const csvzall::pipeline::RunOptions options{
-      ctx.single_threaded,
-      ctx.input == &std::cin,
-      timeseries_cmd.get<bool>("--exact")};
-
+    csvzall::pipeline::RunStats ps;
     const auto rc = csvzall::pipeline::RunTimeseries(
         timeseries_cmd.get<std::string>("--x"),
         timeseries_cmd.get<std::string>("--y"),
         timeseries_cmd.get<std::string>("--series"),
         timeseries_cmd.get<std::string>("--reduce"),
         timeseries_cmd.get<std::string>("--format"),
-        *ctx.input, *ctx.output, options, callbacks, pipeline_stats);
-    stats.rows_processed = pipeline_stats.rows_processed;
-    stats.bytes_processed = pipeline_stats.bytes_processed;
+        *input, std::cout, BuildTransformOptions(timeseries_cmd, input),
+        BuildCallbacks(logger), ps);
+    stats = FinishStats(ps, start);
+    MaybePrintVerboseStats(stats, logger);
+    return rc;
+  }
+
+  if (program.is_subcommand_used("sql")) {
+    Logger logger(sql_cmd.get<bool>("--verbose"));
+    const std::string input_name = sql_cmd.get<std::string>("input");
+    auto* input = ResolveInput(input_name, input_file, logger);
+    if (!input) {
+      logger.Error("Unable to open input file: " + input_name);
+      return 1;
+    }
+    const csvzall::pipeline::RunOptions options{
+      sql_cmd.get<bool>("--single-threaded"),
+      input == &std::cin,
+      false,
+      ParseDelimiter(sql_cmd.get<std::string>("--delimiter"))};
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunSqlExport(
+        input_name, sql_cmd.get<std::string>("--dest"),
+        sql_cmd.get<std::string>("--table"),
+        *input, options, BuildCallbacks(logger), ps);
+    stats.rows_processed = ps.rows_processed;
     stats.elapsed = std::chrono::steady_clock::now() - start;
     MaybePrintVerboseStats(stats, logger);
     return rc;
@@ -374,21 +348,21 @@ int main(int argc, char** argv) {
     logger.Error("--rows must be greater than or equal to 0.");
     return 1;
   }
-
-  RunContext ctx;
-  ctx.input_name = head_cmd.get<std::string>("input");
-  ctx.verbose = head_cmd.get<bool>("--verbose");
-  ctx.input = ResolveInput(ctx.input_name, input_file, logger);
-  ctx.output = &std::cout;
-
-  if (ctx.input == nullptr) {
-    logger.Error("Unable to open input file: " + ctx.input_name);
+  const std::string input_name = head_cmd.get<std::string>("input");
+  auto* input = ResolveInput(input_name, input_file, logger);
+  if (!input) {
+    logger.Error("Unable to open input file: " + input_name);
     return 1;
   }
-
+  const csvzall::pipeline::RunOptions head_options{
+    false,
+    input == &std::cin,
+    false,
+    ParseDelimiter(head_cmd.get<std::string>("--delimiter"))};
   csvzall::head::Result head_result;
-  const auto rc = csvzall::head::Run(static_cast<std::size_t>(requested_rows), *ctx.input,
-                                     *ctx.output, ctx.input == &std::cin, logger, head_result);
+  const auto rc = csvzall::head::Run(
+      static_cast<std::size_t>(requested_rows), *input, std::cout,
+      head_options, logger, head_result);
   stats.rows_processed = head_result.rows_processed;
   stats.bytes_processed = head_result.bytes_processed;
   stats.elapsed = std::chrono::steady_clock::now() - start;

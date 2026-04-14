@@ -109,15 +109,14 @@ The binary is at `build/Release/csvzall.exe` (Windows) or `build/csvzall` (Linux
 |---|---|---|
 | [csv-parser](https://github.com/vincentlaucsb/csv-parser) v3 | CSV parsing and writing | Local checkout |
 | [argparse](https://github.com/p-ranav/argparse) v3.1 | CLI argument parsing | FetchContent |
-| [ExprTk](https://github.com/ArashPartow/exprtk) | Expression evaluation | FetchContent |
+| [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) | SQLite C++ wrapper (bundled SQLite) | FetchContent |
 
 ## Design notes
 
 - Data flows on **stdout**, diagnostics on **stderr**. Every command is safe to pipe.
 - `-` as the input path means stdin. All commands accept it.
-- Expressions support both C-style `&&`/`||` and ExprTk's `and`/`or` keywords interchangeably.
-- Column matching is case-insensitive by default for `filter`, `derive`, and `summarize`.
-- `--exact` switches those commands back to strict case-sensitive matching.
+- `filter` and `derive` use SQL syntax — standard `WHERE` clauses and SQL expressions.
+- Column matching is case-insensitive by default (SQLite identifier resolution).
 
 ## Roadmap
 

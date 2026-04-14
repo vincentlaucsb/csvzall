@@ -11,14 +11,20 @@ FetchContent_MakeAvailable(Catch2)
 add_executable(csvzall_tests
   test_filter.cpp
   test_derive.cpp
+  test_head.cpp
+  test_sql_export.cpp
   test_summarize.cpp
   test_timeseries.cpp
   ../src/transform_pipeline.cpp
   ../src/pipeline/common/column_lookup.cpp
   ../src/pipeline/common/row_utils.cpp
-  ../src/pipeline/expression/expr_engine.cpp
+  ../src/pipeline/sqlite/sqlite_db.cpp
+  ../src/pipeline/sqlite/csv_loader.cpp
+  ../src/pipeline/commands/CsvInputCommand.cpp
+  ../src/pipeline/commands/CsvTransformCommand.cpp
   ../src/pipeline/commands/derive.cpp
   ../src/pipeline/commands/filter.cpp
+  ../src/pipeline/commands/sql_export.cpp
   ../src/pipeline/commands/summarize.cpp
   ../src/pipeline/commands/timeseries.cpp)
 
@@ -27,7 +33,7 @@ target_link_libraries(csvzall_tests
     Catch2::Catch2WithMain
     ${CSVZALL_ARGPARSE_TARGET}
     csv
-    exprtk
+    SQLiteCpp
     Threads::Threads)
 
 target_include_directories(csvzall_tests

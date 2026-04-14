@@ -14,6 +14,8 @@
 #include <utility>
 #include <vector>
 
+#include "pipeline_types.hpp"
+
 namespace csvzall::head {
 
 struct Result {
@@ -48,7 +50,7 @@ inline void PrintSeparator(const std::vector<std::size_t>& widths, std::ostream&
     out << std::string(width + 2, '-') << '+';
   }
   out << '\n';
-}
+} 
 
 inline void PrintTableRow(const std::vector<std::string>& values, const std::vector<std::size_t>& widths,
                           std::ostream& out) {
@@ -64,12 +66,13 @@ inline void PrintTableRow(const std::vector<std::string>& values, const std::vec
 }
 
 template <typename LoggerT>
-int Run(std::size_t row_limit, std::istream& input, std::ostream& output, bool input_is_stdin,
+int Run(std::size_t row_limit, std::istream& input, std::ostream& output,
+        const csvzall::pipeline::RunOptions& options,
         LoggerT& logger, Result& result) {
   try {
     std::unique_ptr<std::istringstream> buffered_stdin;
     std::istream* parse_input = &input;
-    if (input_is_stdin) {
+    if (options.input_is_stdin) {
       std::ostringstream raw;
       raw << input.rdbuf();
       buffered_stdin = std::make_unique<std::istringstream>(raw.str());
@@ -78,7 +81,12 @@ int Run(std::size_t row_limit, std::istream& input, std::ostream& output, bool i
     }
 
     csv::CSVFormat format;
-    format.delimiter(',').quote('"').header_row(0);
+    if (options.delimiter) {
+      format.delimiter(*options.delimiter);
+    } else {
+      format.delimiter({ ',', '|', '\t', ';', '^' });
+    }
+    format.quote('"').header_row(0);
     csv::CSVReader reader(*parse_input, format);
 
     const auto headers = reader.get_col_names();

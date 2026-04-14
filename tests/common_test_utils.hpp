@@ -1,67 +1,56 @@
 #pragma once
 
-#include <string>
+#include <csv.hpp>
 #include <sstream>
+#include <string>
 #include <vector>
+
+#include "../src/pipeline_types.hpp"
 
 namespace csvzall::tests {
 
-// Helper to create test CSV data from headers and rows
+// Build a CSV string using csv-parser's own writer so quoting and escaping
+// are handled correctly.
 inline std::string MakeTestCsv(const std::vector<std::string>& headers,
                                const std::vector<std::vector<std::string>>& rows) {
   std::ostringstream oss;
-  
-  // Write header
-  for (std::size_t i = 0; i < headers.size(); ++i) {
-    if (i > 0) oss << ',';
-    oss << headers[i];
-  }
-  oss << '\n';
-  
-  // Write rows
+  auto writer = csv::make_csv_writer(oss);
+  writer << headers;
   for (const auto& row : rows) {
-    for (std::size_t i = 0; i < row.size(); ++i) {
-      if (i > 0) oss << ',';
-      // Simple quote handling for CSV
-      if (row[i].find(',') != std::string::npos || row[i].find('"') != std::string::npos) {
-        oss << '"' << row[i] << '"';
-      } else {
-        oss << row[i];
-      }
-    }
-    oss << '\n';
+    writer << row;
   }
-  
   return oss.str();
 }
 
-// Helper to extract CSV cells from output (basic, assumes no quoted commas)
+// Parse a CSV string using csv-parser's own reader.
+// Returns all rows including the header row as row 0.
 inline std::vector<std::vector<std::string>> ParseCsv(const std::string& csv_text) {
   std::vector<std::vector<std::string>> result;
   std::istringstream stream(csv_text);
-  std::string line;
-  
-  while (std::getline(stream, line)) {
-    if (line.empty()) continue;
-    
-    std::vector<std::string> row;
-    std::istringstream line_stream(line);
-    std::string cell;
-    
-    while (std::getline(line_stream, cell, ',')) {
-      // Trim quotes if present
-      if (!cell.empty() && cell.front() == '"' && cell.back() == '"') {
-        cell = cell.substr(1, cell.size() - 2);
-      }
-      row.push_back(cell);
-    }
-    
-    if (!row.empty()) {
-      result.push_back(row);
-    }
+  csv::CSVReader reader(stream);
+
+  // Header row first.
+  result.push_back(reader.get_col_names());
+
+  for (auto& row : reader) {
+    result.push_back(std::vector<std::string>(row));
   }
-  
+
   return result;
+}
+
+// RunOptions suitable for unit tests: treats input as a stream (not a file),
+// no exact column matching, auto-detect delimiter.
+inline csvzall::pipeline::RunOptions MakeTestOptions(bool exact = false) {
+  csvzall::pipeline::RunOptions opts;
+  opts.input_is_stdin = true;
+  opts.exact_column_matching = exact;
+  return opts;
+}
+
+// Null-sink LoggerCallbacks for tests that don't inspect log output.
+inline csvzall::pipeline::LoggerCallbacks MakeNullLogger() {
+  return {nullptr, nullptr};
 }
 
 }  // namespace csvzall::tests
