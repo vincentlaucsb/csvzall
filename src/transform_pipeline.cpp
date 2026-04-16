@@ -40,4 +40,34 @@ int RunSqlExport(const std::string& input_path,
   return commands::RunSqlExport(input_path, dest_path, table_name, input, options, logger, stats);
 }
 
+int RunSqlQueryCsv(const std::string& sql_query,
+                   const std::string& table_name,
+                   std::istream& input,
+                   std::ostream& output,
+                   const RunOptions& options,
+                   const LoggerCallbacks& logger,
+                   RunStats& stats) {
+  return commands::RunSqlQueryCsv(sql_query, table_name, input, output, options, logger, stats);
+}
+
+SqlQueryInputKind DetectSqlQueryInputKind(const std::string& path) {
+  switch (commands::DetectSqlQueryInputKind(path)) {
+    case commands::SqlQueryInputKind::kCsv:
+      return SqlQueryInputKind::kCsv;
+    case commands::SqlQueryInputKind::kSqlite:
+      return SqlQueryInputKind::kSqlite;
+    case commands::SqlQueryInputKind::kUnknown:
+    default:
+      return SqlQueryInputKind::kUnknown;
+  }
+}
+
+int RunSqlQueryDb(const std::string& sql_query,
+                  const std::string& db_path,
+                  std::ostream& output,
+                  const LoggerCallbacks& logger,
+                  RunStats& stats) {
+  return commands::RunSqlQueryDb(sql_query, db_path, output, logger, stats);
+}
+
 }  // namespace csvzall::pipeline

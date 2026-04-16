@@ -68,6 +68,7 @@ Commands fall into two categories:
 - [x] **[PIVOT]** Implement memory strategy: in-memory vs temp-file database based on `--sqlite-threshold-mb`.
 - [x] **[PIVOT]** Port `filter` to SQLite `WHERE` clause; deleted `expression/` layer.
 - [x] **[PIVOT]** Port `derive` to SQLite computed column (`SELECT *, <expr> AS col`); deleted `expression/` layer.
+- [ ] Add `sql query` submode under `sql` for arbitrary SQL over CSV-loaded SQLite (`--csv` path first; `--db` later).
 - [ ] **[PIVOT]** Port `summarize` to SQLite `GROUP BY` with standard SQL aggregates.
 - [ ] **[PIVOT]** Add `sort` command (SQLite-backed, `ORDER BY`).
 - [ ] **[PIVOT]** Add `reorder` command (streaming, no SQLite).

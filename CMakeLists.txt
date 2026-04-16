@@ -65,57 +65,68 @@ if(TARGET argparse::argparse)
 endif()
 
 # SQLiteCpp — RAII C++ wrapper with bundled internal SQLite.
-# Used by all SQLite-backed commands (filter, derive, summarize, sort).
+# Patched via cmake/patches/SQLiteCpp-bind-text-with-length.patch to add a
+# bind(int, const char*, int) text-with-length overload (no null termination required).
 # SQLITECPP_INTERNAL_SQLITE is ON by default; no system SQLite required.
 FetchContent_Declare(
   SQLiteCpp
   GIT_REPOSITORY https://github.com/SRombauts/SQLiteCpp.git
   GIT_TAG 3.3.2
   GIT_SHALLOW TRUE
+  PATCH_COMMAND git apply "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patches/SQLiteCpp-bind-text-with-length.patch"
+  UPDATE_DISCONNECTED TRUE
 )
-set(SQLITECPP_RUN_CPPCHECK OFF CACHE BOOL "" FORCE)
-set(SQLITECPP_RUN_CPPLINT  OFF CACHE BOOL "" FORCE)
-set(SQLITECPP_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
+set(SQLITECPP_RUN_CPPCHECK   OFF CACHE BOOL "" FORCE)
+set(SQLITECPP_RUN_CPPLINT    OFF CACHE BOOL "" FORCE)
+set(SQLITECPP_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(SQLITECPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SQLiteCpp)
 
 find_package(Threads REQUIRED)
 
-add_executable(csvzall
-  src/main.cpp
-  src/transform_pipeline.cpp
-  src/pipeline/common/column_lookup.cpp
-  src/pipeline/common/row_utils.cpp
-  src/pipeline/sqlite/sqlite_db.cpp
-  src/pipeline/sqlite/csv_loader.cpp
-  src/pipeline/commands/CsvInputCommand.cpp
-  src/pipeline/commands/CsvTransformCommand.cpp
-  src/pipeline/commands/derive.cpp
-  src/pipeline/commands/filter.cpp
-  src/pipeline/commands/sql_export.cpp
-  src/pipeline/commands/summarize.cpp
-  src/pipeline/commands/timeseries.cpp)
+set(CSVZALL_APP_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/transform_pipeline.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/column_lookup.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/row_utils.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/sqlite/sqlite_db.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/sqlite/csv_loader.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/CsvInputCommand.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/CsvTransformCommand.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/derive.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/filter.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/sql_query.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/sql_export.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/summarize.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/timeseries.cpp)
 
-target_link_libraries(csvzall
-  PRIVATE
-    ${CSVZALL_ARGPARSE_TARGET}
-    csv
-    SQLiteCpp
-    Threads::Threads)
+function(csvzall_configure_app target_name)
+  target_link_libraries(${target_name}
+    PRIVATE
+      ${CSVZALL_ARGPARSE_TARGET}
+      csv
+      SQLiteCpp
+      Threads::Threads)
 
-target_compile_features(csvzall PRIVATE cxx_std_20)
+  target_compile_features(${target_name} PRIVATE cxx_std_20)
 
-if(MSVC)
-  target_compile_options(csvzall PRIVATE /W4 /permissive- /bigobj)
-  if(CSVZALL_WARNINGS_AS_ERRORS)
-    target_compile_options(csvzall PRIVATE /WX)
+  if(MSVC)
+    target_compile_options(${target_name} PRIVATE /W4 /permissive- /bigobj)
+    if(CSVZALL_WARNINGS_AS_ERRORS)
+      target_compile_options(${target_name} PRIVATE /WX)
+    endif()
+  else()
+    target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wpedantic)
+    if(CSVZALL_WARNINGS_AS_ERRORS)
+      target_compile_options(${target_name} PRIVATE -Werror)
+    endif()
   endif()
-else()
-  target_compile_options(csvzall PRIVATE -Wall -Wextra -Wpedantic)
-  if(CSVZALL_WARNINGS_AS_ERRORS)
-    target_compile_options(csvzall PRIVATE -Werror)
-  endif()
-endif()
+endfunction()
+
+add_executable(csvzall ${CSVZALL_APP_SOURCES})
+csvzall_configure_app(csvzall)
+
+add_subdirectory(programs)
 
 install(TARGETS csvzall
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

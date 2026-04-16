@@ -118,12 +118,14 @@ csvzall::pipeline::LoggerCallbacks BuildCallbacks(const Logger& logger) {
 }
 
 csvzall::pipeline::RunOptions BuildTransformOptions(
-    const argparse::ArgumentParser& cmd, std::istream* input) {
-  return {
-    cmd.get<bool>("--single-threaded"),
-    input == &std::cin,
-    cmd.get<bool>("--exact"),
-    ParseDelimiter(cmd.get<std::string>("--delimiter"))};
+    const argparse::ArgumentParser& cmd, std::istream* input, const std::string& input_path) {
+  csvzall::pipeline::RunOptions options;
+  options.single_threaded = cmd.get<bool>("--single-threaded");
+  options.input_is_stdin = (input == &std::cin);
+  options.exact_column_matching = cmd.get<bool>("--exact");
+  options.delimiter = ParseDelimiter(cmd.get<std::string>("--delimiter"));
+  options.input_path = input_path;
+  return options;
 }
 
 ThroughputStats FinishStats(const csvzall::pipeline::RunStats& ps,
@@ -210,14 +212,28 @@ int main(int argc, char** argv) {
   program.add_subparser(timeseries_cmd);
 
   argparse::ArgumentParser sql_cmd("sql");
-  sql_cmd.add_description("Convert a CSV file to a SQLite database");
-  AddCsvInputArguments(sql_cmd);
-  sql_cmd.add_argument("--dest")
+    sql_cmd.add_description("SQLite-backed workflows (load/query)");
+
+    sql_cmd.add_argument("mode")
+      .help("SQL mode: load|query")
+      .default_value(std::string{"load"})
+      .nargs(argparse::nargs_pattern::optional);
+    AddCsvInputArguments(sql_cmd);
+    sql_cmd.add_argument("--dest")
       .help("Destination .db file path (default: input filename with .db extension)")
       .default_value(std::string{});
-  sql_cmd.add_argument("--table")
+    sql_cmd.add_argument("--table")
       .help("Table name to create inside the database")
-      .default_value(std::string{"data"});;
+      .default_value(std::string{"data"});
+    sql_cmd.add_argument("--csv")
+      .help("Input CSV file path, or '-' for stdin")
+      .default_value(std::string{});
+      sql_cmd.add_argument("--db")
+        .help("Input SQLite database path")
+        .default_value(std::string{});
+    sql_cmd.add_argument("--sql")
+      .help("SQL query text to execute")
+      .default_value(std::string{""});
 
   program.add_subparser(sql_cmd);
 
@@ -251,7 +267,7 @@ int main(int argc, char** argv) {
     csvzall::pipeline::RunStats ps;
     const auto rc = csvzall::pipeline::RunDerive(
         derive_cmd.get<std::string>("assignment"),
-        *input, std::cout, BuildTransformOptions(derive_cmd, input),
+        *input, std::cout, BuildTransformOptions(derive_cmd, input, input_name),
         BuildCallbacks(logger), ps);
     stats = FinishStats(ps, start);
     MaybePrintVerboseStats(stats, logger);
@@ -269,7 +285,7 @@ int main(int argc, char** argv) {
     csvzall::pipeline::RunStats ps;
     const auto rc = csvzall::pipeline::RunFilter(
         filter_cmd.get<std::string>("expression"),
-        *input, std::cout, BuildTransformOptions(filter_cmd, input),
+        *input, std::cout, BuildTransformOptions(filter_cmd, input, input_name),
         BuildCallbacks(logger), ps);
     stats = FinishStats(ps, start);
     MaybePrintVerboseStats(stats, logger);
@@ -289,7 +305,7 @@ int main(int argc, char** argv) {
         summarize_cmd.get<std::string>("--group-by"),
         summarize_cmd.get<std::string>("--max"),
         summarize_cmd.get<std::vector<std::string>>("--show"),
-        *input, std::cout, BuildTransformOptions(summarize_cmd, input),
+        *input, std::cout, BuildTransformOptions(summarize_cmd, input, input_name),
         BuildCallbacks(logger), ps);
     stats = FinishStats(ps, start);
     MaybePrintVerboseStats(stats, logger);
@@ -311,7 +327,7 @@ int main(int argc, char** argv) {
         timeseries_cmd.get<std::string>("--series"),
         timeseries_cmd.get<std::string>("--reduce"),
         timeseries_cmd.get<std::string>("--format"),
-        *input, std::cout, BuildTransformOptions(timeseries_cmd, input),
+        *input, std::cout, BuildTransformOptions(timeseries_cmd, input, input_name),
         BuildCallbacks(logger), ps);
     stats = FinishStats(ps, start);
     MaybePrintVerboseStats(stats, logger);
@@ -320,26 +336,108 @@ int main(int argc, char** argv) {
 
   if (program.is_subcommand_used("sql")) {
     Logger logger(sql_cmd.get<bool>("--verbose"));
-    const std::string input_name = sql_cmd.get<std::string>("input");
-    auto* input = ResolveInput(input_name, input_file, logger);
-    if (!input) {
-      logger.Error("Unable to open input file: " + input_name);
-      return 1;
+    const std::string mode = sql_cmd.get<std::string>("mode");
+
+    if (mode == "query") {
+      const std::string csv_override = sql_cmd.get<std::string>("--csv");
+      const std::string db_override = sql_cmd.get<std::string>("--db");
+      const std::string query_text = sql_cmd.get<std::string>("--sql");
+      if (!csv_override.empty() && !db_override.empty()) {
+        logger.Error("sql query: pass only one of --csv or --db.");
+        return 1;
+      }
+      if (query_text.empty()) {
+        logger.Error("sql query: --sql is required.");
+        return 1;
+      }
+
+      std::string source_path;
+      csvzall::pipeline::SqlQueryInputKind input_kind =
+          csvzall::pipeline::SqlQueryInputKind::kUnknown;
+
+      if (!csv_override.empty()) {
+        source_path = csv_override;
+        input_kind = csvzall::pipeline::SqlQueryInputKind::kCsv;
+      } else if (!db_override.empty()) {
+        source_path = db_override;
+        input_kind = csvzall::pipeline::SqlQueryInputKind::kSqlite;
+      } else {
+        source_path = sql_cmd.get<std::string>("input");
+        if (source_path == "-") {
+          input_kind = csvzall::pipeline::SqlQueryInputKind::kCsv;
+        } else {
+          input_kind = csvzall::pipeline::DetectSqlQueryInputKind(source_path);
+        }
+      }
+
+      if (input_kind == csvzall::pipeline::SqlQueryInputKind::kUnknown) {
+        logger.Error("sql query: could not infer input type from path. Use --csv or --db.");
+        return 1;
+      }
+
+      if (input_kind == csvzall::pipeline::SqlQueryInputKind::kSqlite) {
+        csvzall::pipeline::RunStats ps;
+        const auto rc = csvzall::pipeline::RunSqlQueryDb(
+            query_text, source_path, std::cout, BuildCallbacks(logger), ps);
+        stats = FinishStats(ps, start);
+        MaybePrintVerboseStats(stats, logger);
+        return rc;
+      }
+
+      auto* input = ResolveInput(source_path, input_file, logger);
+      if (!input) {
+        logger.Error("Unable to open input file: " + source_path);
+        return 1;
+      }
+
+      csvzall::pipeline::RunOptions options;
+      options.single_threaded = sql_cmd.get<bool>("--single-threaded");
+      options.input_is_stdin = (input == &std::cin);
+      options.delimiter = ParseDelimiter(sql_cmd.get<std::string>("--delimiter"));
+      options.input_path = source_path;
+
+      csvzall::pipeline::RunStats ps;
+      const auto rc = csvzall::pipeline::RunSqlQueryCsv(
+          query_text,
+          sql_cmd.get<std::string>("--table"),
+          *input, std::cout, options, BuildCallbacks(logger), ps);
+      stats = FinishStats(ps, start);
+      MaybePrintVerboseStats(stats, logger);
+      return rc;
     }
-    const csvzall::pipeline::RunOptions options{
-      sql_cmd.get<bool>("--single-threaded"),
-      input == &std::cin,
-      false,
-      ParseDelimiter(sql_cmd.get<std::string>("--delimiter"))};
-    csvzall::pipeline::RunStats ps;
-    const auto rc = csvzall::pipeline::RunSqlExport(
-        input_name, sql_cmd.get<std::string>("--dest"),
-        sql_cmd.get<std::string>("--table"),
-        *input, options, BuildCallbacks(logger), ps);
-    stats.rows_processed = ps.rows_processed;
-    stats.elapsed = std::chrono::steady_clock::now() - start;
-    MaybePrintVerboseStats(stats, logger);
-    return rc;
+
+    if (mode == "load" || (mode != "query" && mode != "load")) {
+      std::string input_name = sql_cmd.get<std::string>("input");
+      if (mode != "load") {
+        // Backward-compatible shorthand: `csvzall sql <input.csv>`.
+        input_name = mode;
+      }
+
+      auto* input = ResolveInput(input_name, input_file, logger);
+      if (!input) {
+        logger.Error("Unable to open input file: " + input_name);
+        return 1;
+      }
+
+      csvzall::pipeline::RunOptions options;
+      options.single_threaded = sql_cmd.get<bool>("--single-threaded");
+      options.input_is_stdin = (input == &std::cin);
+      options.delimiter = ParseDelimiter(sql_cmd.get<std::string>("--delimiter"));
+      options.input_path = input_name;
+
+      csvzall::pipeline::RunStats ps;
+      const auto rc = csvzall::pipeline::RunSqlExport(
+          input_name, sql_cmd.get<std::string>("--dest"),
+          sql_cmd.get<std::string>("--table"),
+          *input, options, BuildCallbacks(logger), ps);
+      stats.rows_processed = ps.rows_processed;
+      stats.elapsed = std::chrono::steady_clock::now() - start;
+      MaybePrintVerboseStats(stats, logger);
+      return rc;
+    }
+
+    logger.Error("sql: mode must be 'load' or 'query'.");
+    return 1;
   }
 
   Logger logger(head_cmd.get<bool>("--verbose"));

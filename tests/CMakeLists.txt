@@ -12,6 +12,7 @@ add_executable(csvzall_tests
   test_filter.cpp
   test_derive.cpp
   test_head.cpp
+  test_sql_query.cpp
   test_sql_export.cpp
   test_summarize.cpp
   test_timeseries.cpp
@@ -24,6 +25,7 @@ add_executable(csvzall_tests
   ../src/pipeline/commands/CsvTransformCommand.cpp
   ../src/pipeline/commands/derive.cpp
   ../src/pipeline/commands/filter.cpp
+  ../src/pipeline/commands/sql_query.cpp
   ../src/pipeline/commands/sql_export.cpp
   ../src/pipeline/commands/summarize.cpp
   ../src/pipeline/commands/timeseries.cpp)

@@ -7,6 +7,10 @@
 #include <string>
 #include <vector>
 
+#ifndef CSVZALL_SQLITE_BIND_USE_STRING_COPY
+#define CSVZALL_SQLITE_BIND_USE_STRING_COPY 1
+#endif
+
 namespace csvzall::pipeline::sqlite {
 
 // Returns a double-quoted SQL identifier with embedded " escaped by doubling.
@@ -72,8 +76,13 @@ bool LoadCsvIntoTable(csv::CSVReader& reader,
     for (auto& row : reader) {
       const int n = static_cast<int>(headers.size());
       for (int i = 0; i < n; ++i) {
+#if CSVZALL_SQLITE_BIND_USE_STRING_COPY
         stmt.bind(i + 1, row[i].get_sv().data()
                       ? std::string(row[i].get_sv()) : std::string{});
+#else
+        const auto sv = row[i].get_sv();
+        stmt.bind(i + 1, sv.data(), static_cast<int>(sv.size()));
+#endif
       }
       stmt.exec();
       stmt.reset();

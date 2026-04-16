@@ -1,0 +1,39 @@
+From: csvzall patch
+Subject: Add bind(int, const char*, int) text-with-length overload
+
+Adds a Statement::bind overload that accepts an explicit byte length,
+allowing string_view data to be bound without null termination or a
+std::string copy. Uses SQLITE_TRANSIENT so SQLite copies immediately.
+--- a/include/SQLiteCpp/Statement.h
++++ b/include/SQLiteCpp/Statement.h
+@@ -150,6 +150,14 @@ public:
+      * @note Uses the SQLITE_TRANSIENT flag, making a copy of the data, for SQLite internal use
+      */
+     void bind(const int aIndex, const char*         apValue);
++    /**
++     * @brief Bind a text value to a parameter "?", "?NNN", ":VVV", "@VVV" or "$VVV" in the SQL prepared statement (aIndex >= 1)
++     *
++     * Binds the text using an explicit byte length, so the data does not need to be null-terminated.
++     *
++     * @note Uses the SQLITE_TRANSIENT flag, making a copy of the data, for SQLite internal use
++     */
++    void bind(const int aIndex, const char*         apValue, const int aSize);
+     /**
+      * @brief Bind a binary blob value to a parameter "?", "?NNN", ":VVV", "@VVV" or "$VVV" in the SQL prepared statement (aIndex >= 1)
+      *
+--- a/src/Statement.cpp
++++ b/src/Statement.cpp
+@@ -123,6 +123,13 @@ void Statement::bind(const int aIndex, const char* apValue)
+     check(ret);
+ }
+ 
++// Bind a text value with explicit length (does not require null termination)
++void Statement::bind(const int aIndex, const char* apValue, const int aSize)
++{
++    const int ret = sqlite3_bind_text(getPreparedStatement(), aIndex, apValue, aSize, SQLITE_TRANSIENT);
++    check(ret);
++}
++
+ // Bind a binary blob value to a parameter "?", "?NNN", ":VVV", "@VVV" or "$VVV" in the SQL prepared statement
+ void Statement::bind(const int aIndex, const void* apValue, const int aSize)
+ {

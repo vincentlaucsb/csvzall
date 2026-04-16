@@ -34,4 +34,26 @@ int RunSqlExport(const std::string& input_path,
                  const LoggerCallbacks& logger,
                  RunStats& stats);
 
+int RunSqlQueryCsv(const std::string& sql_query,
+                   const std::string& table_name,
+                   std::istream& input,
+                   std::ostream& output,
+                   const RunOptions& options,
+                   const LoggerCallbacks& logger,
+                   RunStats& stats);
+
+enum class SqlQueryInputKind {
+    kCsv,
+    kSqlite,
+    kUnknown,
+};
+
+SqlQueryInputKind DetectSqlQueryInputKind(const std::string& path);
+
+int RunSqlQueryDb(const std::string& sql_query,
+                  const std::string& db_path,
+                  std::ostream& output,
+                  const LoggerCallbacks& logger,
+                  RunStats& stats);
+
 }  // namespace csvzall::pipeline

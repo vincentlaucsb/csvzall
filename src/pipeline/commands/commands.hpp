@@ -98,4 +98,34 @@ int RunSqlExport(const std::string& input_path,
                  const LoggerCallbacks& logger,
                  RunStats& stats);
 
+// Run an arbitrary SQL query against a CSV loaded into a SQLite table.
+// The result set is streamed as CSV to output.
+int RunSqlQueryCsv(const std::string& sql_query,
+                   const std::string& table_name,
+                   std::istream& input,
+                   std::ostream& output,
+                   const RunOptions& options,
+                   const LoggerCallbacks& logger,
+                   RunStats& stats);
+
+enum class SqlQueryInputKind {
+  kCsv,
+  kSqlite,
+  kUnknown,
+};
+
+// Detect SQL query input type from path extension.
+// CSV extensions: .csv, .txt
+// SQLite extensions: .db, .sqlite, .sqlite3
+// Returns kUnknown for stdin ("-") or unrecognized extensions.
+SqlQueryInputKind DetectSqlQueryInputKind(const std::string& path);
+
+// Run an arbitrary SQL query against an existing SQLite database file.
+// The result set is streamed as CSV to output.
+int RunSqlQueryDb(const std::string& sql_query,
+                  const std::string& db_path,
+                  std::ostream& output,
+                  const LoggerCallbacks& logger,
+                  RunStats& stats);
+
 }  // namespace csvzall::pipeline::commands
