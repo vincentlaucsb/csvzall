@@ -70,4 +70,8 @@ int RunSqlQueryDb(const std::string& sql_query,
   return commands::RunSqlQueryDb(sql_query, db_path, output, logger, stats);
 }
 
+bool ShouldWarnIntegerDivision(const std::string& sql_query) {
+  return commands::ShouldWarnIntegerDivision(sql_query);
+}
+
 }  // namespace csvzall::pipeline

@@ -48,7 +48,7 @@ protected:
 
     sqlite::SqliteDb sdb = sqlite::OpenSqliteDb(options());
 
-    if (!sqlite::LoadCsvIntoTable(reader(), headers(), sdb.db(), "t", logger())) {
+    if (!sqlite::LoadCsvIntoTable(reader(), headers(), sdb.db(), "t", options(), logger())) {
       return 1;
     }
 

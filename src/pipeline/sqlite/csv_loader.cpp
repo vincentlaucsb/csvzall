@@ -61,6 +61,7 @@ bool LoadCsvIntoTable(csv::CSVReader& reader,
                       const std::vector<std::string>& headers,
                       SQLite::Database& db,
                       const std::string& table_name,
+                      const RunOptions& options,
                       const LoggerCallbacks& logger) {
   if (headers.empty()) {
     if (logger.error) logger.error("Cannot load CSV into SQLite: no column headers.");
@@ -68,6 +69,10 @@ bool LoadCsvIntoTable(csv::CSVReader& reader,
   }
 
   try {
+    if (!options.sqlite_journal_enabled) {
+      db.exec("PRAGMA journal_mode = OFF");
+    }
+
     db.exec(BuildCreateTable(table_name, headers));
 
     SQLite::Statement stmt(db, BuildInsert(table_name, headers.size()));

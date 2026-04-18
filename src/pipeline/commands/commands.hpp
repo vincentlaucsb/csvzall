@@ -128,4 +128,8 @@ int RunSqlQueryDb(const std::string& sql_query,
                   const LoggerCallbacks& logger,
                   RunStats& stats);
 
+// Heuristic detector for likely integer division in SQL expressions.
+// Ignores quoted strings and SQL comments.
+bool ShouldWarnIntegerDivision(const std::string& sql_query);
+
 }  // namespace csvzall::pipeline::commands

@@ -26,6 +26,10 @@ struct RunOptions {
   // Absolute path of the input file currently being processed.  Empty or "-"
   // means stdin.  Used by the SQLite layer to decide in-memory vs temp-file.
   std::string input_path;
+  // Bulk-load safety/perf tradeoff for CSV->SQLite inserts.
+  // false (default): disable SQLite journaling during load for speed.
+  // true: keep default SQLite journal mode (safer for crash recovery).
+  bool sqlite_journal_enabled = false;
 };
 
 struct RunStats {

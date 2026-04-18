@@ -75,6 +75,32 @@ TEST_CASE("SqlExport: custom table name") {
   std::filesystem::remove(db_path);
 }
 
+TEST_CASE("SqlExport: RunOptions defaults journaling off") {
+  pipeline::RunOptions options;
+  REQUIRE(options.sqlite_journal_enabled == false);
+}
+
+TEST_CASE("SqlExport: explicit journaling opt-in still succeeds") {
+  const std::string db_path = TempDbPath("csvzall_test_journal_mode.db");
+  std::filesystem::remove(db_path);
+
+  auto csv = tests::MakeTestCsv({"x"}, {{"1"}, {"2"}});
+  std::istringstream input(csv);
+
+  pipeline::RunOptions options;
+  options.input_is_stdin = true;
+  options.sqlite_journal_enabled = true;
+  pipeline::LoggerCallbacks logger{nullptr, nullptr};
+  pipeline::RunStats stats;
+
+  const int rc = pipeline::RunSqlExport("-", db_path, "data", input, options, logger, stats);
+
+  REQUIRE(rc == 0);
+  REQUIRE(stats.rows_processed == 2);
+
+  std::filesystem::remove(db_path);
+}
+
 TEST_CASE("SqlExport: refuses to overwrite existing file") {
   const std::string db_path = TempDbPath("csvzall_test_overwrite.db");
   // Create the file so it already exists.

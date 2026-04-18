@@ -75,7 +75,7 @@ protected:
         }
       };
 
-      if (!sqlite::LoadCsvIntoTable(reader(), headers(), db, table_name_, logger())) {
+      if (!sqlite::LoadCsvIntoTable(reader(), headers(), db, table_name_, options(), logger())) {
         cleanup();
         return 1;
       }

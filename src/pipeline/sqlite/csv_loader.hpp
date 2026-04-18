@@ -39,6 +39,7 @@ bool LoadCsvIntoTable(csv::CSVReader& reader,
                       const std::vector<std::string>& headers,
                       SQLite::Database& db,
                       const std::string& table_name,
+                      const RunOptions& options,
                       const LoggerCallbacks& logger);
 
 }  // namespace csvzall::pipeline::sqlite

@@ -141,3 +141,14 @@ TEST_CASE("SqlQueryCsv: non-result statement returns error") {
 
     std::filesystem::remove(db_path);
   }
+
+  TEST_CASE("SqlQuery: integer-division warning heuristic") {
+    REQUIRE(pipeline::ShouldWarnIntegerDivision("SELECT Reps/30 FROM data"));
+    REQUIRE(pipeline::ShouldWarnIntegerDivision("SELECT 3/2"));
+
+    REQUIRE_FALSE(pipeline::ShouldWarnIntegerDivision("SELECT Reps/30.0 FROM data"));
+    REQUIRE_FALSE(pipeline::ShouldWarnIntegerDivision("SELECT Reps*1.0/30 FROM data"));
+    REQUIRE_FALSE(pipeline::ShouldWarnIntegerDivision("SELECT 'a/b' AS text"));
+    REQUIRE_FALSE(pipeline::ShouldWarnIntegerDivision("-- a/b in comment\nSELECT 1"));
+    REQUIRE_FALSE(pipeline::ShouldWarnIntegerDivision("SELECT 1 /* a/b */"));
+  }

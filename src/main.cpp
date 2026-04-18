@@ -234,6 +234,10 @@ int main(int argc, char** argv) {
     sql_cmd.add_argument("--sql")
       .help("SQL query text to execute")
       .default_value(std::string{""});
+      sql_cmd.add_argument("--no-int-division-warning")
+        .help("Suppress warning for likely integer division in SQL expressions")
+        .default_value(false)
+        .implicit_value(true);
 
   program.add_subparser(sql_cmd);
 
@@ -342,6 +346,7 @@ int main(int argc, char** argv) {
       const std::string csv_override = sql_cmd.get<std::string>("--csv");
       const std::string db_override = sql_cmd.get<std::string>("--db");
       const std::string query_text = sql_cmd.get<std::string>("--sql");
+      const bool suppress_int_div_warning = sql_cmd.get<bool>("--no-int-division-warning");
       if (!csv_override.empty() && !db_override.empty()) {
         logger.Error("sql query: pass only one of --csv or --db.");
         return 1;
@@ -373,6 +378,12 @@ int main(int argc, char** argv) {
       if (input_kind == csvzall::pipeline::SqlQueryInputKind::kUnknown) {
         logger.Error("sql query: could not infer input type from path. Use --csv or --db.");
         return 1;
+      }
+
+      if (!suppress_int_div_warning && csvzall::pipeline::ShouldWarnIntegerDivision(query_text)) {
+        logger.Info("sql query: possible integer division detected. "
+                    "SQLite/PostgreSQL may truncate integer division; use 30.0 or x * 1.0 / y "
+                    "for floating-point behavior. Pass --no-int-division-warning to suppress.");
       }
 
       if (input_kind == csvzall::pipeline::SqlQueryInputKind::kSqlite) {
