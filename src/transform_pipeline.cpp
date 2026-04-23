@@ -74,4 +74,18 @@ bool ShouldWarnIntegerDivision(const std::string& sql_query) {
   return commands::ShouldWarnIntegerDivision(sql_query);
 }
 
+#ifdef CSVZALL_HAVE_POSTGRESQL
+int RunPostgresExport(std::istream& input,
+                      const RunOptions& options,
+                      const LoggerCallbacks& logger,
+                      RunStats& stats,
+                      const postgres::ConnectionConfig& pg_config,
+                      const std::string& table_name,
+                      const std::string& if_exists_mode,
+                      const postgres::RowLoaderConfig& row_config) {
+  return commands::RunPostgresExport(input, options, logger, stats,
+                                     pg_config, table_name, if_exists_mode, row_config);
+}
+#endif
+
 }  // namespace csvzall::pipeline

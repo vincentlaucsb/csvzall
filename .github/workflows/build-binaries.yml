@@ -1,0 +1,45 @@
+name: Build Binaries (on every push to master)
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            artifact: csvzall-linux-x86_64
+
+          - os: windows-latest
+            name: windows-x64
+            artifact: csvzall-windows-x64.exe
+
+          - os: macos-latest
+            name: macos-x86_64
+            artifact: csvzall-macos-x86_64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Configure CMake
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=26
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Upload Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            build/csvzall
+            build/csvzall.exe
+          if-no-files-found: error

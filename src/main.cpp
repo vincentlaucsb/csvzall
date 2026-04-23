@@ -2,6 +2,11 @@
 #include "head.hpp"
 #include "transform_pipeline.hpp"
 
+#ifdef CSVZALL_HAVE_POSTGRESQL
+#include "pipeline/postgres/postgres_connection.hpp"
+#include "pipeline/postgres/row_loader.hpp"
+#endif
+
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -241,6 +246,49 @@ int main(int argc, char** argv) {
 
   program.add_subparser(sql_cmd);
 
+#ifdef CSVZALL_HAVE_POSTGRESQL
+  argparse::ArgumentParser postgres_cmd("postgres");
+  postgres_cmd.add_description("Export CSV to PostgreSQL database with automatic schema inference");
+  AddCsvInputArguments(postgres_cmd);
+  AddExactArgument(postgres_cmd);
+  postgres_cmd.add_argument("--table")
+      .help("PostgreSQL table name to create or append to")
+      .required();
+  postgres_cmd.add_argument("--dbname")
+      .help("PostgreSQL database name")
+      .required();
+  postgres_cmd.add_argument("--host")
+      .help("PostgreSQL server host")
+      .default_value(std::string{"localhost"});
+  postgres_cmd.add_argument("--port")
+      .help("PostgreSQL server port")
+      .default_value(5432)
+      .scan<'i', int>();
+  postgres_cmd.add_argument("--user")
+      .help("PostgreSQL username")
+      .required();
+  postgres_cmd.add_argument("--password")
+      .help("PostgreSQL password (leave empty for prompt or .pgpass)")
+      .default_value(std::string{""});
+  postgres_cmd.add_argument("--if-exists")
+      .help("Action if table exists: error|drop|append")
+      .default_value(std::string{"error"});
+  postgres_cmd.add_argument("--price-min")
+      .help("Minimum price filter (drop below; -1 to disable)")
+      .default_value(500)
+      .scan<'i', int>();
+  postgres_cmd.add_argument("--price-max")
+      .help("Maximum price filter (drop above; -1 to disable)")
+      .default_value(500000)
+      .scan<'i', int>();
+  postgres_cmd.add_argument("--odometer-max")
+      .help("Maximum odometer filter (drop above; -1 to disable)")
+      .default_value(500000)
+      .scan<'i', int>();
+
+  program.add_subparser(postgres_cmd);
+#endif
+
   try {
     program.parse_args(argc, argv);
   } catch (const std::exception& ex) {
@@ -251,7 +299,11 @@ int main(int argc, char** argv) {
 
   if (!program.is_subcommand_used("derive") && !program.is_subcommand_used("filter") &&
       !program.is_subcommand_used("head") && !program.is_subcommand_used("summarize") &&
-      !program.is_subcommand_used("timeseries") && !program.is_subcommand_used("sql")) {
+      !program.is_subcommand_used("timeseries") && !program.is_subcommand_used("sql")
+#ifdef CSVZALL_HAVE_POSTGRESQL
+      && !program.is_subcommand_used("postgres")
+#endif
+  ) {
     std::cerr << program;
     return 1;
   }
@@ -450,6 +502,44 @@ int main(int argc, char** argv) {
     logger.Error("sql: mode must be 'load' or 'query'.");
     return 1;
   }
+
+#ifdef CSVZALL_HAVE_POSTGRESQL
+  if (program.is_subcommand_used("postgres")) {
+    Logger logger(postgres_cmd.get<bool>("--verbose"));
+    const std::string input_name = postgres_cmd.get<std::string>("input");
+    auto* input = ResolveInput(input_name, input_file, logger);
+    if (!input) {
+      logger.Error("Unable to open input file: " + input_name);
+      return 1;
+    }
+
+    // Build PostgreSQL configuration
+    csvzall::pipeline::postgres::ConnectionConfig pg_config;
+    pg_config.host = postgres_cmd.get<std::string>("--host");
+    pg_config.port = postgres_cmd.get<int>("--port");
+    pg_config.database = postgres_cmd.get<std::string>("--dbname");
+    pg_config.user = postgres_cmd.get<std::string>("--user");
+    pg_config.password = postgres_cmd.get<std::string>("--password");
+
+    // Build row loader configuration
+    csvzall::pipeline::postgres::RowLoaderConfig row_config;
+    row_config.price_min = postgres_cmd.get<int>("--price-min");
+    row_config.price_max = postgres_cmd.get<int>("--price-max");
+    row_config.odometer_max = postgres_cmd.get<int>("--odometer-max");
+
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunPostgresExport(
+        *input, BuildTransformOptions(postgres_cmd, input, input_name),
+        BuildCallbacks(logger), ps,
+        pg_config,
+        postgres_cmd.get<std::string>("--table"),
+        postgres_cmd.get<std::string>("--if-exists"),
+        row_config);
+    stats = FinishStats(ps, start);
+    MaybePrintVerboseStats(stats, logger);
+    return rc;
+  }
+#endif
 
   Logger logger(head_cmd.get<bool>("--verbose"));
   const int requested_rows = head_cmd.get<int>("--rows");

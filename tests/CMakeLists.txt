@@ -14,6 +14,7 @@ add_executable(csvzall_tests
   test_head.cpp
   test_sql_query.cpp
   test_sql_export.cpp
+  test_postgres_schema.cpp
   test_summarize.cpp
   test_timeseries.cpp
   ../src/transform_pipeline.cpp
@@ -30,6 +31,14 @@ add_executable(csvzall_tests
   ../src/pipeline/commands/summarize.cpp
   ../src/pipeline/commands/timeseries.cpp)
 
+if(CSVZALL_HAVE_POSTGRESQL)
+  target_sources(csvzall_tests PRIVATE
+    ../src/pipeline/postgres/postgres_connection.cpp
+    ../src/pipeline/postgres/schema_inference.cpp
+    ../src/pipeline/postgres/row_loader.cpp
+    ../src/pipeline/commands/postgres_export.cpp)
+endif()
+
 target_link_libraries(csvzall_tests
   PRIVATE
     Catch2::Catch2WithMain
@@ -38,11 +47,19 @@ target_link_libraries(csvzall_tests
     SQLiteCpp
     Threads::Threads)
 
+if(CSVZALL_HAVE_POSTGRESQL)
+  target_link_libraries(csvzall_tests PRIVATE libpqxx::pqxx)
+endif()
+
 target_include_directories(csvzall_tests
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 target_compile_features(csvzall_tests PRIVATE cxx_std_20)
+
+if(CSVZALL_HAVE_POSTGRESQL)
+  target_compile_definitions(csvzall_tests PRIVATE CSVZALL_HAVE_POSTGRESQL=1)
+endif()
 
 if(MSVC)
   target_compile_options(csvzall_tests PRIVATE /W4 /permissive- /bigobj)

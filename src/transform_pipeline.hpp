@@ -7,6 +7,11 @@
 #include <string>
 #include <vector>
 
+#ifdef CSVZALL_HAVE_POSTGRESQL
+#include "pipeline/postgres/postgres_connection.hpp"
+#include "pipeline/postgres/row_loader.hpp"
+#endif
+
 namespace csvzall::pipeline {
 
 int RunDerive(const std::string& assignment, std::istream& input, std::ostream& output,
@@ -57,5 +62,16 @@ int RunSqlQueryDb(const std::string& sql_query,
                   RunStats& stats);
 
 bool ShouldWarnIntegerDivision(const std::string& sql_query);
+
+#ifdef CSVZALL_HAVE_POSTGRESQL
+int RunPostgresExport(std::istream& input,
+                      const RunOptions& options,
+                      const LoggerCallbacks& logger,
+                      RunStats& stats,
+                      const postgres::ConnectionConfig& pg_config,
+                      const std::string& table_name,
+                      const std::string& if_exists_mode,
+                      const postgres::RowLoaderConfig& row_config);
+#endif
 
 }  // namespace csvzall::pipeline

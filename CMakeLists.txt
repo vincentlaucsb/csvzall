@@ -84,6 +84,17 @@ FetchContent_MakeAvailable(SQLiteCpp)
 
 find_package(Threads REQUIRED)
 
+# Optional PostgreSQL support via libpqxx (modern C++ wrapper around libpq).
+# If unavailable, csvzall still builds without the `postgres` subcommand.
+find_package(libpqxx CONFIG QUIET)
+if(NOT libpqxx_FOUND)
+  message(STATUS "libpqxx not found; PostgreSQL dumper will not be built")
+  set(CSVZALL_HAVE_POSTGRESQL OFF)
+else()
+  message(STATUS "Found libpqxx: ${libpqxx_DIR}")
+  set(CSVZALL_HAVE_POSTGRESQL ON)
+endif()
+
 set(CSVZALL_APP_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/transform_pipeline.cpp
@@ -100,15 +111,32 @@ set(CSVZALL_APP_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/summarize.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/timeseries.cpp)
 
+if(CSVZALL_HAVE_POSTGRESQL)
+  list(APPEND CSVZALL_APP_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/postgres_connection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/schema_inference.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/row_loader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/postgres_export.cpp)
+endif()
+
 function(csvzall_configure_app target_name)
-  target_link_libraries(${target_name}
-    PRIVATE
-      ${CSVZALL_ARGPARSE_TARGET}
-      csv
-      SQLiteCpp
-      Threads::Threads)
+  set(LINK_LIBS
+    ${CSVZALL_ARGPARSE_TARGET}
+    csv
+    SQLiteCpp
+    Threads::Threads)
+
+  if(CSVZALL_HAVE_POSTGRESQL)
+    list(APPEND LINK_LIBS libpqxx::pqxx)
+  endif()
+
+  target_link_libraries(${target_name} PRIVATE ${LINK_LIBS})
 
   target_compile_features(${target_name} PRIVATE cxx_std_20)
+
+  if(CSVZALL_HAVE_POSTGRESQL)
+    target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_POSTGRESQL=1)
+  endif()
 
   if(MSVC)
     target_compile_options(${target_name} PRIVATE /W4 /permissive- /bigobj)
