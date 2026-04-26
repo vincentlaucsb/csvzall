@@ -32,7 +32,7 @@ jobs:
         uses: lukka/get-cmake@latest
 
       - name: Configure CMake
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=26
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=26 -DCSVZALL_REQUIRE_POSTGRESQL=ON
 
       - name: Build
         run: cmake --build build --config Release

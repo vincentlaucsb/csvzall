@@ -87,10 +87,11 @@ There is no built-in pipeline format. Save complex chains as PowerShell, Bash, o
 
 ## Building
 
-Requires CMake 3.20+, a C++20 compiler, and a checkout of [csv-parser](https://github.com/vincentlaucsb/csv-parser).
+Requires CMake 3.25+ and a C++26 compiler. A local [csv-parser](https://github.com/vincentlaucsb/csv-parser) checkout is preferred for development, but CMake can fetch it when no local checkout is configured.
 
 ```sh
-# csv-parser can live at ../csv-parser, external/csv-parser, or a custom path
+# csv-parser can live at ../csv-parser, external/csv-parser, or a custom path.
+# When both local paths exist, ../csv-parser is preferred by default.
 cmake -S . -B build
 cmake --build build --config Release
 ```
@@ -105,11 +106,15 @@ The binary is at `build/Release/csvzall.exe` (Windows) or `build/csvzall` (Linux
 
 ## Dependencies
 
-| Library | Role | How it's sourced |
-|---|---|---|
-| [csv-parser](https://github.com/vincentlaucsb/csv-parser) v3 | CSV parsing and writing | Local checkout |
-| [argparse](https://github.com/p-ranav/argparse) v3.1 | CLI argument parsing | FetchContent |
-| [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) | SQLite C++ wrapper (bundled SQLite) | FetchContent |
+| Library | Author / maintainer | Role | How it's sourced |
+|---|---|---|---|
+| [csv-parser](https://github.com/vincentlaucsb/csv-parser) | [Vincent La](https://github.com/vincentlaucsb) | CSV parsing, writing, and scalar type classification | Local checkout preferred; FetchContent fallback |
+| [argparse](https://github.com/p-ranav/argparse) v3.1 | [Pranav](https://github.com/p-ranav) | CLI argument parsing | FetchContent |
+| [indicators](https://github.com/p-ranav/indicators) v2.3 | [Pranav](https://github.com/p-ranav) | Terminal progress bars for long-running imports | FetchContent |
+| [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite | FetchContent, with a local CMake patch |
+| [libpqxx](https://github.com/jtv/libpqxx) v7.10.1 | [Jeroen T. Vermeulen](https://pqxx.org/libpqxx/) | PostgreSQL C++ client API used by the `postgres` command | System package if available; FetchContent fallback |
+| [PostgreSQL libpq](https://www.postgresql.org/docs/current/libpq.html) | [PostgreSQL Global Development Group](https://www.postgresql.org/community/) | PostgreSQL client C library required by libpqxx | System PostgreSQL installation |
+| [Catch2](https://github.com/catchorg/Catch2) v3.4.0 | [Catch2 contributors](https://github.com/catchorg/Catch2) | Test framework | FetchContent, tests only |
 
 ## Design notes
 

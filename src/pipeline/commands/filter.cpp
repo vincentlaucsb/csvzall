@@ -41,7 +41,7 @@ protected:
     try {
       SQLite::Statement query(sdb.db(), sql);
 
-      auto writer = csv::make_csv_writer_buffered(output());
+      auto writer = csv::make_csv_writer(output()).set_auto_flush(false);
       writer << headers();
 
       while (query.executeStep()) {

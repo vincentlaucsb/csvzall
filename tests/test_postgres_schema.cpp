@@ -22,7 +22,7 @@ std::vector<std::string> ColumnTypes(const std::vector<pipeline::postgres::Infer
 
 }  // namespace
 
-TEST_CASE("PostgresSchemaInference: infers integer numeric timestamp text") {
+TEST_CASE("PostgresSchemaInference: infers integer numeric and text") {
   pipeline::postgres::SchemaInference inference({"year", "price", "listed_at", "make"});
 
   inference.observe_row({"2020", "24999.5", "2024-01-10 09:30:00", "Toyota"});
@@ -35,7 +35,7 @@ TEST_CASE("PostgresSchemaInference: infers integer numeric timestamp text") {
   const auto types = ColumnTypes(cols);
   REQUIRE(types[0] == "INTEGER");
   REQUIRE(types[1] == "NUMERIC");
-  REQUIRE(types[2] == "TIMESTAMP");
+  REQUIRE(types[2] == "TEXT");
   REQUIRE(types[3] == "TEXT");
 }
 
@@ -51,7 +51,7 @@ TEST_CASE("PostgresSchemaInference: mixed values default to text conservatively"
   REQUIRE(pipeline::postgres::ColumnTypeToString(cols[0].type) == "TEXT");
 }
 
-TEST_CASE("PostgresSchemaInference: high null ratio defaults to text") {
+TEST_CASE("PostgresSchemaInference: nulls do not change non-null type") {
   pipeline::postgres::SchemaInference inference({"price"});
 
   inference.observe_row({""});
@@ -60,7 +60,53 @@ TEST_CASE("PostgresSchemaInference: high null ratio defaults to text") {
 
   const auto cols = inference.finalize();
   REQUIRE(cols.size() == 1);
-  REQUIRE(pipeline::postgres::ColumnTypeToString(cols[0].type) == "TEXT");
+  REQUIRE(pipeline::postgres::ColumnTypeToString(cols[0].type) == "INTEGER");
+}
+
+TEST_CASE("PostgresSchemaInference: int64 values infer bigint") {
+  pipeline::postgres::SchemaInference inference({"id"});
+
+  inference.observe_row({"7316814884"});
+  inference.observe_row({"7316814885"});
+
+  const auto cols = inference.finalize();
+  REQUIRE(cols.size() == 1);
+  REQUIRE(pipeline::postgres::ColumnTypeToString(cols[0].type) == "BIGINT");
+}
+
+TEST_CASE("PostgresSchemaInference: int32 values stay integer") {
+  pipeline::postgres::SchemaInference inference({"id"});
+
+  inference.observe_row({"2147483647"});
+  inference.observe_row({"-2147483648"});
+
+  const auto cols = inference.finalize();
+  REQUIRE(cols.size() == 1);
+  REQUIRE(pipeline::postgres::ColumnTypeToString(cols[0].type) == "INTEGER");
+}
+
+TEST_CASE("PostgresSchemaInference: column names do not override observed data") {
+  pipeline::postgres::SchemaInference inference({"id", "amount"});
+
+  inference.observe_row({"not-an-id", "not-an-amount"});
+
+  const auto cols = inference.finalize();
+  REQUIRE(cols.size() == 2);
+
+  const auto types = ColumnTypes(cols);
+  REQUIRE(types[0] == "TEXT");
+  REQUIRE(types[1] == "TEXT");
+}
+
+TEST_CASE("PostgresSchemaInference: uses csv-parser numeric classification") {
+  pipeline::postgres::SchemaInference inference({"value"});
+
+  inference.observe_row({"1e-06"});
+  inference.observe_row({"2.17222E+02"});
+
+  const auto cols = inference.finalize();
+  REQUIRE(cols.size() == 1);
+  REQUIRE(pipeline::postgres::ColumnTypeToString(cols[0].type) == "NUMERIC");
 }
 
 TEST_CASE("PostgresSchemaInference: samples capped at 1000 rows") {

@@ -40,6 +40,10 @@ struct RunStats {
 struct LoggerCallbacks {
   std::function<void(const std::string&)> error;
   std::function<void(const std::string&)> verbose;
+  std::function<void(const std::string&)> info;
+  std::function<void(const std::string&, std::uint64_t)> progress_start;
+  std::function<void(std::uint64_t)> progress_update;
+  std::function<void()> progress_finish;
 };
 
 }  // namespace csvzall::pipeline

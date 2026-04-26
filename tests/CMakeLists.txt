@@ -43,19 +43,24 @@ target_link_libraries(csvzall_tests
   PRIVATE
     Catch2::Catch2WithMain
     ${CSVZALL_ARGPARSE_TARGET}
+    ${CSVZALL_INDICATORS_TARGET}
     csv
     SQLiteCpp
     Threads::Threads)
 
 if(CSVZALL_HAVE_POSTGRESQL)
-  target_link_libraries(csvzall_tests PRIVATE libpqxx::pqxx)
+  target_link_libraries(csvzall_tests PRIVATE ${CSVZALL_LIBPQXX_TARGET})
 endif()
+
+csvzall_copy_runtime_dependencies(csvzall_tests)
 
 target_include_directories(csvzall_tests
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
-target_compile_features(csvzall_tests PRIVATE cxx_std_20)
+set_property(TARGET csvzall_tests PROPERTY CXX_STANDARD ${CSVZALL_CXX_STANDARD})
+set_property(TARGET csvzall_tests PROPERTY CXX_STANDARD_REQUIRED ON)
+set_property(TARGET csvzall_tests PROPERTY CXX_EXTENSIONS OFF)
 
 if(CSVZALL_HAVE_POSTGRESQL)
   target_compile_definitions(csvzall_tests PRIVATE CSVZALL_HAVE_POSTGRESQL=1)

@@ -46,6 +46,42 @@ int CsvInputCommand::init_reader() {
   return 0;
 }
 
+int CsvInputCommand::reset_reader() {
+  std::istream* parse_input = &input_;
+  if (options_.input_is_stdin) {
+    if (!buffered_input_) {
+      if (logger_.error) {
+        logger_.error("Unable to reset buffered stdin input.");
+      }
+      return 1;
+    }
+    buffered_input_->clear();
+    buffered_input_->seekg(0);
+    parse_input = buffered_input_.get();
+  } else {
+    input_.clear();
+    input_.seekg(0);
+    if (!input_) {
+      if (logger_.error) {
+        logger_.error("Unable to rewind input stream for second pass.");
+      }
+      return 1;
+    }
+  }
+
+  auto format = make_format();
+  reader_ = std::make_unique<csv::CSVReader>(*parse_input, format);
+  const auto reset_headers = reader_->get_col_names();
+  if (reset_headers != headers_) {
+    if (logger_.error) {
+      logger_.error("CSV header changed while resetting input stream.");
+    }
+    return 1;
+  }
+
+  return 0;
+}
+
 int CsvInputCommand::execute() {
   if (int rc = init_reader(); rc != 0) {
     return rc;

@@ -81,10 +81,9 @@ int RunPostgresExport(std::istream& input,
                       RunStats& stats,
                       const postgres::ConnectionConfig& pg_config,
                       const std::string& table_name,
-                      const std::string& if_exists_mode,
-                      const postgres::RowLoaderConfig& row_config) {
+                      const std::string& if_exists_mode) {
   return commands::RunPostgresExport(input, options, logger, stats,
-                                     pg_config, table_name, if_exists_mode, row_config);
+                                     pg_config, table_name, if_exists_mode);
 }
 #endif
 

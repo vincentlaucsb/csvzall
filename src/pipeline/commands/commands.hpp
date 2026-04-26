@@ -13,7 +13,6 @@
 // Forward declarations for PostgreSQL types
 namespace csvzall::pipeline::postgres {
 struct ConnectionConfig;
-struct RowLoaderConfig;
 }
 
 namespace csvzall::pipeline::commands {
@@ -44,6 +43,7 @@ protected:
   const RunOptions& options() const { return options_; }
   const LoggerCallbacks& logger() const { return logger_; }
   RunStats& stats() { return stats_; }
+  int reset_reader();
 
 private:
   int init_reader();
@@ -140,8 +140,7 @@ bool ShouldWarnIntegerDivision(const std::string& sql_query);
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
 // Export a CSV file to a PostgreSQL database with automatic schema inference.
-// Scans first 1000 rows to infer column types (INTEGER, NUMERIC, TIMESTAMP, TEXT).
-// Loads remaining rows with data cleaning (price/odometer filters).
+// Scans first 1000 rows to infer column types (INTEGER, BIGINT, NUMERIC, TIMESTAMP, TEXT).
 // if_exists_mode: "error" (default), "drop", or "append"
 // Skips rows that fail type validation (warning logged).
 int RunPostgresExport(std::istream& input,
@@ -150,8 +149,7 @@ int RunPostgresExport(std::istream& input,
                       RunStats& stats,
                       const postgres::ConnectionConfig& pg_config,
                       const std::string& table_name,
-                      const std::string& if_exists_mode,
-                      const postgres::RowLoaderConfig& row_config);
+                      const std::string& if_exists_mode);
 #endif
 
 }  // namespace csvzall::pipeline::commands

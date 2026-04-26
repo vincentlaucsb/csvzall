@@ -246,7 +246,7 @@ protected:
         return 1;
       }
 
-      auto writer = csv::make_csv_writer_buffered(output());
+      auto writer = csv::make_csv_writer(output()).set_auto_flush(false);
 
       std::vector<std::string> out_headers;
       out_headers.reserve(static_cast<std::size_t>(col_count));
@@ -342,7 +342,7 @@ int RunSqlQueryDb(const std::string& sql_query,
       return 1;
     }
 
-    auto writer = csv::make_csv_writer_buffered(output);
+    auto writer = csv::make_csv_writer(output).set_auto_flush(false);
     std::vector<std::string> out_headers;
     out_headers.reserve(static_cast<std::size_t>(col_count));
     for (int i = 0; i < col_count; ++i) {

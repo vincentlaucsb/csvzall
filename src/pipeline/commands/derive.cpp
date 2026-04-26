@@ -58,7 +58,7 @@ protected:
     try {
       SQLite::Statement query(sdb.db(), sql);
 
-      auto writer = csv::make_csv_writer_buffered(output());
+      auto writer = csv::make_csv_writer(output()).set_auto_flush(false);
       std::vector<std::string> out_headers = headers();
       out_headers.push_back(new_column);
       writer << out_headers;

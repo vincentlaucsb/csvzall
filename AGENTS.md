@@ -29,12 +29,24 @@ This file is the canonical AI reference for this repository.
 
 ## Design rules
 
-- Target C++20 and prefer modern language features.
+- Target C++26 and prefer modern language features.
 - Use `std::string_view` at API boundaries where lifetimes are safe.
 - Never store `std::string_view` in persistent data structures; store `std::string` instead.
 - Keep stdout for data output and stderr for diagnostics.
 - Keep `RunOptions` as the shared flow point for cross-command behavior (for example exact matching and SQLite threshold).
 - Avoid duplicating logic. Move shared helpers to `src/pipeline/common/` (general) or `src/pipeline/sqlite/` (SQLite-specific). If no clean home exists, add a `// TODO(dedup):` comment rather than copying.
+
+## Dependency documentation
+
+- When adding, removing, or materially changing a third-party dependency, update the README dependency table in the same change.
+- Include the dependency name, author or maintainer with a link, role in csvzall, and how it is sourced (local checkout, FetchContent, system package, test-only, optional, etc.).
+
+## csv-parser feedback loop
+
+- `CSV_PARSER_TODOS.md` is a committed working log for issues discovered while csvzall exercises csv-parser in real workflows.
+- When csv-parser integration reveals API smells, heavy materialization paths, ambiguous documentation, missing examples, or missing library features, add a concise note to `CSV_PARSER_TODOS.md`.
+- Prefer actionable notes: describe the workflow pressure from csvzall, why the current csv-parser API/docs made the choice easy or hard, and what improvement would help.
+- Do not block csvzall work on speculative csv-parser changes. Use the working log when the right fix belongs upstream or needs more design thought.
 
 ## Testing docs location
 

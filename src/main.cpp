@@ -1,4 +1,5 @@
 #include <argparse/argparse.hpp>
+#include <indicators/progress_bar.hpp>
 #include "head.hpp"
 #include "transform_pipeline.hpp"
 
@@ -7,6 +8,7 @@
 #include "pipeline/postgres/row_loader.hpp"
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -19,9 +21,12 @@ namespace {
 
 class Logger {
  public:
-  explicit Logger(bool verbose) : verbose_(verbose) {}
+  explicit Logger(bool verbose, bool quiet = false) : verbose_(verbose), quiet_(quiet) {}
 
   void Info(const std::string& msg) const {
+    if (quiet_) {
+      return;
+    }
     std::cerr << "[info] " << msg << '\n';
   }
 
@@ -35,10 +40,55 @@ class Logger {
     }
   }
 
+  void StartProgress(const std::string& label, std::uint64_t total) const {
+    if (quiet_ || total == 0) {
+      return;
+    }
+
+    progress_total_ = total;
+    progress_bar_ = std::make_unique<indicators::ProgressBar>(
+        indicators::option::Stream{std::cerr},
+        indicators::option::BarWidth{40},
+        indicators::option::Start{"["},
+        indicators::option::Fill{"="},
+        indicators::option::Lead{">"},
+        indicators::option::Remainder{" "},
+        indicators::option::End{"]"},
+        indicators::option::PrefixText{label + " "},
+        indicators::option::ShowPercentage{true},
+        indicators::option::ShowElapsedTime{true},
+        indicators::option::ShowRemainingTime{true},
+        indicators::option::ForegroundColor{indicators::Color::cyan});
+    progress_bar_->set_progress(0);
+  }
+
+  void UpdateProgress(std::uint64_t current) const {
+    if (!progress_bar_ || progress_total_ == 0) {
+      return;
+    }
+
+    const auto percent = static_cast<std::size_t>(
+        std::min<std::uint64_t>((current * 100) / progress_total_, 100));
+    progress_bar_->set_progress(percent);
+  }
+
+  void FinishProgress() const {
+    if (!progress_bar_) {
+      return;
+    }
+
+    progress_bar_->set_progress(100);
+    progress_bar_.reset();
+    progress_total_ = 0;
+  }
+
   [[nodiscard]] bool is_verbose() const { return verbose_; }
 
  private:
   bool verbose_ = false;
+  bool quiet_ = false;
+  mutable std::unique_ptr<indicators::ProgressBar> progress_bar_;
+  mutable std::uint64_t progress_total_ = 0;
 };
 
 struct ThroughputStats {
@@ -103,6 +153,10 @@ void AddCsvInputArguments(argparse::ArgumentParser& cmd) {
       .help("Print throughput and diagnostic logs to stderr")
       .default_value(false)
       .implicit_value(true);
+  cmd.add_argument("--quiet")
+      .help("Suppress informational logs")
+      .default_value(false)
+      .implicit_value(true);
   cmd.add_argument("-d", "--delimiter")
       .help("Input field delimiter: single char, 'tab', or '\\t' (default: auto-detect)")
       .default_value(std::string{""});
@@ -119,7 +173,11 @@ void AddExactArgument(argparse::ArgumentParser& cmd) {
 csvzall::pipeline::LoggerCallbacks BuildCallbacks(const Logger& logger) {
   return {
     [&logger](const std::string& msg) { logger.Error(msg); },
-    [&logger](const std::string& msg) { logger.Verbose(msg); }};
+    [&logger](const std::string& msg) { logger.Verbose(msg); },
+    [&logger](const std::string& msg) { logger.Info(msg); },
+    [&logger](const std::string& label, std::uint64_t total) { logger.StartProgress(label, total); },
+    [&logger](std::uint64_t current) { logger.UpdateProgress(current); },
+    [&logger]() { logger.FinishProgress(); }};
 }
 
 csvzall::pipeline::RunOptions BuildTransformOptions(
@@ -169,6 +227,10 @@ int main(int argc, char** argv) {
       .scan<'i', int>();
     head_cmd.add_argument("--verbose")
       .help("Print throughput and diagnostic logs to stderr")
+      .default_value(false)
+      .implicit_value(true);
+    head_cmd.add_argument("--quiet")
+      .help("Suppress informational logs")
       .default_value(false)
       .implicit_value(true);
     head_cmd.add_argument("-d", "--delimiter")
@@ -273,18 +335,6 @@ int main(int argc, char** argv) {
   postgres_cmd.add_argument("--if-exists")
       .help("Action if table exists: error|drop|append")
       .default_value(std::string{"error"});
-  postgres_cmd.add_argument("--price-min")
-      .help("Minimum price filter (drop below; -1 to disable)")
-      .default_value(500)
-      .scan<'i', int>();
-  postgres_cmd.add_argument("--price-max")
-      .help("Maximum price filter (drop above; -1 to disable)")
-      .default_value(500000)
-      .scan<'i', int>();
-  postgres_cmd.add_argument("--odometer-max")
-      .help("Maximum odometer filter (drop above; -1 to disable)")
-      .default_value(500000)
-      .scan<'i', int>();
 
   program.add_subparser(postgres_cmd);
 #endif
@@ -313,7 +363,7 @@ int main(int argc, char** argv) {
   const auto start = std::chrono::steady_clock::now();
 
   if (program.is_subcommand_used("derive")) {
-    Logger logger(derive_cmd.get<bool>("--verbose"));
+    Logger logger(derive_cmd.get<bool>("--verbose"), derive_cmd.get<bool>("--quiet"));
     const std::string input_name = derive_cmd.get<std::string>("input");
     auto* input = ResolveInput(input_name, input_file, logger);
     if (!input) {
@@ -331,7 +381,7 @@ int main(int argc, char** argv) {
   }
 
   if (program.is_subcommand_used("filter")) {
-    Logger logger(filter_cmd.get<bool>("--verbose"));
+    Logger logger(filter_cmd.get<bool>("--verbose"), filter_cmd.get<bool>("--quiet"));
     const std::string input_name = filter_cmd.get<std::string>("input");
     auto* input = ResolveInput(input_name, input_file, logger);
     if (!input) {
@@ -349,7 +399,7 @@ int main(int argc, char** argv) {
   }
 
   if (program.is_subcommand_used("summarize")) {
-    Logger logger(summarize_cmd.get<bool>("--verbose"));
+    Logger logger(summarize_cmd.get<bool>("--verbose"), summarize_cmd.get<bool>("--quiet"));
     const std::string input_name = summarize_cmd.get<std::string>("input");
     auto* input = ResolveInput(input_name, input_file, logger);
     if (!input) {
@@ -369,7 +419,7 @@ int main(int argc, char** argv) {
   }
 
   if (program.is_subcommand_used("timeseries")) {
-    Logger logger(timeseries_cmd.get<bool>("--verbose"));
+    Logger logger(timeseries_cmd.get<bool>("--verbose"), timeseries_cmd.get<bool>("--quiet"));
     const std::string input_name = timeseries_cmd.get<std::string>("input");
     auto* input = ResolveInput(input_name, input_file, logger);
     if (!input) {
@@ -391,7 +441,7 @@ int main(int argc, char** argv) {
   }
 
   if (program.is_subcommand_used("sql")) {
-    Logger logger(sql_cmd.get<bool>("--verbose"));
+    Logger logger(sql_cmd.get<bool>("--verbose"), sql_cmd.get<bool>("--quiet"));
     const std::string mode = sql_cmd.get<std::string>("mode");
 
     if (mode == "query") {
@@ -505,7 +555,7 @@ int main(int argc, char** argv) {
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
   if (program.is_subcommand_used("postgres")) {
-    Logger logger(postgres_cmd.get<bool>("--verbose"));
+    Logger logger(postgres_cmd.get<bool>("--verbose"), postgres_cmd.get<bool>("--quiet"));
     const std::string input_name = postgres_cmd.get<std::string>("input");
     auto* input = ResolveInput(input_name, input_file, logger);
     if (!input) {
@@ -521,27 +571,20 @@ int main(int argc, char** argv) {
     pg_config.user = postgres_cmd.get<std::string>("--user");
     pg_config.password = postgres_cmd.get<std::string>("--password");
 
-    // Build row loader configuration
-    csvzall::pipeline::postgres::RowLoaderConfig row_config;
-    row_config.price_min = postgres_cmd.get<int>("--price-min");
-    row_config.price_max = postgres_cmd.get<int>("--price-max");
-    row_config.odometer_max = postgres_cmd.get<int>("--odometer-max");
-
     csvzall::pipeline::RunStats ps;
     const auto rc = csvzall::pipeline::RunPostgresExport(
         *input, BuildTransformOptions(postgres_cmd, input, input_name),
         BuildCallbacks(logger), ps,
         pg_config,
         postgres_cmd.get<std::string>("--table"),
-        postgres_cmd.get<std::string>("--if-exists"),
-        row_config);
+        postgres_cmd.get<std::string>("--if-exists"));
     stats = FinishStats(ps, start);
     MaybePrintVerboseStats(stats, logger);
     return rc;
   }
 #endif
 
-  Logger logger(head_cmd.get<bool>("--verbose"));
+  Logger logger(head_cmd.get<bool>("--verbose"), head_cmd.get<bool>("--quiet"));
   const int requested_rows = head_cmd.get<int>("--rows");
   if (requested_rows < 0) {
     logger.Error("--rows must be greater than or equal to 0.");

@@ -9,7 +9,6 @@
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
 #include "pipeline/postgres/postgres_connection.hpp"
-#include "pipeline/postgres/row_loader.hpp"
 #endif
 
 namespace csvzall::pipeline {
@@ -70,8 +69,7 @@ int RunPostgresExport(std::istream& input,
                       RunStats& stats,
                       const postgres::ConnectionConfig& pg_config,
                       const std::string& table_name,
-                      const std::string& if_exists_mode,
-                      const postgres::RowLoaderConfig& row_config);
+                      const std::string& if_exists_mode);
 #endif
 
 }  // namespace csvzall::pipeline

@@ -4,14 +4,18 @@
 
 #include <string>
 #include <vector>
-#include <map>
-#include <cstdint>
+
+namespace csv {
+class CSVRow;
+enum class DataType;
+}
 
 namespace csvzall::pipeline::postgres {
 
 // PostgreSQL column type
 enum class ColumnType {
   INTEGER,
+  BIGINT,
   NUMERIC,
   TIMESTAMP,
   TEXT
@@ -30,13 +34,26 @@ struct InferredColumn {
 // Schema inference state
 class SchemaInference {
  public:
+  struct ColumnStats {
+    std::string name;
+    int integer_count = 0;
+    int bigint_count = 0;
+    int numeric_count = 0;
+    int text_count = 0;
+    int total_non_null = 0;
+    int null_count = 0;
+  };
+
   explicit SchemaInference(const std::vector<std::string>& headers);
 
   // Add a row and update type statistics
+  void observe_row(const csv::CSVRow& row);
   void observe_row(const std::vector<std::string>& row);
 
   // Finalize inference and return inferred columns
   std::vector<InferredColumn> finalize();
+  static std::vector<InferredColumn> finalize_stats(const std::vector<ColumnStats>& stats);
+  static void observe_type(ColumnStats& stats, csv::DataType type);
 
   // Check if we've observed enough rows to stop inference
   bool has_enough_samples() const { return samples_ >= max_samples_; }
@@ -45,30 +62,10 @@ class SchemaInference {
   static constexpr int max_samples_ = 1000;
   int samples_ = 0;
 
-  struct ColumnStats {
-    std::string name;
-    int integer_count = 0;
-    int float_count = 0;
-    int timestamp_count = 0;
-    int text_count = 0;
-    int total_non_null = 0;
-    int null_count = 0;
-  };
-
   std::vector<ColumnStats> column_stats_;
 
-  // Type detection helpers
-  bool is_integer(const std::string& value);
-  bool is_float(const std::string& value);
-  bool is_timestamp(const std::string& value);
-
-  // Classify common column names
-  bool looks_like_integer_column(const std::string& name);
-  bool looks_like_numeric_column(const std::string& name);
-  bool looks_like_timestamp_column(const std::string& name);
-
   // Decide final type for a column
-  ColumnType infer_type(const ColumnStats& stats);
+  static ColumnType infer_type(const ColumnStats& stats);
 };
 
 }  // namespace csvzall::pipeline::postgres

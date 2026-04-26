@@ -186,7 +186,7 @@ protected:
     if (format_ == "markdown") {
       WriteMarkdownTable(output(), out_headers, out_rows);
     } else {
-      auto writer = csv::make_csv_writer_buffered(output());
+      auto writer = csv::make_csv_writer(output()).set_auto_flush(false);
       writer << out_headers;
       for (auto& r : out_rows) {
         writer << r;

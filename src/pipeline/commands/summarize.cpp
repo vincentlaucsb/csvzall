@@ -87,7 +87,7 @@ protected:
       common::AccumulateRowBytes(row, stats());
     }
 
-    auto writer = csv::make_csv_writer_buffered(output());
+    auto writer = csv::make_csv_writer(output()).set_auto_flush(false);
     std::vector<std::string> out_headers;
     out_headers.push_back(group_by_column_);
     for (const auto& col : show_columns_) {

@@ -4,81 +4,84 @@
 
 #include "postgres_connection.hpp"
 
-#include <algorithm>
-#include <cctype>
+#include <csv.hpp>
+
 #include <charconv>
-#include <sstream>
+#include <stdexcept>
 
 namespace csvzall::pipeline::postgres {
 
-namespace {
-
-// Case-insensitive string match
-bool contains_ci(const std::string& haystack, const std::string& needle) {
-  std::string lower_haystack = haystack;
-  std::string lower_needle = needle;
-
-  std::transform(lower_haystack.begin(), lower_haystack.end(),
-                 lower_haystack.begin(),
-                 [](unsigned char c) { return std::tolower(c); });
-  std::transform(lower_needle.begin(), lower_needle.end(),
-                 lower_needle.begin(),
-                 [](unsigned char c) { return std::tolower(c); });
-
-  return lower_haystack.find(lower_needle) != std::string::npos;
-}
-
-}  // namespace
-
 RowLoader::RowLoader(pqxx::connection& connection,
+                     pqxx::work& transaction,
                      const std::string& table_name,
-                     const std::vector<InferredColumn>& columns,
-                     const RowLoaderConfig& config)
+                     const std::vector<InferredColumn>& columns)
     : connection_(connection),
+      transaction_(transaction),
       table_name_(table_name),
-      columns_(columns),
-      config_(config),
-      prepared_name_("csvzall_pg_insert") {
-  prepare_insert_statement();
+      columns_(columns) {
+  column_names_.reserve(columns_.size());
+  for (const auto& column : columns_) {
+    column_names_.push_back(column.name);
+  }
+
+  open_stream();
 }
 
-void RowLoader::add_row(const std::vector<std::string>& row) {
+void RowLoader::add_row(const csv::CSVRow& row) {
+  if (completed_) {
+    throw std::logic_error("cannot add rows after RowLoader::flush()");
+  }
+
   if (row.size() != columns_.size()) {
     rows_skipped_type_mismatch_++;
     return;
   }
 
-  if (!should_load_row(row)) {
-    rows_skipped_filtered_++;
+  std::vector<PgValue> values;
+  values.reserve(columns_.size());
+  for (std::size_t i = 0; i < columns_.size(); ++i) {
+    if (!append_cast_value(row, i, values)) {
+      rows_skipped_type_mismatch_++;
+      return;
+    }
+  }
+
+  write_values(values);
+}
+
+void RowLoader::add_row(const std::vector<std::string>& row) {
+  if (completed_) {
+    throw std::logic_error("cannot add rows after RowLoader::flush()");
+  }
+
+  if (row.size() != columns_.size()) {
+    rows_skipped_type_mismatch_++;
     return;
   }
 
-  pending_rows_.push_back(row);
-
-  if (pending_rows_.size() >= batch_size_) {
-    flush();
+  std::vector<PgValue> values;
+  values.reserve(columns_.size());
+  for (std::size_t i = 0; i < columns_.size(); ++i) {
+    if (!append_cast_value(row[i], i, values)) {
+      rows_skipped_type_mismatch_++;
+      return;
+    }
   }
+
+  write_values(values);
 }
 
 void RowLoader::flush() {
-  if (pending_rows_.empty()) {
+  if (completed_) {
     return;
   }
 
-  flush_pending_lenient();
-  pending_rows_.clear();
+  stream_->complete();
+  stream_.reset();
+  completed_ = true;
 }
 
-int RowLoader::find_column_index(const std::string& pattern) const {
-  for (size_t i = 0; i < columns_.size(); ++i) {
-    if (contains_ci(columns_[i].name, pattern)) {
-      return static_cast<int>(i);
-    }
-  }
-  return -1;
-}
-
-bool RowLoader::try_parse_int64(const std::string& s, std::int64_t& out) {
+bool RowLoader::try_parse_int64(std::string_view s, std::int64_t& out) {
   if (s.empty()) {
     return false;
   }
@@ -88,95 +91,96 @@ bool RowLoader::try_parse_int64(const std::string& s, std::int64_t& out) {
   return result.ec == std::errc{} && result.ptr == end;
 }
 
-bool RowLoader::should_load_row(const std::vector<std::string>& row) const {
-  const int price_idx = find_column_index(config_.price_column);
-  const int odometer_idx = find_column_index(config_.odometer_column);
+void RowLoader::open_stream() {
+  stream_ = std::make_unique<pqxx::stream_to>(
+      pqxx::stream_to::raw_table(
+          transaction_,
+          QuoteIdentifier(table_name_),
+          connection_.quote_columns(column_names_)));
+}
 
-  if (config_.price_min >= 0 || config_.price_max >= 0) {
-    if (price_idx >= 0 && price_idx < static_cast<int>(row.size())) {
-      const auto& price_str = row[price_idx];
-      if (!price_str.empty()) {
-        std::int64_t price = 0;
-        if (try_parse_int64(price_str, price)) {
-          if (config_.price_min >= 0 && price < config_.price_min) {
-            return false;
-          }
-          if (config_.price_max >= 0 && price > config_.price_max) {
-            return false;
-          }
-        }
-      }
-    }
+bool RowLoader::append_cast_value(const csv::CSVRow& row,
+                                  std::size_t index,
+                                  std::vector<PgValue>& values) const {
+  auto field = row[index];
+  if (field.is_null()) {
+    values.emplace_back(std::optional<std::string_view>{});
+    return true;
   }
 
-  if (odometer_idx >= 0 && odometer_idx < static_cast<int>(row.size())) {
-    const auto& odometer_str = row[odometer_idx];
-
-    // Requirement: skip rows where odometer is null.
-    if (odometer_str.empty()) {
-      return false;
-    }
-
-    if (config_.odometer_max >= 0) {
-      std::int64_t odometer = 0;
-      if (try_parse_int64(odometer_str, odometer) && odometer > config_.odometer_max) {
+  switch (columns_[index].type) {
+    case ColumnType::BIGINT:
+    case ColumnType::INTEGER: {
+      std::int64_t value = 0;
+      if (!field.try_get(value)) {
         return false;
       }
+      values.emplace_back(std::optional<std::int64_t>{value});
+      return true;
     }
+
+    case ColumnType::NUMERIC: {
+      long double value = 0;
+      if (!field.try_get(value)) {
+        return false;
+      }
+      values.emplace_back(std::optional<long double>{value});
+      return true;
+    }
+
+    case ColumnType::TIMESTAMP:
+    case ColumnType::TEXT:
+      values.emplace_back(std::optional<std::string_view>{std::string_view{field.get_sv()}});
+      return true;
   }
 
-  return true;
+  return false;
 }
 
-void RowLoader::prepare_insert_statement() {
-  std::ostringstream col_list;
-  std::ostringstream val_list;
-
-  for (size_t i = 0; i < columns_.size(); ++i) {
-    if (i > 0) {
-      col_list << ", ";
-      val_list << ", ";
-    }
-    col_list << QuoteIdentifier(columns_[i].name);
-    // NULLIF allows empty CSV fields to map to SQL NULL without special-case binding.
-    val_list << "NULLIF($" << (i + 1) << ", '')";
+bool RowLoader::append_cast_value(std::string_view value,
+                                  std::size_t index,
+                                  std::vector<PgValue>& values) const {
+  if (csv::internals::data_type(value) == csv::DataType::CSV_NULL) {
+    values.emplace_back(std::optional<std::string_view>{});
+    return true;
   }
 
-  const std::string sql = "INSERT INTO " + QuoteIdentifier(table_name_) +
-                          " (" + col_list.str() + ") VALUES (" + val_list.str() + ")";
+  switch (columns_[index].type) {
+    case ColumnType::BIGINT:
+    case ColumnType::INTEGER: {
+      std::int64_t parsed = 0;
+      if (!try_parse_int64(value, parsed)) {
+        return false;
+      }
+      values.emplace_back(std::optional<std::int64_t>{parsed});
+      return true;
+    }
 
-  connection_.prepare(prepared_name_, sql);
+    case ColumnType::NUMERIC: {
+      long double parsed = 0;
+      if (csv::internals::data_type(value, &parsed) <= csv::DataType::CSV_STRING) {
+        return false;
+      }
+      values.emplace_back(std::optional<long double>{parsed});
+      return true;
+    }
+
+    case ColumnType::TIMESTAMP:
+    case ColumnType::TEXT:
+      values.emplace_back(std::optional<std::string_view>{value});
+      return true;
+  }
+
+  return false;
 }
 
-void RowLoader::insert_one_lenient(const std::vector<std::string>& row) {
-  try {
-    pqxx::work tx(connection_);
-    auto invocation = tx.prepared(prepared_name_);
-    for (const auto& value : row) {
-      invocation(value);
-    }
-    invocation.exec();
-    tx.commit();
-    rows_loaded_++;
-  } catch (const pqxx::sql_error&) {
-    rows_skipped_type_mismatch_++;
-  } catch (const std::exception&) {
-    rows_skipped_type_mismatch_++;
-  }
-}
-
-void RowLoader::flush_pending_lenient() {
-  for (const auto& row : pending_rows_) {
-    insert_one_lenient(row);
-  }
+void RowLoader::write_values(std::vector<PgValue>& values) {
+  stream_->write_row(values);
+  rows_loaded_++;
 }
 
 RowLoader::~RowLoader() {
-  try {
-    flush();
-  } catch (...) {
-    // Suppress exceptions in destructor
-  }
+  stream_.reset();
 }
 
 }  // namespace csvzall::pipeline::postgres
