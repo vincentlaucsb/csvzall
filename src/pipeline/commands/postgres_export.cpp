@@ -6,8 +6,13 @@
 #include "../postgres/schema_inference.hpp"
 #include "../postgres/row_loader.hpp"
 
+#include <condition_variable>
+#include <deque>
+#include <exception>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 
 namespace csvzall::pipeline::commands {
@@ -34,7 +39,7 @@ std::string ColumnToDdl(const postgres::InferredColumn& col) {
 void CreateTable(pqxx::work& tx,
                  const std::string& table_name,
                  const std::vector<postgres::InferredColumn>& inferred_columns) {
-  std::string ddl = "CREATE TABLE " + postgres::QuoteIdentifier(table_name) + " (";
+  std::string ddl = "CREATE UNLOGGED TABLE " + postgres::QuoteIdentifier(table_name) + " (";
   for (size_t i = 0; i < inferred_columns.size(); ++i) {
     if (i > 0) {
       ddl += ", ";
@@ -49,13 +54,13 @@ void CreateTable(pqxx::work& tx,
 void DumpInferredSchema(const LoggerCallbacks& logger,
                         const std::string& table_name,
                         const std::vector<postgres::InferredColumn>& inferred_columns,
-                        const std::size_t sample_count) {
+                        const std::size_t observed_rows) {
   if (!logger.info) {
     return;
   }
 
   logger.info("postgres: inferred schema for " + table_name + " from " +
-              std::to_string(sample_count) + " sampled rows:");
+              std::to_string(observed_rows) + " observed rows:");
 
   for (const auto& col : inferred_columns) {
     std::ostringstream line;
@@ -78,7 +83,210 @@ std::size_t ObservedRows(const std::vector<postgres::SchemaInference::ColumnStat
   return rows;
 }
 
+constexpr std::size_t kPostgresCopyQueueDepth = 3;
+constexpr std::size_t kPostgresInferChunkSize = 50000;
+
+struct InferredPostgresSchema {
+  std::vector<postgres::InferredColumn> columns;
+  std::size_t observed_rows = 0;
+};
+
+InferredPostgresSchema InferPostgresSchema(csv::CSVReader& reader,
+                                           const std::vector<std::string>& headers,
+                                           const LoggerCallbacks& logger) {
+  std::vector<postgres::SchemaInference::ColumnStats> column_stats;
+  column_stats.reserve(headers.size());
+  for (const auto& header : headers) {
+    postgres::SchemaInference::ColumnStats stats;
+    stats.name = header;
+    column_stats.push_back(std::move(stats));
+  }
+
+  if (logger.progress_start) {
+    logger.progress_start("postgres infer", 0);
+  }
+
+  try {
+    csv::DataFrameExecutor executor;
+    std::uint64_t rows_seen = 0;
+    csv::chunk_parallel_apply(
+        reader,
+        executor,
+        column_stats,
+        [&logger, &rows_seen](csv::DataFrame<>::column_type column,
+                              postgres::SchemaInference::ColumnStats& stats) {
+          for (const auto& cell : column) {
+            postgres::SchemaInference::observe_type(stats, cell.type());
+          }
+
+          if (column.index() == 0) {
+            rows_seen += static_cast<std::uint64_t>(column.size());
+            if (logger.progress_update) {
+              logger.progress_update(rows_seen);
+            }
+          }
+        },
+        kPostgresInferChunkSize);
+  } catch (...) {
+    if (logger.progress_finish) {
+      logger.progress_finish();
+    }
+    throw;
+  }
+
+  if (logger.progress_finish) {
+    logger.progress_finish();
+  }
+
+  InferredPostgresSchema result;
+  result.columns = postgres::SchemaInference::finalize_stats(column_stats);
+  result.observed_rows = ObservedRows(column_stats);
+  return result;
+}
+
+void CopyRowsWithPipeline(csv::CSVReader& reader,
+                          postgres::RowLoader& loader,
+                          const LoggerCallbacks& logger,
+                          const std::uint64_t total_rows,
+                          const std::size_t chunk_size) {
+  if (chunk_size == 0) {
+    throw std::invalid_argument("postgres: COPY batch size must be greater than 0");
+  }
+
+  struct QueueState {
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::deque<std::vector<csv::CSVRow>> queue;
+    bool done = false;
+    bool cancel = false;
+    std::exception_ptr producer_error;
+  };
+
+  QueueState state;
+
+  if (logger.progress_start) {
+    logger.progress_start("postgres COPY", total_rows);
+  }
+
+  std::thread producer([&]() {
+    try {
+      std::vector<csv::CSVRow> rows;
+      while (reader.read_chunk(rows, chunk_size)) {
+        std::unique_lock<std::mutex> lock(state.mutex);
+        state.cv.wait(lock, [&]() {
+          return state.cancel || state.queue.size() < kPostgresCopyQueueDepth;
+        });
+        if (state.cancel) {
+          break;
+        }
+        state.queue.push_back(std::move(rows));
+        lock.unlock();
+        state.cv.notify_all();
+      }
+    } catch (...) {
+      std::lock_guard<std::mutex> lock(state.mutex);
+      state.producer_error = std::current_exception();
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(state.mutex);
+      state.done = true;
+    }
+    state.cv.notify_all();
+  });
+
+  std::uint64_t rows_seen = 0;
+  try {
+    while (true) {
+      std::vector<csv::CSVRow> rows;
+      {
+        std::unique_lock<std::mutex> lock(state.mutex);
+        state.cv.wait(lock, [&]() {
+          return state.done || !state.queue.empty();
+        });
+
+        if (state.queue.empty()) {
+          break;
+        }
+
+        rows = std::move(state.queue.front());
+        state.queue.pop_front();
+      }
+      state.cv.notify_all();
+
+      rows_seen += rows.size();
+      loader.add_rows(rows);
+      if (logger.progress_update) {
+        logger.progress_update(rows_seen);
+      }
+    }
+  } catch (...) {
+    {
+      std::lock_guard<std::mutex> lock(state.mutex);
+      state.cancel = true;
+    }
+    state.cv.notify_all();
+    producer.join();
+    if (logger.progress_finish) {
+      logger.progress_finish();
+    }
+    throw;
+  }
+
+  producer.join();
+
+  if (state.producer_error) {
+    if (logger.progress_finish) {
+      logger.progress_finish();
+    }
+    std::rethrow_exception(state.producer_error);
+  }
+
+  if (logger.progress_finish) {
+    logger.progress_finish();
+  }
+}
+
 }  // namespace
+
+class PostgresInferCommand : public CsvInputCommand {
+ public:
+  PostgresInferCommand(std::istream& input,
+                       const RunOptions& options,
+                       const LoggerCallbacks& logger,
+                       RunStats& stats,
+                       std::string table_name)
+      : CsvInputCommand(input, options, logger, stats),
+        table_name_(std::move(table_name)) {}
+
+ protected:
+  int run() override {
+    try {
+      if (logger().verbose) {
+        logger().verbose("Inferring PostgreSQL schema from full input...");
+      }
+
+      const auto schema = InferPostgresSchema(reader(), headers(), logger());
+      DumpInferredSchema(logger(), table_name_, schema.columns, schema.observed_rows);
+      stats().rows_processed = schema.observed_rows;
+
+      if (logger().verbose) {
+        logger().verbose("postgres infer: inspected " +
+                         std::to_string(schema.observed_rows) + " rows");
+      }
+
+      return 0;
+    } catch (const std::exception& ex) {
+      if (logger().error) {
+        logger().error(std::string("PostgreSQL schema inference error: ") + ex.what());
+      }
+      return 1;
+    }
+  }
+
+ private:
+  std::string table_name_;
+};
 
 class PostgresExportCommand : public CsvInputCommand {
  public:
@@ -135,26 +343,9 @@ class PostgresExportCommand : public CsvInputCommand {
         logger().verbose("Inferring schema from full input...");
       }
 
-      std::vector<postgres::SchemaInference::ColumnStats> column_stats;
-      column_stats.reserve(headers().size());
-      for (const auto& header : headers()) {
-        postgres::SchemaInference::ColumnStats stats;
-        stats.name = header;
-        column_stats.push_back(std::move(stats));
-      }
-
-      csv::chunk_parallel_apply(
-          reader(),
-          column_stats,
-          [](csv::DataFrame<>::column_type column,
-             postgres::SchemaInference::ColumnStats& stats) {
-            for (const auto& cell : column) {
-              postgres::SchemaInference::observe_type(stats, cell.type());
-            }
-          });
-
-      const auto inferred_columns = postgres::SchemaInference::finalize_stats(column_stats);
-      const auto observed_rows = ObservedRows(column_stats);
+      const auto schema = InferPostgresSchema(reader(), headers(), logger());
+      const auto& inferred_columns = schema.columns;
+      const auto observed_rows = schema.observed_rows;
       DumpInferredSchema(logger(), table_name_, inferred_columns, observed_rows);
 
       if (logger().verbose) {
@@ -168,6 +359,7 @@ class PostgresExportCommand : public CsvInputCommand {
       if (!table_exists) {
         try {
           pqxx::work tx(pq_conn);
+          tx.exec("SET LOCAL synchronous_commit = off");
           if (drop_existing_table) {
             tx.exec("DROP TABLE IF EXISTS " + postgres::QuoteIdentifier(table_name_));
           }
@@ -177,21 +369,9 @@ class PostgresExportCommand : public CsvInputCommand {
           }
 
           postgres::RowLoader loader(pq_conn, tx, table_name_, inferred_columns);
-          std::uint64_t rows_seen = 0;
-          if (logger().progress_start) {
-            logger().progress_start("postgres COPY", observed_rows);
-          }
-          for (const auto& row : reader()) {
-            loader.add_row(row);
-            rows_seen++;
-            if (logger().progress_update && rows_seen % 1000 == 0) {
-              logger().progress_update(rows_seen);
-            }
-          }
+          CopyRowsWithPipeline(
+              reader(), loader, logger(), observed_rows, options().postgres_copy_batch_rows);
           loader.flush();
-          if (logger().progress_finish) {
-            logger().progress_finish();
-          }
           tx.commit();
 
           stats().rows_processed = loader.rows_loaded();
@@ -220,22 +400,11 @@ class PostgresExportCommand : public CsvInputCommand {
       }
 
       pqxx::work tx(pq_conn);
+      tx.exec("SET LOCAL synchronous_commit = off");
       postgres::RowLoader loader(pq_conn, tx, table_name_, inferred_columns);
-      std::uint64_t rows_seen = 0;
-      if (logger().progress_start) {
-        logger().progress_start("postgres COPY", observed_rows);
-      }
-      for (const auto& row : reader()) {
-        loader.add_row(row);
-        rows_seen++;
-        if (logger().progress_update && rows_seen % 1000 == 0) {
-          logger().progress_update(rows_seen);
-        }
-      }
+      CopyRowsWithPipeline(
+          reader(), loader, logger(), observed_rows, options().postgres_copy_batch_rows);
       loader.flush();
-      if (logger().progress_finish) {
-        logger().progress_finish();
-      }
       tx.commit();
 
       stats().rows_processed = loader.rows_loaded();
@@ -274,11 +443,11 @@ class PostgresExportCommand : public CsvInputCommand {
     }
 
     pqxx::work tx(conn);
+    tx.exec("SET LOCAL synchronous_commit = off");
     postgres::RowLoader loader(conn, tx, table_name_, columns);
 
-    for (const auto& row : reader()) {
-      loader.add_row(row);
-    }
+    CopyRowsWithPipeline(
+        reader(), loader, logger(), 0, options().postgres_copy_batch_rows);
     loader.flush();
     tx.commit();
 
@@ -308,6 +477,15 @@ int RunPostgresExport(std::istream& input,
                       const std::string& if_exists_mode) {
   const IfExistsMode mode = ParseIfExistsMode(if_exists_mode);
   PostgresExportCommand cmd(input, options, logger, stats, pg_config, table_name, mode);
+  return cmd.execute();
+}
+
+int RunPostgresInfer(std::istream& input,
+                     const RunOptions& options,
+                     const LoggerCallbacks& logger,
+                     RunStats& stats,
+                     const std::string& table_name) {
+  PostgresInferCommand cmd(input, options, logger, stats, table_name);
   return cmd.execute();
 }
 

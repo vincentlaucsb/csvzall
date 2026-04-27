@@ -1,5 +1,6 @@
 #include <argparse/argparse.hpp>
 #include <indicators/progress_bar.hpp>
+#include <indicators/progress_spinner.hpp>
 #include "head.hpp"
 #include "transform_pipeline.hpp"
 
@@ -16,6 +17,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -41,11 +43,23 @@ class Logger {
   }
 
   void StartProgress(const std::string& label, std::uint64_t total) const {
-    if (quiet_ || total == 0) {
+    if (quiet_) {
       return;
     }
 
     progress_total_ = total;
+    if (total == 0) {
+      progress_spinner_ = std::make_unique<indicators::ProgressSpinner>(
+          indicators::option::Stream{std::cerr},
+          indicators::option::PrefixText{label + " "},
+          indicators::option::ShowPercentage{false},
+          indicators::option::ShowElapsedTime{true},
+          indicators::option::SpinnerStates{std::vector<std::string>{"|", "/", "-", "\\"}},
+          indicators::option::ForegroundColor{indicators::Color::cyan});
+      progress_spinner_->tick();
+      return;
+    }
+
     progress_bar_ = std::make_unique<indicators::ProgressBar>(
         indicators::option::Stream{std::cerr},
         indicators::option::BarWidth{40},
@@ -58,11 +72,19 @@ class Logger {
         indicators::option::ShowPercentage{true},
         indicators::option::ShowElapsedTime{true},
         indicators::option::ShowRemainingTime{true},
+        indicators::option::MaxProgress{100},
         indicators::option::ForegroundColor{indicators::Color::cyan});
     progress_bar_->set_progress(0);
   }
 
   void UpdateProgress(std::uint64_t current) const {
+    if (progress_spinner_) {
+      progress_spinner_->set_option(
+          indicators::option::PostfixText{std::to_string(current) + " rows"});
+      progress_spinner_->tick();
+      return;
+    }
+
     if (!progress_bar_ || progress_total_ == 0) {
       return;
     }
@@ -73,13 +95,18 @@ class Logger {
   }
 
   void FinishProgress() const {
-    if (!progress_bar_) {
+    if (progress_spinner_) {
+      progress_spinner_->mark_as_completed();
+      progress_spinner_.reset();
+      progress_total_ = 0;
       return;
     }
 
-    progress_bar_->set_progress(100);
-    progress_bar_.reset();
-    progress_total_ = 0;
+    if (progress_bar_) {
+      progress_bar_->set_progress(100);
+      progress_bar_.reset();
+      progress_total_ = 0;
+    }
   }
 
   [[nodiscard]] bool is_verbose() const { return verbose_; }
@@ -88,6 +115,7 @@ class Logger {
   bool verbose_ = false;
   bool quiet_ = false;
   mutable std::unique_ptr<indicators::ProgressBar> progress_bar_;
+  mutable std::unique_ptr<indicators::ProgressSpinner> progress_spinner_;
   mutable std::uint64_t progress_total_ = 0;
 };
 
@@ -309,6 +337,14 @@ int main(int argc, char** argv) {
   program.add_subparser(sql_cmd);
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
+  argparse::ArgumentParser infer_cmd("infer");
+  infer_cmd.add_description("Infer a PostgreSQL schema without creating a table or loading rows");
+  AddCsvInputArguments(infer_cmd);
+  AddExactArgument(infer_cmd);
+  infer_cmd.add_argument("--table")
+      .help("Table name to use when printing the inferred schema")
+      .default_value(std::string{"inferred_table"});
+
   argparse::ArgumentParser postgres_cmd("postgres");
   postgres_cmd.add_description("Export CSV to PostgreSQL database with automatic schema inference");
   AddCsvInputArguments(postgres_cmd);
@@ -335,7 +371,12 @@ int main(int argc, char** argv) {
   postgres_cmd.add_argument("--if-exists")
       .help("Action if table exists: error|drop|append")
       .default_value(std::string{"error"});
+  postgres_cmd.add_argument("--copy-batch-rows")
+      .help("Rows per PostgreSQL COPY producer batch")
+      .default_value(10000)
+      .scan<'i', int>();
 
+  program.add_subparser(infer_cmd);
   program.add_subparser(postgres_cmd);
 #endif
 
@@ -351,6 +392,7 @@ int main(int argc, char** argv) {
       !program.is_subcommand_used("head") && !program.is_subcommand_used("summarize") &&
       !program.is_subcommand_used("timeseries") && !program.is_subcommand_used("sql")
 #ifdef CSVZALL_HAVE_POSTGRESQL
+      && !program.is_subcommand_used("infer")
       && !program.is_subcommand_used("postgres")
 #endif
   ) {
@@ -554,6 +596,25 @@ int main(int argc, char** argv) {
   }
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
+  if (program.is_subcommand_used("infer")) {
+    Logger logger(infer_cmd.get<bool>("--verbose"), infer_cmd.get<bool>("--quiet"));
+    const std::string input_name = infer_cmd.get<std::string>("input");
+    auto* input = ResolveInput(input_name, input_file, logger);
+    if (!input) {
+      logger.Error("Unable to open input file: " + input_name);
+      return 1;
+    }
+
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunPostgresInfer(
+        *input, BuildTransformOptions(infer_cmd, input, input_name),
+        BuildCallbacks(logger), ps,
+        infer_cmd.get<std::string>("--table"));
+    stats = FinishStats(ps, start);
+    MaybePrintVerboseStats(stats, logger);
+    return rc;
+  }
+
   if (program.is_subcommand_used("postgres")) {
     Logger logger(postgres_cmd.get<bool>("--verbose"), postgres_cmd.get<bool>("--quiet"));
     const std::string input_name = postgres_cmd.get<std::string>("input");
@@ -571,10 +632,17 @@ int main(int argc, char** argv) {
     pg_config.user = postgres_cmd.get<std::string>("--user");
     pg_config.password = postgres_cmd.get<std::string>("--password");
 
+    auto options = BuildTransformOptions(postgres_cmd, input, input_name);
+    const auto copy_batch_rows = postgres_cmd.get<int>("--copy-batch-rows");
+    if (copy_batch_rows <= 0) {
+      logger.Error("postgres: --copy-batch-rows must be greater than 0");
+      return 1;
+    }
+    options.postgres_copy_batch_rows = static_cast<std::size_t>(copy_batch_rows);
+
     csvzall::pipeline::RunStats ps;
     const auto rc = csvzall::pipeline::RunPostgresExport(
-        *input, BuildTransformOptions(postgres_cmd, input, input_name),
-        BuildCallbacks(logger), ps,
+        *input, options, BuildCallbacks(logger), ps,
         pg_config,
         postgres_cmd.get<std::string>("--table"),
         postgres_cmd.get<std::string>("--if-exists"));

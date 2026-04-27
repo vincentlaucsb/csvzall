@@ -14,6 +14,17 @@ for csv-parser follow-ups, not a committed roadmap.
 - `csv::chunk_parallel_apply()` is the more important building block for those
   advanced cases. It gives callers bounded chunking and per-column parallelism
   while leaving the inference policy under application control.
+- Make `CSVReader`'s default variable-column behavior obvious in the docs:
+  rows that are too short or too long are ignored by default. Generic ETL
+  callers can rely on that instead of duplicating row-width checks after
+  `read_chunk()`, and users who want different behavior should be pointed at
+  the variable-columns configuration.
+- Document that `CSVField::is_null()` is backed by scalar classification via
+  `CSVField::type()`. This is the right default because null semantics stay in
+  one place, but it matters in ultra-hot ETL loops: callers that only need the
+  current csv-parser null definition (empty string or ASCII-space-only field)
+  may choose a narrow predicate after `get_sv()` to avoid invoking full scalar
+  inference per cell.
 - Documentation should make this split explicit:
   - use `csv_data_types()` when the default SQL-friendly inference is enough
   - copy the `chunk_parallel_apply()` pattern when the workflow needs more

@@ -81,6 +81,24 @@ csvzall head -n 10 data.csv
 some-command | csvzall head -
 ```
 
+### `infer [input]`
+
+Infer the PostgreSQL schema that `postgres` export would use, without connecting to a database or loading rows. This is useful for inspecting type inference and timing inference separately from `COPY`.
+
+```sh
+csvzall infer vehicles.csv --table used_cars --verbose
+```
+
+### `postgres [input]`
+
+Export CSV rows into PostgreSQL with full-file schema inference followed by `COPY`.
+
+```sh
+csvzall postgres vehicles.csv --dbname postgres --user postgres --table used_cars
+```
+
+`--copy-batch-rows <N>` tunes the producer batch size for the COPY pipeline. The default is `10000`, which keeps memory bounded well on large files; larger values may increase peak memory without improving throughput.
+
 ## Pipelines are shell scripts
 
 There is no built-in pipeline format. Save complex chains as PowerShell, Bash, or batch scripts — they're already shareable, version-controllable, and composable with the rest of your toolbox.

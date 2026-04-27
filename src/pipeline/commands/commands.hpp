@@ -150,6 +150,13 @@ int RunPostgresExport(std::istream& input,
                       const postgres::ConnectionConfig& pg_config,
                       const std::string& table_name,
                       const std::string& if_exists_mode);
+
+// Infer a CSV file's PostgreSQL schema without creating a table or loading rows.
+int RunPostgresInfer(std::istream& input,
+                     const RunOptions& options,
+                     const LoggerCallbacks& logger,
+                     RunStats& stats,
+                     const std::string& table_name);
 #endif
 
 }  // namespace csvzall::pipeline::commands

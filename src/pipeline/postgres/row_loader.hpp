@@ -3,32 +3,31 @@
 #ifdef CSVZALL_HAVE_POSTGRESQL
 
 #include <pqxx/pqxx>
+#include <csv.hpp>
 
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <variant>
 #include <vector>
 #include "schema_inference.hpp"
-
-namespace csv {
-class CSVRow;
-}
 
 namespace csvzall::pipeline::postgres {
 
 // Batch loader state
 class RowLoader {
  public:
+  using PgValue = std::optional<std::string_view>;
+
   RowLoader(pqxx::connection& connection,
             pqxx::work& transaction,
             const std::string& table_name,
             const std::vector<InferredColumn>& columns);
 
-  // Adds a row. Rows that cannot be cast to the inferred PostgreSQL schema are skipped.
+  // Adds rows to the COPY stream.
   void add_row(const csv::CSVRow& row);
   void add_row(const std::vector<std::string>& row);
+  void add_rows(const std::vector<csv::CSVRow>& rows);
 
   void flush();
 
@@ -38,11 +37,6 @@ class RowLoader {
   ~RowLoader();
 
  private:
-  using PgValue = std::variant<
-      std::optional<std::int64_t>,
-      std::optional<long double>,
-      std::optional<std::string_view>>;
-
   pqxx::connection& connection_;
   pqxx::work& transaction_;
   std::string table_name_;
@@ -56,11 +50,9 @@ class RowLoader {
 
   void open_stream();
 
-  bool append_cast_value(const csv::CSVRow& row, std::size_t index, std::vector<PgValue>& values) const;
-  bool append_cast_value(std::string_view value, std::size_t index, std::vector<PgValue>& values) const;
+  void append_value(const csv::CSVRow& row, std::size_t index, std::vector<PgValue>& values) const;
+  void append_value(std::string_view value, std::vector<PgValue>& values) const;
   void write_values(std::vector<PgValue>& values);
-
-  static bool try_parse_int64(std::string_view s, std::int64_t& out);
 };
 
 }  // namespace csvzall::pipeline::postgres

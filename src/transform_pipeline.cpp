@@ -85,6 +85,14 @@ int RunPostgresExport(std::istream& input,
   return commands::RunPostgresExport(input, options, logger, stats,
                                      pg_config, table_name, if_exists_mode);
 }
+
+int RunPostgresInfer(std::istream& input,
+                     const RunOptions& options,
+                     const LoggerCallbacks& logger,
+                     RunStats& stats,
+                     const std::string& table_name) {
+  return commands::RunPostgresInfer(input, options, logger, stats, table_name);
+}
 #endif
 
 }  // namespace csvzall::pipeline

@@ -6,10 +6,22 @@
 
 #include <csv.hpp>
 
-#include <charconv>
 #include <stdexcept>
 
 namespace csvzall::pipeline::postgres {
+
+namespace {
+
+bool IsCsvNull(std::string_view value) {
+  for (const char ch : value) {
+    if (ch != ' ') {
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
 
 RowLoader::RowLoader(pqxx::connection& connection,
                      pqxx::work& transaction,
@@ -40,10 +52,7 @@ void RowLoader::add_row(const csv::CSVRow& row) {
   std::vector<PgValue> values;
   values.reserve(columns_.size());
   for (std::size_t i = 0; i < columns_.size(); ++i) {
-    if (!append_cast_value(row, i, values)) {
-      rows_skipped_type_mismatch_++;
-      return;
-    }
+    append_value(row, i, values);
   }
 
   write_values(values);
@@ -62,13 +71,32 @@ void RowLoader::add_row(const std::vector<std::string>& row) {
   std::vector<PgValue> values;
   values.reserve(columns_.size());
   for (std::size_t i = 0; i < columns_.size(); ++i) {
-    if (!append_cast_value(row[i], i, values)) {
-      rows_skipped_type_mismatch_++;
-      return;
-    }
+    append_value(row[i], values);
   }
 
   write_values(values);
+}
+
+void RowLoader::add_rows(const std::vector<csv::CSVRow>& rows) {
+  if (completed_) {
+    throw std::logic_error("cannot add rows after RowLoader::flush()");
+  }
+
+  if (rows.empty()) {
+    return;
+  }
+
+  std::vector<PgValue> row_values;
+  row_values.reserve(columns_.size());
+
+  for (const auto& row : rows) {
+    row_values.clear();
+    for (std::size_t column_index = 0; column_index < columns_.size(); ++column_index) {
+      append_value(row, column_index, row_values);
+    }
+
+    write_values(row_values);
+  }
 }
 
 void RowLoader::flush() {
@@ -81,16 +109,6 @@ void RowLoader::flush() {
   completed_ = true;
 }
 
-bool RowLoader::try_parse_int64(std::string_view s, std::int64_t& out) {
-  if (s.empty()) {
-    return false;
-  }
-  const char* begin = s.data();
-  const char* end = s.data() + s.size();
-  const auto result = std::from_chars(begin, end, out);
-  return result.ec == std::errc{} && result.ptr == end;
-}
-
 void RowLoader::open_stream() {
   stream_ = std::make_unique<pqxx::stream_to>(
       pqxx::stream_to::raw_table(
@@ -99,79 +117,27 @@ void RowLoader::open_stream() {
           connection_.quote_columns(column_names_)));
 }
 
-bool RowLoader::append_cast_value(const csv::CSVRow& row,
-                                  std::size_t index,
-                                  std::vector<PgValue>& values) const {
+void RowLoader::append_value(const csv::CSVRow& row,
+                             std::size_t index,
+                             std::vector<PgValue>& values) const {
   auto field = row[index];
-  if (field.is_null()) {
-    values.emplace_back(std::optional<std::string_view>{});
-    return true;
+  const std::string_view value{field.get_sv()};
+  if (IsCsvNull(value)) {
+    values.emplace_back(std::nullopt);
+    return;
   }
 
-  switch (columns_[index].type) {
-    case ColumnType::BIGINT:
-    case ColumnType::INTEGER: {
-      std::int64_t value = 0;
-      if (!field.try_get(value)) {
-        return false;
-      }
-      values.emplace_back(std::optional<std::int64_t>{value});
-      return true;
-    }
-
-    case ColumnType::NUMERIC: {
-      long double value = 0;
-      if (!field.try_get(value)) {
-        return false;
-      }
-      values.emplace_back(std::optional<long double>{value});
-      return true;
-    }
-
-    case ColumnType::TIMESTAMP:
-    case ColumnType::TEXT:
-      values.emplace_back(std::optional<std::string_view>{std::string_view{field.get_sv()}});
-      return true;
-  }
-
-  return false;
+  values.emplace_back(value);
 }
 
-bool RowLoader::append_cast_value(std::string_view value,
-                                  std::size_t index,
-                                  std::vector<PgValue>& values) const {
-  if (csv::internals::data_type(value) == csv::DataType::CSV_NULL) {
-    values.emplace_back(std::optional<std::string_view>{});
-    return true;
+void RowLoader::append_value(std::string_view value,
+                             std::vector<PgValue>& values) const {
+  if (IsCsvNull(value)) {
+    values.emplace_back(std::nullopt);
+    return;
   }
 
-  switch (columns_[index].type) {
-    case ColumnType::BIGINT:
-    case ColumnType::INTEGER: {
-      std::int64_t parsed = 0;
-      if (!try_parse_int64(value, parsed)) {
-        return false;
-      }
-      values.emplace_back(std::optional<std::int64_t>{parsed});
-      return true;
-    }
-
-    case ColumnType::NUMERIC: {
-      long double parsed = 0;
-      if (csv::internals::data_type(value, &parsed) <= csv::DataType::CSV_STRING) {
-        return false;
-      }
-      values.emplace_back(std::optional<long double>{parsed});
-      return true;
-    }
-
-    case ColumnType::TIMESTAMP:
-    case ColumnType::TEXT:
-      values.emplace_back(std::optional<std::string_view>{value});
-      return true;
-  }
-
-  return false;
+  values.emplace_back(value);
 }
 
 void RowLoader::write_values(std::vector<PgValue>& values) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -30,6 +31,9 @@ struct RunOptions {
   // false (default): disable SQLite journaling during load for speed.
   // true: keep default SQLite journal mode (safer for crash recovery).
   bool sqlite_journal_enabled = false;
+  // PostgreSQL COPY producer chunk size. Larger values can reduce queue churn
+  // but increase peak memory; 10k was a good default on large local loads.
+  std::size_t postgres_copy_batch_rows = 10000;
 };
 
 struct RunStats {
