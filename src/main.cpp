@@ -17,6 +17,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -375,6 +376,12 @@ int main(int argc, char** argv) {
       .help("Rows per PostgreSQL COPY producer batch")
       .default_value(10000)
       .scan<'i', int>();
+  postgres_cmd.add_argument("--parallel-copy")
+      .help("Number of PostgreSQL COPY workers; values above 1 do not preserve insertion order")
+      .default_value(1)
+      .implicit_value(0)
+      .nargs(argparse::nargs_pattern::optional)
+      .scan<'i', int>();
 
   program.add_subparser(infer_cmd);
   program.add_subparser(postgres_cmd);
@@ -639,6 +646,24 @@ int main(int argc, char** argv) {
       return 1;
     }
     options.postgres_copy_batch_rows = static_cast<std::size_t>(copy_batch_rows);
+    auto parallel_copy = postgres_cmd.get<int>("--parallel-copy");
+    if (parallel_copy == 0 && postgres_cmd.is_used("--parallel-copy")) {
+      const auto hardware_threads = std::thread::hardware_concurrency();
+      const auto heuristic = hardware_threads > 1 ? hardware_threads / 2 : 1;
+      parallel_copy = static_cast<int>(std::min<unsigned int>(heuristic, 8));
+    }
+    if (parallel_copy <= 0) {
+      logger.Error("postgres: --parallel-copy must be greater than 0");
+      return 1;
+    }
+    options.postgres_parallel_copy_workers = static_cast<std::size_t>(parallel_copy);
+    const auto hardware_threads = std::thread::hardware_concurrency();
+    if (hardware_threads > 0 &&
+        options.postgres_parallel_copy_workers > static_cast<std::size_t>(hardware_threads)) {
+      options.postgres_parallel_copy_workers = static_cast<std::size_t>(hardware_threads);
+      logger.Info("postgres: capped --parallel-copy to hardware concurrency (" +
+                  std::to_string(hardware_threads) + ")");
+    }
 
     csvzall::pipeline::RunStats ps;
     const auto rc = csvzall::pipeline::RunPostgresExport(

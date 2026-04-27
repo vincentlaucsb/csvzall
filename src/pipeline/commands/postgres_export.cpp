@@ -86,6 +86,11 @@ std::size_t ObservedRows(const std::vector<postgres::SchemaInference::ColumnStat
 constexpr std::size_t kPostgresCopyQueueDepth = 3;
 constexpr std::size_t kPostgresInferChunkSize = 50000;
 
+struct CopyResult {
+  std::uint64_t rows_loaded = 0;
+  std::uint64_t rows_skipped_type_mismatch = 0;
+};
+
 struct InferredPostgresSchema {
   std::vector<postgres::InferredColumn> columns;
   std::size_t observed_rows = 0;
@@ -247,6 +252,171 @@ void CopyRowsWithPipeline(csv::CSVReader& reader,
   }
 }
 
+CopyResult CopyRowsWithParallelWorkers(csv::CSVReader& reader,
+                                       const postgres::ConnectionConfig& pg_config,
+                                       const std::string& table_name,
+                                       const std::vector<postgres::InferredColumn>& columns,
+                                       const LoggerCallbacks& logger,
+                                       const std::uint64_t total_rows,
+                                       const std::size_t chunk_size,
+                                       const std::size_t worker_count) {
+  if (chunk_size == 0) {
+    throw std::invalid_argument("postgres: COPY batch size must be greater than 0");
+  }
+  if (worker_count == 0) {
+    throw std::invalid_argument("postgres: parallel COPY worker count must be greater than 0");
+  }
+
+  struct QueueState {
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::deque<std::vector<csv::CSVRow>> queue;
+    bool done = false;
+    bool cancel = false;
+    std::exception_ptr error;
+    std::uint64_t rows_seen = 0;
+    std::uint64_t rows_loaded = 0;
+    std::uint64_t rows_skipped_type_mismatch = 0;
+    std::size_t ready_workers = 0;
+    bool commit_decided = false;
+    bool commit_ok = false;
+  };
+
+  QueueState state;
+  std::mutex progress_mutex;
+  const auto max_queue_depth = kPostgresCopyQueueDepth * worker_count;
+
+  if (logger.progress_start) {
+    logger.progress_start("postgres COPY", total_rows);
+  }
+
+  auto set_error = [&](std::exception_ptr error) {
+    std::lock_guard<std::mutex> lock(state.mutex);
+    if (!state.error) {
+      state.error = error;
+    }
+    state.cancel = true;
+  };
+
+  auto worker = [&]() {
+    try {
+      postgres::PostgresConnection conn(pg_config);
+      pqxx::work tx(conn.connection());
+      tx.exec("SET LOCAL synchronous_commit = off");
+      postgres::RowLoader loader(conn.connection(), tx, table_name, columns);
+
+      while (true) {
+        std::vector<csv::CSVRow> rows;
+        {
+          std::unique_lock<std::mutex> lock(state.mutex);
+          state.cv.wait(lock, [&]() {
+            return state.cancel || state.done || !state.queue.empty();
+          });
+
+          if (state.cancel) {
+            break;
+          }
+          if (state.queue.empty()) {
+            if (state.done) {
+              break;
+            }
+            continue;
+          }
+
+          rows = std::move(state.queue.front());
+          state.queue.pop_front();
+        }
+        state.cv.notify_all();
+
+        const auto row_count = static_cast<std::uint64_t>(rows.size());
+        loader.add_rows(rows);
+
+        if (logger.progress_update) {
+          std::uint64_t rows_seen = 0;
+          {
+            std::lock_guard<std::mutex> lock(state.mutex);
+            state.rows_seen += row_count;
+            rows_seen = state.rows_seen;
+          }
+          std::lock_guard<std::mutex> lock(progress_mutex);
+          logger.progress_update(rows_seen);
+        }
+      }
+
+      loader.flush();
+
+      {
+        std::unique_lock<std::mutex> lock(state.mutex);
+        state.rows_loaded += loader.rows_loaded();
+        state.rows_skipped_type_mismatch += loader.rows_skipped_type_mismatch();
+        state.ready_workers++;
+        state.cv.notify_all();
+        state.cv.wait(lock, [&]() {
+          return state.commit_decided;
+        });
+        if (!state.commit_ok) {
+          return;
+        }
+      }
+
+      tx.commit();
+    } catch (...) {
+      set_error(std::current_exception());
+      state.cv.notify_all();
+    }
+  };
+
+  std::vector<std::thread> workers;
+  workers.reserve(worker_count);
+  for (std::size_t i = 0; i < worker_count; ++i) {
+    workers.emplace_back(worker);
+  }
+
+  try {
+    std::vector<csv::CSVRow> rows;
+    while (reader.read_chunk(rows, chunk_size)) {
+      std::unique_lock<std::mutex> lock(state.mutex);
+      state.cv.wait(lock, [&]() {
+        return state.cancel || state.queue.size() < max_queue_depth;
+      });
+      if (state.cancel) {
+        break;
+      }
+      state.queue.push_back(std::move(rows));
+      lock.unlock();
+      state.cv.notify_all();
+    }
+  } catch (...) {
+    set_error(std::current_exception());
+  }
+
+  {
+    std::unique_lock<std::mutex> lock(state.mutex);
+    state.done = true;
+    state.cv.notify_all();
+    state.cv.wait(lock, [&]() {
+      return state.error || state.ready_workers == worker_count;
+    });
+    state.commit_ok = !state.error;
+    state.commit_decided = true;
+  }
+  state.cv.notify_all();
+
+  for (auto& worker_thread : workers) {
+    worker_thread.join();
+  }
+
+  if (logger.progress_finish) {
+    logger.progress_finish();
+  }
+
+  if (state.error) {
+    std::rethrow_exception(state.error);
+  }
+
+  return {state.rows_loaded, state.rows_skipped_type_mismatch};
+}
+
 }  // namespace
 
 class PostgresInferCommand : public CsvInputCommand {
@@ -358,6 +528,39 @@ class PostgresExportCommand : public CsvInputCommand {
 
       if (!table_exists) {
         try {
+          if (options().postgres_parallel_copy_workers > 1) {
+            {
+              pqxx::work ddl_tx(pq_conn);
+              if (drop_existing_table) {
+                ddl_tx.exec("DROP TABLE IF EXISTS " + postgres::QuoteIdentifier(table_name_));
+              }
+              CreateTable(ddl_tx, table_name_, inferred_columns);
+              ddl_tx.commit();
+            }
+            if (logger().verbose) {
+              logger().verbose("Created table: " + table_name_);
+            }
+
+            const auto copy_result = CopyRowsWithParallelWorkers(
+                reader(), pg_config_, table_name_, inferred_columns, logger(), observed_rows,
+                options().postgres_copy_batch_rows, options().postgres_parallel_copy_workers);
+
+            stats().rows_processed = copy_result.rows_loaded;
+            if (copy_result.rows_skipped_type_mismatch > 0) {
+              if (logger().error) {
+                logger().error("postgres: skipped " +
+                              std::to_string(copy_result.rows_skipped_type_mismatch) +
+                              " rows (type_mismatch=" +
+                              std::to_string(copy_result.rows_skipped_type_mismatch) + ")");
+              }
+            }
+            if (logger().verbose) {
+              logger().verbose("postgres: inserted " +
+                               std::to_string(copy_result.rows_loaded) + " rows");
+            }
+            return 0;
+          }
+
           pqxx::work tx(pq_conn);
           tx.exec("SET LOCAL synchronous_commit = off");
           if (drop_existing_table) {
@@ -389,6 +592,14 @@ class PostgresExportCommand : public CsvInputCommand {
         } catch (const std::exception& ex) {
           if (logger().progress_finish) {
             logger().progress_finish();
+          }
+          if (options().postgres_parallel_copy_workers > 1) {
+            try {
+              pqxx::work cleanup_tx(pq_conn);
+              cleanup_tx.exec("DROP TABLE IF EXISTS " + postgres::QuoteIdentifier(table_name_));
+              cleanup_tx.commit();
+            } catch (...) {
+            }
           }
           if (logger().error) {
             logger().error(std::string("PostgreSQL export transaction failed: ") + ex.what());
@@ -440,6 +651,27 @@ class PostgresExportCommand : public CsvInputCommand {
     columns.reserve(headers().size());
     for (const auto& header : headers()) {
       columns.push_back({header, postgres::ColumnType::TEXT, true});
+    }
+
+    if (options().postgres_parallel_copy_workers > 1) {
+      const auto copy_result = CopyRowsWithParallelWorkers(
+          reader(), pg_config_, table_name_, columns, logger(), 0,
+          options().postgres_copy_batch_rows, options().postgres_parallel_copy_workers);
+      stats().rows_processed = copy_result.rows_loaded;
+
+      if (copy_result.rows_skipped_type_mismatch > 0) {
+        if (logger().error) {
+          logger().error("postgres: skipped " +
+                        std::to_string(copy_result.rows_skipped_type_mismatch) +
+                        " rows (type_mismatch=" +
+                        std::to_string(copy_result.rows_skipped_type_mismatch) + ")");
+        }
+      }
+      if (logger().verbose) {
+        logger().verbose("postgres: inserted " +
+                         std::to_string(copy_result.rows_loaded) + " rows");
+      }
+      return 0;
     }
 
     pqxx::work tx(conn);

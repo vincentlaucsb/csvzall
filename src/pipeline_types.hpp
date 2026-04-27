@@ -34,6 +34,9 @@ struct RunOptions {
   // PostgreSQL COPY producer chunk size. Larger values can reduce queue churn
   // but increase peak memory; 10k was a good default on large local loads.
   std::size_t postgres_copy_batch_rows = 10000;
+  // Number of PostgreSQL COPY workers. Values above 1 do not preserve physical
+  // insertion order and use one PostgreSQL connection per worker.
+  std::size_t postgres_parallel_copy_workers = 1;
 };
 
 struct RunStats {

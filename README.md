@@ -99,6 +99,13 @@ csvzall postgres vehicles.csv --dbname postgres --user postgres --table used_car
 
 `--copy-batch-rows <N>` tunes the producer batch size for the COPY pipeline. The default is `10000`, which keeps memory bounded well on large files; larger values may increase peak memory without improving throughput.
 
+`--parallel-copy [N]` runs multiple PostgreSQL COPY workers, each with its own
+connection. This can improve throughput when a single COPY stream is the
+bottleneck, but physical insertion order is not preserved. The default is `1`
+when the flag is omitted. Passing `--parallel-copy` without a value uses
+`min(hardware_concurrency / 2, 8)`, and explicit values are capped at hardware
+concurrency.
+
 ## Pipelines are shell scripts
 
 There is no built-in pipeline format. Save complex chains as PowerShell, Bash, or batch scripts — they're already shareable, version-controllable, and composable with the rest of your toolbox.
