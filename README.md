@@ -97,6 +97,24 @@ Export CSV rows into PostgreSQL with full-file schema inference followed by `COP
 csvzall postgres vehicles.csv --dbname postgres --user postgres --table used_cars
 ```
 
+Credential storage is optional. Save a PostgreSQL password to the OS keychain:
+
+```sh
+csvzall postgres --save --host localhost --port 5432 --dbname postgres --user postgres
+```
+
+Normal `postgres` runs try the keychain first, then prompt with masked input if
+no credential is found. `--password` remains available for automation but prints
+a warning because command-line passwords are visible in shell history and process
+lists. `--password-env VARNAME` reads the password from an environment variable.
+
+Remove stored PostgreSQL credentials:
+
+```sh
+csvzall forget postgres
+csvzall forget postgres --host localhost --port 5432 --dbname postgres --user postgres
+```
+
 `--copy-batch-rows <N>` tunes the producer batch size for the COPY pipeline. The default is `10000`, which keeps memory bounded well on large files; larger values may increase peak memory without improving throughput.
 
 `--parallel-copy [N]` runs multiple PostgreSQL COPY workers, each with its own
@@ -112,7 +130,7 @@ There is no built-in pipeline format. Save complex chains as PowerShell, Bash, o
 
 ## Building
 
-Requires CMake 3.25+ and a C++26 compiler. A local [csv-parser](https://github.com/vincentlaucsb/csv-parser) checkout is preferred for development, but CMake can fetch it when no local checkout is configured.
+Requires CMake 3.25+ and a C++23 compiler. A local [csv-parser](https://github.com/vincentlaucsb/csv-parser) checkout is preferred for development, but CMake can fetch it when no local checkout is configured.
 
 ```sh
 # csv-parser can live at ../csv-parser, external/csv-parser, or a custom path.
@@ -136,6 +154,7 @@ The binary is at `build/Release/csvzall.exe` (Windows) or `build/csvzall` (Linux
 | [csv-parser](https://github.com/vincentlaucsb/csv-parser) | [Vincent La](https://github.com/vincentlaucsb) | CSV parsing, writing, and scalar type classification | Local checkout preferred; FetchContent fallback |
 | [argparse](https://github.com/p-ranav/argparse) v3.1 | [Pranav](https://github.com/p-ranav) | CLI argument parsing | FetchContent |
 | [indicators](https://github.com/p-ranav/indicators) v2.3 | [Pranav](https://github.com/p-ranav) | Terminal progress bars for long-running imports | FetchContent |
+| [keychain](https://github.com/hrantzsch/keychain) v1.3.1 | [hrantzsch](https://github.com/hrantzsch) | Optional OS credential storage for PostgreSQL passwords | System package if available; FetchContent fallback; Linux requires libsecret |
 | [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite | FetchContent, with a local CMake patch |
 | [libpqxx](https://github.com/jtv/libpqxx) v7.10.1 | [Jeroen T. Vermeulen](https://pqxx.org/libpqxx/) | PostgreSQL C++ client API used by the `postgres` command | System package if available; FetchContent fallback |
 | [PostgreSQL libpq](https://www.postgresql.org/docs/current/libpq.html) | [PostgreSQL Global Development Group](https://www.postgresql.org/community/) | PostgreSQL client C library required by libpqxx | System PostgreSQL installation |

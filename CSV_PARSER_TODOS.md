@@ -55,6 +55,11 @@ for csv-parser follow-ups, not a committed roadmap.
   or normalize malformed domain strings. Callers can preprocess data and feed the
   cleaned token back into `infer_scalar`, or install custom recognizers for their
   own permissive grammars.
+- Fix signed integer minimum boundary classification in the future
+  `infer_scalar` work. csvzall found that `data_type("-2147483648")` classifies
+  as `CSV_INT64` even though the final signed value fits `int32_t`. Add focused
+  signed-min tests there rather than baking the edge case into csvzall's schema
+  tests.
 - A future JSON ingestion path in csvzall would benefit from this: it can pass
   scalar text as `std::string_view` without constructing `CSVField`, while still
   sharing csv-parser's numeric/null classification rules.

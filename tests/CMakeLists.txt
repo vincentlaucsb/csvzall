@@ -17,6 +17,8 @@ add_executable(csvzall_tests
   test_postgres_schema.cpp
   test_summarize.cpp
   test_timeseries.cpp
+  ../src/credentials.cpp
+  ../src/util.cpp
   ../src/transform_pipeline.cpp
   ../src/pipeline/common/column_lookup.cpp
   ../src/pipeline/common/row_utils.cpp
@@ -51,6 +53,9 @@ target_link_libraries(csvzall_tests
 if(CSVZALL_HAVE_POSTGRESQL)
   target_link_libraries(csvzall_tests PRIVATE ${CSVZALL_LIBPQXX_TARGET})
 endif()
+if(CSVZALL_HAVE_KEYCHAIN)
+  target_link_libraries(csvzall_tests PRIVATE ${CSVZALL_KEYCHAIN_TARGET})
+endif()
 
 csvzall_copy_runtime_dependencies(csvzall_tests)
 
@@ -64,6 +69,9 @@ set_property(TARGET csvzall_tests PROPERTY CXX_EXTENSIONS OFF)
 
 if(CSVZALL_HAVE_POSTGRESQL)
   target_compile_definitions(csvzall_tests PRIVATE CSVZALL_HAVE_POSTGRESQL=1)
+endif()
+if(CSVZALL_HAVE_KEYCHAIN)
+  target_compile_definitions(csvzall_tests PRIVATE CSVZALL_HAVE_KEYCHAIN=1)
 endif()
 
 if(MSVC)

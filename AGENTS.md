@@ -29,7 +29,7 @@ This file is the canonical AI reference for this repository.
 
 ## Design rules
 
-- Target C++26 and prefer modern language features.
+- Target C++23 and prefer modern language features.
 - Use `std::string_view` at API boundaries where lifetimes are safe.
 - Never store `std::string_view` in persistent data structures; store `std::string` instead.
 - Keep stdout for data output and stderr for diagnostics.
@@ -40,6 +40,13 @@ This file is the canonical AI reference for this repository.
 
 - When adding, removing, or materially changing a third-party dependency, update the README dependency table in the same change.
 - Include the dependency name, author or maintainer with a link, role in csvzall, and how it is sourced (local checkout, FetchContent, system package, test-only, optional, etc.).
+
+## Local CMake workflow
+
+- Prefer the local, ignored `CMakeUserPresets.json` when it exists; it is the workspace-specific record of the preferred generator and build directory.
+- Do not reconfigure an existing CMake build directory with a different generator. If the generator needs to change, create a new build directory instead.
+- Before manually running `cmake -S ... -B ...`, inspect the target build directory's existing `CMakeCache.txt` or use a fresh build directory to avoid generator mismatches.
+- On Windows with MSVC + Ninja, run configure/build from a Visual Studio developer environment, preferably through the Visual Studio-bundled CMake. Bare sandboxed shells can hang during CMake's compiler/linker probe.
 
 ## csv-parser feedback loop
 

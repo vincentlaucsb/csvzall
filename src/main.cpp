@@ -1,8 +1,10 @@
 #include <argparse/argparse.hpp>
 #include <indicators/progress_bar.hpp>
 #include <indicators/progress_spinner.hpp>
+#include "credentials.hpp"
 #include "head.hpp"
 #include "transform_pipeline.hpp"
+#include "util.hpp"
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
 #include "pipeline/postgres/postgres_connection.hpp"
@@ -11,6 +13,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -125,6 +128,106 @@ struct ThroughputStats {
   std::uint64_t bytes_processed = 0;
   std::chrono::steady_clock::duration elapsed{};
 };
+
+csvzall::CredentialTarget BuildCredentialTarget(
+    const std::string& host,
+    const int port,
+    const std::string& database,
+    const std::string& user) {
+  return {host, port, database, user};
+}
+
+bool AskYesNo(const std::string& question, const bool default_yes = false) {
+  std::cerr << question << (default_yes ? " [Y/n] " : " [y/N] ");
+  std::string answer;
+  std::getline(std::cin, answer);
+  if (answer.empty()) {
+    return default_yes;
+  }
+  return answer == "y" || answer == "Y" || answer == "yes" || answer == "YES";
+}
+
+bool ValidatePasswordSources(const argparse::ArgumentParser& cmd, Logger& logger) {
+  if (cmd.is_used("--password") && cmd.is_used("--password-env")) {
+    logger.Error("postgres: --password and --password-env are mutually exclusive. Pick one.");
+    return false;
+  }
+  if (cmd.is_used("--password")) {
+    logger.Error("⚠️  WARNING: Passing password via --password is insecure "
+                 "(visible in shell history and process list). Use --save instead.");
+  }
+  return true;
+}
+
+std::optional<std::string> ReadEnvironmentVariable(const std::string& name) {
+#ifdef _WIN32
+  char* value = nullptr;
+  std::size_t length = 0;
+  if (_dupenv_s(&value, &length, name.c_str()) != 0 || value == nullptr) {
+    return std::nullopt;
+  }
+  std::string result(value, length > 0 ? length - 1 : 0);
+  free(value);
+  return result;
+#else
+  const char* value = std::getenv(name.c_str());
+  if (!value) {
+    return std::nullopt;
+  }
+  return std::string(value);
+#endif
+}
+
+#ifdef CSVZALL_HAVE_POSTGRESQL
+bool ApplyPasswordSources(argparse::ArgumentParser& cmd,
+                          Logger& logger,
+                          csvzall::pipeline::postgres::ConnectionConfig& pg_config,
+                          const csvzall::CredentialTarget& credential_target,
+                          const bool allow_prompt) {
+  if (cmd.is_used("--password")) {
+    pg_config.password = cmd.get<std::string>("--password");
+    return true;
+  }
+
+  const auto password_env = cmd.get<std::string>("--password-env");
+  if (!password_env.empty()) {
+    auto value = ReadEnvironmentVariable(password_env);
+    if (!value) {
+      logger.Error("postgres: environment variable '" + password_env + "' is not set");
+      return false;
+    }
+    pg_config.password = *value;
+    return true;
+  }
+
+  csvzall::CredentialManager credentials;
+  std::string credential_error;
+  if (auto stored = credentials.get_password(credential_target, &credential_error)) {
+    pg_config.password = *stored;
+    return true;
+  }
+  if (!credential_error.empty() && credentials.available()) {
+    logger.Info("postgres: could not read stored credentials: " + credential_error);
+  }
+
+  if (!allow_prompt) {
+    return true;
+  }
+
+  if (!csvzall::util::stdin_is_terminal()) {
+    logger.Error("postgres: no password source found and stdin is not interactive");
+    return false;
+  }
+
+  try {
+    pg_config.password = csvzall::util::read_password("PostgreSQL password: ");
+  } catch (const std::exception& ex) {
+    logger.Error(std::string("postgres: ") + ex.what());
+    return false;
+  }
+  return true;
+}
+#endif
 
 std::istream* ResolveInput(const std::string& input_path, std::unique_ptr<std::ifstream>& file_holder,
                            Logger& logger) {
@@ -337,6 +440,26 @@ int main(int argc, char** argv) {
 
   program.add_subparser(sql_cmd);
 
+  argparse::ArgumentParser forget_cmd("forget");
+  forget_cmd.add_description("Forget stored csvzall credentials");
+  forget_cmd.add_argument("connection")
+      .help("Credential group to forget (currently: postgres)");
+  forget_cmd.add_argument("--host")
+      .help("PostgreSQL server host")
+      .default_value(std::string{"localhost"});
+  forget_cmd.add_argument("--port")
+      .help("PostgreSQL server port")
+      .default_value(5432)
+      .scan<'i', int>();
+  forget_cmd.add_argument("--dbname")
+      .help("PostgreSQL database name for a specific credential")
+      .default_value(std::string{""});
+  forget_cmd.add_argument("--user")
+      .help("PostgreSQL user name for a specific credential")
+      .default_value(std::string{""});
+
+  program.add_subparser(forget_cmd);
+
 #ifdef CSVZALL_HAVE_POSTGRESQL
   argparse::ArgumentParser infer_cmd("infer");
   infer_cmd.add_description("Infer a PostgreSQL schema without creating a table or loading rows");
@@ -352,7 +475,7 @@ int main(int argc, char** argv) {
   AddExactArgument(postgres_cmd);
   postgres_cmd.add_argument("--table")
       .help("PostgreSQL table name to create or append to")
-      .required();
+      .default_value(std::string{""});
   postgres_cmd.add_argument("--dbname")
       .help("PostgreSQL database name")
       .required();
@@ -369,6 +492,13 @@ int main(int argc, char** argv) {
   postgres_cmd.add_argument("--password")
       .help("PostgreSQL password (leave empty for prompt or .pgpass)")
       .default_value(std::string{""});
+  postgres_cmd.add_argument("--password-env")
+      .help("Read PostgreSQL password from an environment variable")
+      .default_value(std::string{""});
+  postgres_cmd.add_argument("--save")
+      .help("Prompt for password, verify connection, and save credentials to the OS keychain")
+      .default_value(false)
+      .implicit_value(true);
   postgres_cmd.add_argument("--if-exists")
       .help("Action if table exists: error|drop|append")
       .default_value(std::string{"error"});
@@ -397,7 +527,8 @@ int main(int argc, char** argv) {
 
   if (!program.is_subcommand_used("derive") && !program.is_subcommand_used("filter") &&
       !program.is_subcommand_used("head") && !program.is_subcommand_used("summarize") &&
-      !program.is_subcommand_used("timeseries") && !program.is_subcommand_used("sql")
+      !program.is_subcommand_used("timeseries") && !program.is_subcommand_used("sql") &&
+      !program.is_subcommand_used("forget")
 #ifdef CSVZALL_HAVE_POSTGRESQL
       && !program.is_subcommand_used("infer")
       && !program.is_subcommand_used("postgres")
@@ -410,6 +541,55 @@ int main(int argc, char** argv) {
   std::unique_ptr<std::ifstream> input_file;
   ThroughputStats stats;
   const auto start = std::chrono::steady_clock::now();
+
+  if (program.is_subcommand_used("forget")) {
+    Logger logger(false, false);
+    const auto connection = forget_cmd.get<std::string>("connection");
+    if (connection != "postgres") {
+      logger.Error("forget: unknown credential group '" + connection + "' (expected: postgres)");
+      return 1;
+    }
+
+    csvzall::CredentialManager credentials;
+    if (!credentials.available()) {
+      logger.Error("forget postgres: " + credentials.unavailable_reason());
+      return 1;
+    }
+
+    std::string error;
+    const bool specific =
+        forget_cmd.is_used("--host") || forget_cmd.is_used("--port") ||
+        forget_cmd.is_used("--dbname") || forget_cmd.is_used("--user");
+    if (specific) {
+      const auto dbname = forget_cmd.get<std::string>("--dbname");
+      const auto user = forget_cmd.get<std::string>("--user");
+      if (dbname.empty() || user.empty()) {
+        logger.Error("forget postgres: --dbname and --user are required when forgetting one credential");
+        return 1;
+      }
+      const auto target = BuildCredentialTarget(
+          forget_cmd.get<std::string>("--host"),
+          forget_cmd.get<int>("--port"),
+          dbname,
+          user);
+      if (!credentials.forget_password(target, &error)) {
+        logger.Error("forget postgres: " + error);
+        return 1;
+      }
+      logger.Info("forget postgres: removed stored credentials for " +
+                  credentials.target_name(target));
+      return 0;
+    }
+
+    const auto removed = credentials.forget_all_postgres(&error);
+    if (!error.empty()) {
+      logger.Error("forget postgres: " + error);
+      return 1;
+    }
+    logger.Info("forget postgres: removed " + std::to_string(removed) +
+                " stored credential(s)");
+    return 0;
+  }
 
   if (program.is_subcommand_used("derive")) {
     Logger logger(derive_cmd.get<bool>("--verbose"), derive_cmd.get<bool>("--quiet"));
@@ -624,10 +804,7 @@ int main(int argc, char** argv) {
 
   if (program.is_subcommand_used("postgres")) {
     Logger logger(postgres_cmd.get<bool>("--verbose"), postgres_cmd.get<bool>("--quiet"));
-    const std::string input_name = postgres_cmd.get<std::string>("input");
-    auto* input = ResolveInput(input_name, input_file, logger);
-    if (!input) {
-      logger.Error("Unable to open input file: " + input_name);
+    if (!ValidatePasswordSources(postgres_cmd, logger)) {
       return 1;
     }
 
@@ -637,7 +814,74 @@ int main(int argc, char** argv) {
     pg_config.port = postgres_cmd.get<int>("--port");
     pg_config.database = postgres_cmd.get<std::string>("--dbname");
     pg_config.user = postgres_cmd.get<std::string>("--user");
-    pg_config.password = postgres_cmd.get<std::string>("--password");
+
+    const auto credential_target = BuildCredentialTarget(
+        pg_config.host, pg_config.port, pg_config.database, pg_config.user);
+
+    if (postgres_cmd.get<bool>("--save")) {
+      if (postgres_cmd.is_used("--password") || postgres_cmd.is_used("--password-env")) {
+        logger.Error("postgres --save: do not pass --password or --password-env; "
+                     "csvzall will prompt securely");
+        return 1;
+      }
+
+      csvzall::CredentialManager credentials;
+      if (!credentials.available()) {
+        logger.Error("postgres --save: " + credentials.unavailable_reason());
+        return 1;
+      }
+
+      if (!csvzall::util::stdin_is_terminal()) {
+        logger.Error("postgres --save: stdin is not interactive; cannot prompt for password");
+        return 1;
+      }
+
+      try {
+        pg_config.password = csvzall::util::read_password("PostgreSQL password: ");
+      } catch (const std::exception& ex) {
+        logger.Error(std::string("postgres --save: ") + ex.what());
+        return 1;
+      }
+
+      bool connected = false;
+      try {
+        csvzall::pipeline::postgres::PostgresConnection test_conn(pg_config);
+        connected = true;
+      } catch (const std::exception& ex) {
+        logger.Error(std::string("postgres --save: connection failed: ") + ex.what());
+      }
+
+      if (!connected &&
+          !AskYesNo("Save these credentials anyway?", false)) {
+        return 1;
+      }
+
+      std::string error;
+      if (!credentials.save_password(credential_target, pg_config.password, &error)) {
+        logger.Error("postgres --save: " + error);
+        return 1;
+      }
+
+      logger.Info("postgres --save: saved credentials for " +
+                  credentials.target_name(credential_target));
+      return 0;
+    }
+
+    const std::string input_name = postgres_cmd.get<std::string>("input");
+    auto* input = ResolveInput(input_name, input_file, logger);
+    if (!input) {
+      logger.Error("Unable to open input file: " + input_name);
+      return 1;
+    }
+
+    if (postgres_cmd.get<std::string>("--table").empty()) {
+      logger.Error("postgres: --table is required unless --save is used");
+      return 1;
+    }
+
+    if (!ApplyPasswordSources(postgres_cmd, logger, pg_config, credential_target, true)) {
+      return 1;
+    }
 
     auto options = BuildTransformOptions(postgres_cmd, input, input_name);
     const auto copy_batch_rows = postgres_cmd.get<int>("--copy-batch-rows");

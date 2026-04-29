@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(csvzall VERSION 0.1.0 LANGUAGES CXX)
 
-set(CSVZALL_CXX_STANDARD 26 CACHE STRING "C++ standard used by csvzall and in-tree dependencies")
+set(CSVZALL_CXX_STANDARD 23 CACHE STRING "C++ standard used by csvzall and in-tree dependencies")
 
 set(CMAKE_CXX_STANDARD ${CSVZALL_CXX_STANDARD})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,6 +23,8 @@ option(CSVZALL_FETCH_LIBPQXX "Fetch libpqxx from GitHub when not found on system
 option(CSVZALL_REQUIRE_POSTGRESQL "Fail configure if PostgreSQL support cannot be enabled" OFF)
 option(CSVZALL_FETCH_CSV_PARSER "Fetch csv-parser when no explicit or preferred local checkout is selected" ON)
 option(CSVZALL_PREFER_SIBLING_CSV_PARSER "Prefer ../csv-parser over other csv-parser sources when it exists" ON)
+option(CSVZALL_ENABLE_KEYCHAIN "Enable OS keychain credential storage when available" ON)
+option(CSVZALL_FETCH_KEYCHAIN "Fetch hrantzsch/keychain when not found on system" ON)
 
 # Share FetchContent downloads across Visual Studio/Ninja build directories.
 # Without this, x64-Debug, x64-Release, and scratch configure dirs each create
@@ -152,6 +154,57 @@ FetchContent_MakeAvailable(SQLiteCpp)
 
 find_package(Threads REQUIRED)
 
+# Optional OS credential storage. This is deliberately soft: if the library or
+# its platform requirements are unavailable, csvzall still builds and falls back
+# to prompting / explicit password sources.
+set(CSVZALL_HAVE_KEYCHAIN OFF)
+set(CSVZALL_KEYCHAIN_TARGET "")
+
+if(CSVZALL_ENABLE_KEYCHAIN)
+  set(_csvzall_keychain_platform_ok ON)
+  if(UNIX AND NOT APPLE)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+      pkg_check_modules(CSVZALL_LIBSECRET QUIET libsecret-1)
+    endif()
+    if(NOT CSVZALL_LIBSECRET_FOUND)
+      set(_csvzall_keychain_platform_ok OFF)
+      message(STATUS "libsecret-1 not found; keychain credential storage disabled")
+    endif()
+  endif()
+
+  if(_csvzall_keychain_platform_ok)
+    find_package(keychain QUIET)
+
+    if(NOT keychain_FOUND AND CSVZALL_FETCH_KEYCHAIN)
+      FetchContent_Declare(
+        keychain
+        GIT_REPOSITORY https://github.com/hrantzsch/keychain.git
+        GIT_TAG v1.3.1
+        GIT_SHALLOW TRUE
+        UPDATE_DISCONNECTED TRUE
+      )
+      set(BUILD_TESTS OFF CACHE BOOL "Disable keychain tests" FORCE)
+      FetchContent_MakeAvailable(keychain)
+    endif()
+
+    if(TARGET keychain)
+      set(CSVZALL_KEYCHAIN_TARGET keychain)
+    elseif(TARGET keychain::keychain)
+      set(CSVZALL_KEYCHAIN_TARGET keychain::keychain)
+    endif()
+
+    if(NOT CSVZALL_KEYCHAIN_TARGET STREQUAL "")
+      set(CSVZALL_HAVE_KEYCHAIN ON)
+      message(STATUS "Keychain credential storage enabled via target: ${CSVZALL_KEYCHAIN_TARGET}")
+    else()
+      message(STATUS "keychain target not found; credential storage disabled")
+    endif()
+  endif()
+else()
+  message(STATUS "Keychain credential storage disabled (CSVZALL_ENABLE_KEYCHAIN=OFF)")
+endif()
+
 set(CSVZALL_RUNTIME_DEPENDENCY_SCRIPT
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_runtime_dependencies.cmake")
 
@@ -254,6 +307,8 @@ endif()
 
 set(CSVZALL_APP_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/credentials.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/util.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/transform_pipeline.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/column_lookup.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/row_utils.cpp
@@ -287,6 +342,9 @@ function(csvzall_configure_app target_name)
   if(CSVZALL_HAVE_POSTGRESQL)
     list(APPEND LINK_LIBS ${CSVZALL_LIBPQXX_TARGET})
   endif()
+  if(CSVZALL_HAVE_KEYCHAIN)
+    list(APPEND LINK_LIBS ${CSVZALL_KEYCHAIN_TARGET})
+  endif()
 
   target_link_libraries(${target_name} PRIVATE ${LINK_LIBS})
   csvzall_copy_runtime_dependencies(${target_name})
@@ -297,6 +355,9 @@ function(csvzall_configure_app target_name)
 
   if(CSVZALL_HAVE_POSTGRESQL)
     target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_POSTGRESQL=1)
+  endif()
+  if(CSVZALL_HAVE_KEYCHAIN)
+    target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_KEYCHAIN=1)
   endif()
 
   if(MSVC)

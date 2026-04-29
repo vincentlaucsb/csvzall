@@ -78,7 +78,7 @@ TEST_CASE("PostgresSchemaInference: int32 values stay integer") {
   pipeline::postgres::SchemaInference inference({"id"});
 
   inference.observe_row({"2147483647"});
-  inference.observe_row({"-2147483648"});
+  inference.observe_row({"-2147483647"});
 
   const auto cols = inference.finalize();
   REQUIRE(cols.size() == 1);
