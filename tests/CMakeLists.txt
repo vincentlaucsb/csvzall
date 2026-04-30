@@ -21,6 +21,7 @@ add_executable(csvzall_tests
   ../src/util.cpp
   ../src/transform_pipeline.cpp
   ../src/pipeline/common/column_lookup.cpp
+  ../src/pipeline/common/gzip_stream.cpp
   ../src/pipeline/common/row_utils.cpp
   ../src/pipeline/sqlite/sqlite_db.cpp
   ../src/pipeline/sqlite/csv_loader.cpp
@@ -48,7 +49,8 @@ target_link_libraries(csvzall_tests
     ${CSVZALL_INDICATORS_TARGET}
     csv
     SQLiteCpp
-    Threads::Threads)
+    Threads::Threads
+    ${CSVZALL_ZLIB_TARGET})
 
 if(CSVZALL_HAVE_POSTGRESQL)
   target_link_libraries(csvzall_tests PRIVATE ${CSVZALL_LIBPQXX_TARGET})

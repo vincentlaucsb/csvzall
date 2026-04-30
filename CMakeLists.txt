@@ -25,6 +25,7 @@ option(CSVZALL_FETCH_CSV_PARSER "Fetch csv-parser when no explicit or preferred 
 option(CSVZALL_PREFER_SIBLING_CSV_PARSER "Prefer ../csv-parser over other csv-parser sources when it exists" ON)
 option(CSVZALL_ENABLE_KEYCHAIN "Enable OS keychain credential storage when available" ON)
 option(CSVZALL_FETCH_KEYCHAIN "Fetch hrantzsch/keychain when not found on system" ON)
+option(CSVZALL_FETCH_ZLIB "Fetch zlib when not found on system" ON)
 
 # Share FetchContent downloads across Visual Studio/Ninja build directories.
 # Without this, x64-Debug, x64-Release, and scratch configure dirs each create
@@ -154,6 +155,51 @@ FetchContent_MakeAvailable(SQLiteCpp)
 
 find_package(Threads REQUIRED)
 
+# gzip input support. Prefer a system zlib when present, but allow CMake to
+# fetch zlib for plain developer/CI machines.
+if(WIN32 AND NOT DEFINED ZLIB_ROOT)
+  set(_csvzall_zlib_roots
+    "C:/Program Files/PostgreSQL/18"
+    "C:/Program Files/PostgreSQL/17"
+    "C:/Program Files/PostgreSQL/16"
+    "C:/Program Files/PostgreSQL/15")
+
+  foreach(_candidate_root IN LISTS _csvzall_zlib_roots)
+    if(EXISTS "${_candidate_root}/include/zlib.h" AND EXISTS "${_candidate_root}/lib")
+      set(ZLIB_ROOT "${_candidate_root}" CACHE PATH "zlib installation root" FORCE)
+      message(STATUS "Using ZLIB_ROOT hint: ${ZLIB_ROOT}")
+      break()
+    endif()
+  endforeach()
+endif()
+
+find_package(ZLIB QUIET)
+if(NOT ZLIB_FOUND AND CSVZALL_FETCH_ZLIB)
+  message(STATUS "zlib not found on system; using FetchContent cache/fetch")
+  FetchContent_Declare(
+    zlib
+    GIT_REPOSITORY https://github.com/madler/zlib.git
+    GIT_TAG v1.3.1
+    GIT_SHALLOW TRUE
+    UPDATE_DISCONNECTED TRUE
+  )
+  set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "Disable zlib examples" FORCE)
+  FetchContent_MakeAvailable(zlib)
+endif()
+
+set(CSVZALL_ZLIB_TARGET "")
+if(TARGET ZLIB::ZLIB)
+  set(CSVZALL_ZLIB_TARGET ZLIB::ZLIB)
+elseif(TARGET zlibstatic)
+  set(CSVZALL_ZLIB_TARGET zlibstatic)
+elseif(TARGET zlib)
+  set(CSVZALL_ZLIB_TARGET zlib)
+endif()
+
+if(CSVZALL_ZLIB_TARGET STREQUAL "")
+  message(FATAL_ERROR "zlib is required for gzip CSV input support. Install zlib or enable CSVZALL_FETCH_ZLIB.")
+endif()
+
 # Optional OS credential storage. This is deliberately soft: if the library or
 # its platform requirements are unavailable, csvzall still builds and falls back
 # to prompting / explicit password sources.
@@ -244,6 +290,20 @@ if(CSVZALL_ENABLE_POSTGRESQL)
         break()
       endif()
     endforeach()
+  elseif(APPLE AND NOT DEFINED PostgreSQL_ROOT)
+    set(_csvzall_postgresql_roots
+      "/opt/homebrew/opt/libpq"
+      "/usr/local/opt/libpq"
+      "/opt/homebrew/opt/postgresql"
+      "/usr/local/opt/postgresql")
+
+    foreach(_candidate_root IN LISTS _csvzall_postgresql_roots)
+      if(EXISTS "${_candidate_root}/include/libpq-fe.h" AND EXISTS "${_candidate_root}/lib")
+        set(PostgreSQL_ROOT "${_candidate_root}" CACHE PATH "PostgreSQL installation root" FORCE)
+        message(STATUS "Using PostgreSQL_ROOT hint: ${PostgreSQL_ROOT}")
+        break()
+      endif()
+    endforeach()
   endif()
 
   find_package(PostgreSQL QUIET)
@@ -251,9 +311,9 @@ if(CSVZALL_ENABLE_POSTGRESQL)
     if(CSVZALL_REQUIRE_POSTGRESQL)
       message(FATAL_ERROR
         "PostgreSQL client libraries not found but CSVZALL_REQUIRE_POSTGRESQL=ON. "
-        "Set -DPostgreSQL_ROOT=<path> (e.g. C:/Program Files/PostgreSQL/18).")
+        "Set -DPostgreSQL_ROOT=<path> (e.g. C:/Program Files/PostgreSQL/18 or /opt/homebrew/opt/libpq).")
     else()
-      message(STATUS "PostgreSQL client libraries not found; postgres subcommand will not be built (set -DPostgreSQL_ROOT=<path>, e.g. C:/Program Files/PostgreSQL/18)")
+      message(STATUS "PostgreSQL client libraries not found; postgres subcommand will not be built (set -DPostgreSQL_ROOT=<path>, e.g. C:/Program Files/PostgreSQL/18 or /opt/homebrew/opt/libpq)")
     endif()
   else()
     find_package(libpqxx CONFIG QUIET)
@@ -299,6 +359,9 @@ else()
 endif()
 
 set(CSVZALL_RUNTIME_DEPENDENCY_DIRS "")
+if(WIN32 AND ZLIB_ROOT AND EXISTS "${ZLIB_ROOT}/bin")
+  list(APPEND CSVZALL_RUNTIME_DEPENDENCY_DIRS "${ZLIB_ROOT}/bin")
+endif()
 if(CSVZALL_HAVE_POSTGRESQL AND WIN32)
   if(PostgreSQL_ROOT AND EXISTS "${PostgreSQL_ROOT}/bin")
     list(APPEND CSVZALL_RUNTIME_DEPENDENCY_DIRS "${PostgreSQL_ROOT}/bin")
@@ -311,6 +374,7 @@ set(CSVZALL_APP_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/util.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/transform_pipeline.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/column_lookup.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/gzip_stream.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/row_utils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/sqlite/sqlite_db.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/sqlite/csv_loader.cpp
@@ -337,7 +401,8 @@ function(csvzall_configure_app target_name)
     ${CSVZALL_INDICATORS_TARGET}
     csv
     SQLiteCpp
-    Threads::Threads)
+    Threads::Threads
+    ${CSVZALL_ZLIB_TARGET})
 
   if(CSVZALL_HAVE_POSTGRESQL)
     list(APPEND LINK_LIBS ${CSVZALL_LIBPQXX_TARGET})

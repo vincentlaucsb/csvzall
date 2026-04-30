@@ -1,5 +1,7 @@
 #include "commands.hpp"
 
+#include "../common/gzip_stream.hpp"
+
 #include <sstream>
 
 namespace csvzall::pipeline::commands {
@@ -33,7 +35,19 @@ int CsvInputCommand::init_reader() {
   }
 
   auto format = make_format();
-  reader_ = std::make_unique<csv::CSVReader>(*parse_input, format);
+  try {
+    if (!options_.input_is_stdin && !options_.input_path.empty() && options_.input_path != "-") {
+      reader_ = std::make_unique<csv::CSVReader>(
+          common::OpenCsvReader(options_.input_path, format));
+    } else {
+      reader_ = std::make_unique<csv::CSVReader>(*parse_input, format);
+    }
+  } catch (const std::exception& ex) {
+    if (logger_.error) {
+      logger_.error(ex.what());
+    }
+    return 1;
+  }
   headers_ = reader_->get_col_names();
 
   if (headers_.empty()) {
@@ -58,7 +72,7 @@ int CsvInputCommand::reset_reader() {
     buffered_input_->clear();
     buffered_input_->seekg(0);
     parse_input = buffered_input_.get();
-  } else {
+  } else if (options_.input_path.empty() || options_.input_path == "-") {
     input_.clear();
     input_.seekg(0);
     if (!input_) {
@@ -70,7 +84,19 @@ int CsvInputCommand::reset_reader() {
   }
 
   auto format = make_format();
-  reader_ = std::make_unique<csv::CSVReader>(*parse_input, format);
+  try {
+    if (!options_.input_is_stdin && !options_.input_path.empty() && options_.input_path != "-") {
+      reader_ = std::make_unique<csv::CSVReader>(
+          common::OpenCsvReader(options_.input_path, format));
+    } else {
+      reader_ = std::make_unique<csv::CSVReader>(*parse_input, format);
+    }
+  } catch (const std::exception& ex) {
+    if (logger_.error) {
+      logger_.error(ex.what());
+    }
+    return 1;
+  }
   const auto reset_headers = reader_->get_col_names();
   if (reset_headers != headers_) {
     if (logger_.error) {

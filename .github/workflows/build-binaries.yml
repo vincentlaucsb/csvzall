@@ -31,7 +31,18 @@ jobs:
       - name: Install CMake
         uses: lukka/get-cmake@latest
 
+      - name: Install PostgreSQL client libraries (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install libpq
+          echo "PostgreSQL_ROOT=$(brew --prefix libpq)" >> "$GITHUB_ENV"
+
+      - name: Configure CMake (macOS)
+        if: runner.os == 'macOS'
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCSVZALL_CXX_STANDARD=23 -DCSVZALL_REQUIRE_POSTGRESQL=ON -DPostgreSQL_ROOT="$PostgreSQL_ROOT"
+
       - name: Configure CMake
+        if: runner.os != 'macOS'
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCSVZALL_CXX_STANDARD=23 -DCSVZALL_REQUIRE_POSTGRESQL=ON
 
       - name: Build

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "pipeline_types.hpp"
+#include "pipeline/common/gzip_stream.hpp"
 
 namespace csvzall::head {
 
@@ -87,7 +88,14 @@ int Run(std::size_t row_limit, std::istream& input, std::ostream& output,
       format.delimiter({ ',', '|', '\t', ';', '^' });
     }
     format.quote('"').header_row(0);
-    csv::CSVReader reader(*parse_input, format);
+    std::unique_ptr<csv::CSVReader> owned_reader;
+    if (!options.input_is_stdin && !options.input_path.empty() && options.input_path != "-") {
+      owned_reader = std::make_unique<csv::CSVReader>(
+          csvzall::pipeline::common::OpenCsvReader(options.input_path, format));
+    } else {
+      owned_reader = std::make_unique<csv::CSVReader>(*parse_input, format);
+    }
+    csv::CSVReader& reader = *owned_reader;
 
     const auto headers = reader.get_col_names();
     if (headers.empty()) {

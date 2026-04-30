@@ -1,5 +1,7 @@
 # csvzall
 
+<img src="assets/csvzall-logo.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
+
 A fast, single-binary CSV transformation CLI for Unix-style pipelines. Pipe CSVs through `filter`, `derive`, `summarize`, and `head` — each command reads stdin, writes stdout, logs to stderr.
 
 ## Quick example
@@ -97,6 +99,13 @@ Export CSV rows into PostgreSQL with full-file schema inference followed by `COP
 csvzall postgres vehicles.csv --dbname postgres --user postgres --table used_cars
 ```
 
+Files ending in `.gz` are read as gzip-compressed CSV automatically:
+
+```sh
+csvzall head vehicles.csv.gz
+csvzall postgres vehicles.csv.gz --dbname postgres --user postgres --table used_cars
+```
+
 Credential storage is optional. Save a PostgreSQL password to the OS keychain:
 
 ```sh
@@ -154,6 +163,7 @@ The binary is at `build/Release/csvzall.exe` (Windows) or `build/csvzall` (Linux
 | [csv-parser](https://github.com/vincentlaucsb/csv-parser) | [Vincent La](https://github.com/vincentlaucsb) | CSV parsing, writing, and scalar type classification | Local checkout preferred; FetchContent fallback |
 | [argparse](https://github.com/p-ranav/argparse) v3.1 | [Pranav](https://github.com/p-ranav) | CLI argument parsing | FetchContent |
 | [indicators](https://github.com/p-ranav/indicators) v2.3 | [Pranav](https://github.com/p-ranav) | Terminal progress bars for long-running imports | FetchContent |
+| [zlib](https://github.com/madler/zlib) v1.3.1 | [Mark Adler](https://github.com/madler) and contributors | gzip decompression for `.csv.gz` inputs | System package if available; FetchContent fallback |
 | [keychain](https://github.com/hrantzsch/keychain) v1.3.1 | [hrantzsch](https://github.com/hrantzsch) | Optional OS credential storage for PostgreSQL passwords | System package if available; FetchContent fallback; Linux requires libsecret |
 | [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite | FetchContent, with a local CMake patch |
 | [libpqxx](https://github.com/jtv/libpqxx) v7.10.1 | [Jeroen T. Vermeulen](https://pqxx.org/libpqxx/) | PostgreSQL C++ client API used by the `postgres` command | System package if available; FetchContent fallback |

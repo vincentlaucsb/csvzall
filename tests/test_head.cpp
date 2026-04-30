@@ -1,7 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cstdio>
+#include <filesystem>
 #include <sstream>
 #include <string>
 #include <vector>
+
+#include <zlib.h>
 
 #include "../src/head.hpp"
 #include "../src/pipeline_types.hpp"
@@ -50,6 +54,18 @@ std::size_t CountSeparatorColumns(const std::string& output) {
   return 0;
 }
 
+std::filesystem::path WriteGzipCsv(const std::string& csv_text) {
+  auto path = std::filesystem::temp_directory_path() /
+              std::filesystem::path("csvzall_head_test.csv.gz");
+
+  gzFile file = gzopen(path.string().c_str(), "wb");
+  REQUIRE(file != nullptr);
+  const auto written = gzwrite(file, csv_text.data(), static_cast<unsigned int>(csv_text.size()));
+  REQUIRE(written == static_cast<int>(csv_text.size()));
+  REQUIRE(gzclose(file) == Z_OK);
+  return path;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -74,6 +90,32 @@ TEST_CASE("Head: CSV comma-separated") {
   REQUIRE(table[0][0] == "name");
   REQUIRE(table[0][1] == "value");
   REQUIRE(table[0][2] == "active");
+  REQUIRE(table[1][0] == "alice");
+  REQUIRE(table[2][0] == "bob");
+}
+
+TEST_CASE("Head: gzip CSV") {
+  const std::string input =
+    "name,value,active\n"
+    "alice,10,yes\n"
+    "bob,20,no\n";
+
+  const auto path = WriteGzipCsv(input);
+
+  std::istringstream ignored;
+  std::ostringstream out;
+  TestLogger logger;
+  csvzall::head::Result result;
+  csvzall::pipeline::RunOptions options;
+  options.input_path = path.string();
+
+  const int rc = csvzall::head::Run(10, ignored, out, options, logger, result);
+  std::filesystem::remove(path);
+
+  REQUIRE(rc == 0);
+  const auto table = ParseHeadTable(out.str());
+  REQUIRE(table.size() == 3);
+  REQUIRE(table[0][0] == "name");
   REQUIRE(table[1][0] == "alice");
   REQUIRE(table[2][0] == "bob");
 }

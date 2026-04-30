@@ -933,11 +933,10 @@ int main(int argc, char** argv) {
     logger.Error("Unable to open input file: " + input_name);
     return 1;
   }
-  const csvzall::pipeline::RunOptions head_options{
-    false,
-    input == &std::cin,
-    false,
-    ParseDelimiter(head_cmd.get<std::string>("--delimiter"))};
+  csvzall::pipeline::RunOptions head_options;
+  head_options.input_is_stdin = (input == &std::cin);
+  head_options.delimiter = ParseDelimiter(head_cmd.get<std::string>("--delimiter"));
+  head_options.input_path = input_name;
   csvzall::head::Result head_result;
   const auto rc = csvzall::head::Run(
       static_cast<std::size_t>(requested_rows), *input, std::cout,
