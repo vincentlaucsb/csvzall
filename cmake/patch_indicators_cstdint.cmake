@@ -1,0 +1,21 @@
+if(NOT DEFINED INDICATORS_SOURCE_DIR)
+  message(FATAL_ERROR "INDICATORS_SOURCE_DIR is required")
+endif()
+
+set(termcolor_header "${INDICATORS_SOURCE_DIR}/include/indicators/termcolor.hpp")
+
+file(READ "${termcolor_header}" termcolor_text)
+
+if(termcolor_text MATCHES "#include[ \t]*<cstdint>")
+  message(STATUS "indicators termcolor.hpp already includes <cstdint>")
+else()
+  set(include_anchor "#include <iostream>\n")
+  set(include_insert "#include <cstdint>\n#include <iostream>\n")
+  string(FIND "${termcolor_text}" "${include_anchor}" include_anchor_pos)
+  if(include_anchor_pos EQUAL -1)
+    message(FATAL_ERROR "Unable to patch indicators termcolor.hpp: include anchor not found")
+  endif()
+  string(REPLACE "${include_anchor}" "${include_insert}" termcolor_text "${termcolor_text}")
+  file(WRITE "${termcolor_header}" "${termcolor_text}")
+  message(STATUS "Patched indicators termcolor.hpp to include <cstdint>")
+endif()
