@@ -26,6 +26,13 @@ option(CSVZALL_PREFER_SIBLING_CSV_PARSER "Prefer ../csv-parser over other csv-pa
 option(CSVZALL_ENABLE_KEYCHAIN "Enable OS keychain credential storage when available" ON)
 option(CSVZALL_FETCH_KEYCHAIN "Fetch hrantzsch/keychain when not found on system" ON)
 option(CSVZALL_FETCH_ZLIB "Fetch zlib when not found on system" ON)
+set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT ON)
+if(MSVC)
+  set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT OFF)
+endif()
+option(CSVZALL_PREFER_SYSTEM_ZLIB
+  "Prefer a system zlib over FetchContent. Defaults off on MSVC to avoid CRT mismatches with prebuilt zlib libraries."
+  ${CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT})
 
 # Share FetchContent downloads across Visual Studio/Ninja build directories.
 # Without this, x64-Debug, x64-Release, and scratch configure dirs each create
@@ -167,9 +174,9 @@ FetchContent_MakeAvailable(SQLiteCpp)
 
 find_package(Threads REQUIRED)
 
-# gzip input support. Prefer a system zlib when present, but allow CMake to
-# fetch zlib for plain developer/CI machines.
-if(WIN32 AND NOT DEFINED ZLIB_ROOT)
+# gzip input support. Prefer a system zlib on Unix-like platforms, but default
+# to an in-tree zlib build on MSVC so it uses the same CRT settings as csvzall.
+if(CSVZALL_PREFER_SYSTEM_ZLIB AND WIN32 AND NOT DEFINED ZLIB_ROOT)
   set(_csvzall_zlib_roots
     "C:/Program Files/PostgreSQL/18"
     "C:/Program Files/PostgreSQL/17"
@@ -185,7 +192,9 @@ if(WIN32 AND NOT DEFINED ZLIB_ROOT)
   endforeach()
 endif()
 
-find_package(ZLIB QUIET)
+if(CSVZALL_PREFER_SYSTEM_ZLIB)
+  find_package(ZLIB QUIET)
+endif()
 if(NOT ZLIB_FOUND AND CSVZALL_FETCH_ZLIB)
   message(STATUS "zlib not found on system; using FetchContent cache/fetch")
   FetchContent_Declare(
@@ -371,7 +380,7 @@ else()
 endif()
 
 set(CSVZALL_RUNTIME_DEPENDENCY_DIRS "")
-if(WIN32 AND ZLIB_ROOT AND EXISTS "${ZLIB_ROOT}/bin")
+if(WIN32 AND CSVZALL_ZLIB_TARGET STREQUAL "ZLIB::ZLIB" AND ZLIB_ROOT AND EXISTS "${ZLIB_ROOT}/bin")
   list(APPEND CSVZALL_RUNTIME_DEPENDENCY_DIRS "${ZLIB_ROOT}/bin")
 endif()
 if(CSVZALL_HAVE_POSTGRESQL AND WIN32)
