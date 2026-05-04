@@ -14,6 +14,7 @@ add_executable(csvzall_tests
   test_head.cpp
   test_sql_query.cpp
   test_sql_export.cpp
+  test_sqlite_db.cpp
   test_postgres_schema.cpp
   test_summarize.cpp
   test_timeseries.cpp
@@ -89,3 +90,11 @@ else()
 endif()
 
 add_test(NAME csvzall_tests COMMAND csvzall_tests)
+
+add_test(
+  NAME csvzall_cli_smoke
+  COMMAND
+    ${CMAKE_COMMAND}
+    -DCSVZALL_EXE=$<TARGET_FILE:csvzall>
+    -DCLI_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-smoke
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_smoke.cmake)

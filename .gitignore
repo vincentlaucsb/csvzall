@@ -69,6 +69,7 @@ third_party/
 *.log
 *.tmp
 *.temp
+.coverage-analysis/
 
 # Package managers / dependencies we don't want
 node_modules/

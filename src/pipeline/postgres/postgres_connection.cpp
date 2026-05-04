@@ -43,11 +43,11 @@ std::string QuoteIdentifier(const std::string& identifier) {
 
 bool TableExists(pqxx::connection& conn, const std::string& table_name) {
   pqxx::work tx(conn);
-  const pqxx::result r = tx.exec_params(
+  const pqxx::result r = tx.exec(
       "SELECT EXISTS ("
       "SELECT 1 FROM information_schema.tables "
       "WHERE table_schema='public' AND table_name=$1)",
-      table_name);
+      pqxx::params{table_name});
   tx.commit();
   return !r.empty() && r[0][0].as<bool>();
 }
