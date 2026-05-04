@@ -121,7 +121,7 @@ enum class SqlQueryInputKind {
 };
 
 // Detect SQL query input type from path extension.
-// CSV extensions: .csv, .txt
+// CSV extensions: .csv, .txt, .gz, .zip
 // SQLite extensions: .db, .sqlite, .sqlite3
 // Returns kUnknown for stdin ("-") or unrecognized extensions.
 SqlQueryInputKind DetectSqlQueryInputKind(const std::string& path);

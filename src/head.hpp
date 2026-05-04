@@ -91,7 +91,8 @@ int Run(std::size_t row_limit, std::istream& input, std::ostream& output,
     std::unique_ptr<csv::CSVReader> owned_reader;
     if (!options.input_is_stdin && !options.input_path.empty() && options.input_path != "-") {
       owned_reader = std::make_unique<csv::CSVReader>(
-          csvzall::pipeline::common::OpenCsvReader(options.input_path, format));
+          csvzall::pipeline::common::OpenCsvReader(
+              options.input_path, options.zip_entry, format));
     } else {
       owned_reader = std::make_unique<csv::CSVReader>(*parse_input, format);
     }

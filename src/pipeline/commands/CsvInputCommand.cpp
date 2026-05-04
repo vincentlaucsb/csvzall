@@ -38,7 +38,7 @@ int CsvInputCommand::init_reader() {
   try {
     if (!options_.input_is_stdin && !options_.input_path.empty() && options_.input_path != "-") {
       reader_ = std::make_unique<csv::CSVReader>(
-          common::OpenCsvReader(options_.input_path, format));
+          common::OpenCsvReader(options_.input_path, options_.zip_entry, format));
     } else {
       reader_ = std::make_unique<csv::CSVReader>(*parse_input, format);
     }
@@ -87,7 +87,7 @@ int CsvInputCommand::reset_reader() {
   try {
     if (!options_.input_is_stdin && !options_.input_path.empty() && options_.input_path != "-") {
       reader_ = std::make_unique<csv::CSVReader>(
-          common::OpenCsvReader(options_.input_path, format));
+          common::OpenCsvReader(options_.input_path, options_.zip_entry, format));
     } else {
       reader_ = std::make_unique<csv::CSVReader>(*parse_input, format);
     }

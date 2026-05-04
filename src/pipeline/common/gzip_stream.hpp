@@ -3,6 +3,7 @@
 #include <array>
 #include <istream>
 #include <memory>
+#include <sstream>
 #include <streambuf>
 #include <string>
 #include <string_view>
@@ -14,6 +15,8 @@
 namespace csvzall::pipeline::common {
 
 bool IsGzipPath(std::string_view path);
+bool IsZipPath(std::string_view path);
+std::string ReadZipEntry(const std::string& path, const std::string& requested_entry);
 
 class GzipStreambuf : public std::streambuf {
  public:
@@ -40,13 +43,24 @@ class GzipInputStream : public std::istream {
 };
 
 template <typename... Args>
-csv::CSVReader OpenCsvReader(const std::string& path, Args&&... args) {
+csv::CSVReader OpenCsvReader(const std::string& path,
+                             const std::string& zip_entry,
+                             Args&&... args) {
   if (IsGzipPath(path)) {
     std::unique_ptr<std::istream> stream(new GzipInputStream(path));
     return csv::CSVReader(std::move(stream), std::forward<Args>(args)...);
   }
+  if (IsZipPath(path)) {
+    std::unique_ptr<std::istream> stream(new std::istringstream(ReadZipEntry(path, zip_entry)));
+    return csv::CSVReader(std::move(stream), std::forward<Args>(args)...);
+  }
 
   return csv::CSVReader(path, std::forward<Args>(args)...);
+}
+
+template <typename... Args>
+csv::CSVReader OpenCsvReader(const std::string& path, Args&&... args) {
+  return OpenCsvReader(path, std::string{}, std::forward<Args>(args)...);
 }
 
 }  // namespace csvzall::pipeline::common

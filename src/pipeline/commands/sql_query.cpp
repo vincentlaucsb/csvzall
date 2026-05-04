@@ -302,7 +302,7 @@ SqlQueryInputKind DetectSqlQueryInputKind(const std::string& path) {
   std::transform(ext.begin(), ext.end(), ext.begin(),
                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-  if (ext == ".csv" || ext == ".txt") {
+  if (ext == ".csv" || ext == ".txt" || ext == ".gz" || ext == ".zip") {
     return SqlQueryInputKind::kCsv;
   }
   if (ext == ".db" || ext == ".sqlite" || ext == ".sqlite3") {

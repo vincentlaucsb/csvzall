@@ -292,6 +292,9 @@ void AddCsvInputArguments(argparse::ArgumentParser& cmd) {
   cmd.add_argument("-d", "--delimiter")
       .help("Input field delimiter: single char, 'tab', or '\\t' (default: auto-detect)")
       .default_value(std::string{""});
+  cmd.add_argument("--zip-entry")
+      .help("File entry to read from a .zip input archive")
+      .default_value(std::string{""});
 }
 
 // Register --exact for commands that perform column name lookups.
@@ -320,6 +323,7 @@ csvzall::pipeline::RunOptions BuildTransformOptions(
   options.exact_column_matching = cmd.get<bool>("--exact");
   options.delimiter = ParseDelimiter(cmd.get<std::string>("--delimiter"));
   options.input_path = input_path;
+  options.zip_entry = cmd.get<std::string>("--zip-entry");
   return options;
 }
 
@@ -367,6 +371,9 @@ int main(int argc, char** argv) {
       .implicit_value(true);
     head_cmd.add_argument("-d", "--delimiter")
       .help("Input field delimiter: single char, 'tab', or '\\t' (default: auto-detect)")
+      .default_value(std::string{""});
+    head_cmd.add_argument("--zip-entry")
+      .help("File entry to read from a .zip input archive")
       .default_value(std::string{""});
 
   argparse::ArgumentParser summarize_cmd("summarize");
@@ -737,6 +744,7 @@ int main(int argc, char** argv) {
       options.input_is_stdin = (input == &std::cin);
       options.delimiter = ParseDelimiter(sql_cmd.get<std::string>("--delimiter"));
       options.input_path = source_path;
+      options.zip_entry = sql_cmd.get<std::string>("--zip-entry");
 
       csvzall::pipeline::RunStats ps;
       const auto rc = csvzall::pipeline::RunSqlQueryCsv(
@@ -766,6 +774,7 @@ int main(int argc, char** argv) {
       options.input_is_stdin = (input == &std::cin);
       options.delimiter = ParseDelimiter(sql_cmd.get<std::string>("--delimiter"));
       options.input_path = input_name;
+      options.zip_entry = sql_cmd.get<std::string>("--zip-entry");
 
       csvzall::pipeline::RunStats ps;
       const auto rc = csvzall::pipeline::RunSqlExport(
@@ -937,6 +946,7 @@ int main(int argc, char** argv) {
   head_options.input_is_stdin = (input == &std::cin);
   head_options.delimiter = ParseDelimiter(head_cmd.get<std::string>("--delimiter"));
   head_options.input_path = input_name;
+  head_options.zip_entry = head_cmd.get<std::string>("--zip-entry");
   csvzall::head::Result head_result;
   const auto rc = csvzall::head::Run(
       static_cast<std::size_t>(requested_rows), *input, std::cout,

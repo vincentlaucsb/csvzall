@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -66,6 +68,90 @@ std::filesystem::path WriteGzipCsv(const std::string& csv_text) {
   return path;
 }
 
+void AppendLe16(std::string& out, const std::uint16_t value) {
+  out.push_back(static_cast<char>(value & 0xff));
+  out.push_back(static_cast<char>((value >> 8) & 0xff));
+}
+
+void AppendLe32(std::string& out, const std::uint32_t value) {
+  out.push_back(static_cast<char>(value & 0xff));
+  out.push_back(static_cast<char>((value >> 8) & 0xff));
+  out.push_back(static_cast<char>((value >> 16) & 0xff));
+  out.push_back(static_cast<char>((value >> 24) & 0xff));
+}
+
+struct ZipTestEntry {
+  std::string name;
+  std::string content;
+  std::uint32_t crc = 0;
+  std::uint32_t local_header_offset = 0;
+};
+
+std::filesystem::path WriteStoredZip(std::vector<ZipTestEntry> entries,
+                                     const std::string& filename) {
+  auto path = std::filesystem::temp_directory_path() / filename;
+  std::string bytes;
+
+  for (auto& entry : entries) {
+    entry.crc = static_cast<std::uint32_t>(
+        crc32(0, reinterpret_cast<const Bytef*>(entry.content.data()),
+              static_cast<uInt>(entry.content.size())));
+    entry.local_header_offset = static_cast<std::uint32_t>(bytes.size());
+
+    AppendLe32(bytes, 0x04034b50);
+    AppendLe16(bytes, 20);
+    AppendLe16(bytes, 0);
+    AppendLe16(bytes, 0);
+    AppendLe16(bytes, 0);
+    AppendLe16(bytes, 0);
+    AppendLe32(bytes, entry.crc);
+    AppendLe32(bytes, static_cast<std::uint32_t>(entry.content.size()));
+    AppendLe32(bytes, static_cast<std::uint32_t>(entry.content.size()));
+    AppendLe16(bytes, static_cast<std::uint16_t>(entry.name.size()));
+    AppendLe16(bytes, 0);
+    bytes += entry.name;
+    bytes += entry.content;
+  }
+
+  const auto central_offset = static_cast<std::uint32_t>(bytes.size());
+  for (const auto& entry : entries) {
+    AppendLe32(bytes, 0x02014b50);
+    AppendLe16(bytes, 20);
+    AppendLe16(bytes, 20);
+    AppendLe16(bytes, 0);
+    AppendLe16(bytes, 0);
+    AppendLe16(bytes, 0);
+    AppendLe16(bytes, 0);
+    AppendLe32(bytes, entry.crc);
+    AppendLe32(bytes, static_cast<std::uint32_t>(entry.content.size()));
+    AppendLe32(bytes, static_cast<std::uint32_t>(entry.content.size()));
+    AppendLe16(bytes, static_cast<std::uint16_t>(entry.name.size()));
+    AppendLe16(bytes, 0);
+    AppendLe16(bytes, 0);
+    AppendLe16(bytes, 0);
+    AppendLe16(bytes, 0);
+    AppendLe32(bytes, 0);
+    AppendLe32(bytes, entry.local_header_offset);
+    bytes += entry.name;
+  }
+
+  const auto central_size = static_cast<std::uint32_t>(bytes.size() - central_offset);
+  AppendLe32(bytes, 0x06054b50);
+  AppendLe16(bytes, 0);
+  AppendLe16(bytes, 0);
+  AppendLe16(bytes, static_cast<std::uint16_t>(entries.size()));
+  AppendLe16(bytes, static_cast<std::uint16_t>(entries.size()));
+  AppendLe32(bytes, central_size);
+  AppendLe32(bytes, central_offset);
+  AppendLe16(bytes, 0);
+
+  std::ofstream file(path, std::ios::binary);
+  REQUIRE(file);
+  file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  REQUIRE(file);
+  return path;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -118,6 +204,72 @@ TEST_CASE("Head: gzip CSV") {
   REQUIRE(table[0][0] == "name");
   REQUIRE(table[1][0] == "alice");
   REQUIRE(table[2][0] == "bob");
+}
+
+TEST_CASE("Head: single-file ZIP defaults to its only CSV entry") {
+  const std::string input =
+    "name,value\n"
+    "alice,10\n";
+
+  const auto path = WriteStoredZip({{"data.csv", input}}, "csvzall_head_single.zip");
+
+  std::istringstream ignored;
+  std::ostringstream out;
+  TestLogger logger;
+  csvzall::head::Result result;
+  csvzall::pipeline::RunOptions options;
+  options.input_path = path.string();
+
+  const int rc = csvzall::head::Run(10, ignored, out, options, logger, result);
+  std::filesystem::remove(path);
+
+  REQUIRE(rc == 0);
+  const auto table = ParseHeadTable(out.str());
+  REQUIRE(table.size() == 2);
+  REQUIRE(table[0][0] == "name");
+  REQUIRE(table[1][0] == "alice");
+}
+
+TEST_CASE("Head: multi-file ZIP requires an explicit entry") {
+  const auto path = WriteStoredZip(
+      {{"first.csv", "name\nalice\n"}, {"second.csv", "name\nbob\n"}},
+      "csvzall_head_multi.zip");
+
+  std::istringstream ignored;
+  std::ostringstream out;
+  TestLogger logger;
+  csvzall::head::Result result;
+  csvzall::pipeline::RunOptions options;
+  options.input_path = path.string();
+
+  const int rc = csvzall::head::Run(10, ignored, out, options, logger, result);
+  std::filesystem::remove(path);
+
+  REQUIRE(rc == 1);
+  REQUIRE(logger.last_error.find("multiple files") != std::string::npos);
+  REQUIRE(logger.last_error.find("--zip-entry") != std::string::npos);
+}
+
+TEST_CASE("Head: explicit ZIP entry selects one file from multi-file archive") {
+  const auto path = WriteStoredZip(
+      {{"first.csv", "name\nalice\n"}, {"folder/second.csv", "name\nbob\n"}},
+      "csvzall_head_selected.zip");
+
+  std::istringstream ignored;
+  std::ostringstream out;
+  TestLogger logger;
+  csvzall::head::Result result;
+  csvzall::pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.zip_entry = "folder/second.csv";
+
+  const int rc = csvzall::head::Run(10, ignored, out, options, logger, result);
+  std::filesystem::remove(path);
+
+  REQUIRE(rc == 0);
+  const auto table = ParseHeadTable(out.str());
+  REQUIRE(table.size() == 2);
+  REQUIRE(table[1][0] == "bob");
 }
 
 // ---------------------------------------------------------------------------

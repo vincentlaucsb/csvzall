@@ -55,4 +55,9 @@ jobs:
           path: |
             build/csvzall
             build/csvzall.exe
+            build/*.dll
+            build/Release/csvzall.exe
+            build/Release/*.dll
+            build/RelWithDebInfo/csvzall.exe
+            build/RelWithDebInfo/*.dll
           if-no-files-found: error

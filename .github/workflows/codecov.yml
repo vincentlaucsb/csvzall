@@ -1,0 +1,60 @@
+name: Code Coverage
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  codecov:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Install coverage tools
+        run: python3 -m pip install --user gcovr
+
+      - name: Configure CMake
+        run: >
+          cmake -S . -B build-coverage
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCSVZALL_CXX_STANDARD=23
+          -DCSVZALL_ENABLE_POSTGRESQL=OFF
+          -DCSVZALL_ENABLE_KEYCHAIN=OFF
+          -DCSVZALL_PREFER_SIBLING_CSV_PARSER=OFF
+          -DCMAKE_CXX_FLAGS_DEBUG="--coverage -O0 -g"
+          -DCMAKE_C_FLAGS_DEBUG="--coverage -O0 -g"
+          -DCMAKE_EXE_LINKER_FLAGS_DEBUG="--coverage"
+
+      - name: Build
+        run: cmake --build build-coverage --config Debug
+
+      - name: Test
+        run: ctest --test-dir build-coverage -C Debug --output-on-failure
+
+      - name: Generate coverage report
+        run: >
+          python3 -m gcovr
+          --root .
+          --filter 'src/.*'
+          --exclude 'external/.*'
+          --exclude 'build-coverage/.*'
+          --exclude-unreachable-branches
+          --exclude-throw-branches
+          --xml-pretty
+          --output coverage.xml
+          build-coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          fail_ci_if_error: true
+          use_oidc: true

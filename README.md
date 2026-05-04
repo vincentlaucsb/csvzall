@@ -106,6 +106,15 @@ csvzall head vehicles.csv.gz
 csvzall postgres vehicles.csv.gz --dbname postgres --user postgres --table used_cars
 ```
 
+Files ending in `.zip` are read as ZIP-compressed CSV automatically when the
+archive contains exactly one file. For archives with multiple files, pass
+`--zip-entry <name>` to select the CSV member:
+
+```sh
+csvzall head vehicles.zip
+csvzall head archive.zip --zip-entry exports/vehicles.csv
+```
+
 Credential storage is optional. Save a PostgreSQL password to the OS keychain:
 
 ```sh
@@ -163,12 +172,14 @@ The binary is at `build/Release/csvzall.exe` (Windows) or `build/csvzall` (Linux
 | [csv-parser](https://github.com/vincentlaucsb/csv-parser) | [Vincent La](https://github.com/vincentlaucsb) | CSV parsing, writing, and scalar type classification | Local checkout preferred; FetchContent fallback |
 | [argparse](https://github.com/p-ranav/argparse) v3.1 | [Pranav](https://github.com/p-ranav) | CLI argument parsing | FetchContent |
 | [indicators](https://github.com/p-ranav/indicators) v2.3 | [Pranav](https://github.com/p-ranav) | Terminal progress bars for long-running imports | FetchContent |
-| [zlib](https://github.com/madler/zlib) v1.3.1 | [Mark Adler](https://github.com/madler) and contributors | gzip decompression for `.csv.gz` inputs | System package if available; FetchContent fallback |
+| [zlib](https://github.com/madler/zlib) v1.3.1 | [Mark Adler](https://github.com/madler) and contributors | gzip and ZIP/deflate decompression for compressed CSV inputs | System package if available; FetchContent fallback |
 | [keychain](https://github.com/hrantzsch/keychain) v1.3.1 | [hrantzsch](https://github.com/hrantzsch) | Optional OS credential storage for PostgreSQL passwords | System package if available; FetchContent fallback; Linux requires libsecret |
 | [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite | FetchContent, with a local CMake patch |
 | [libpqxx](https://github.com/jtv/libpqxx) v7.10.1 | [Jeroen T. Vermeulen](https://pqxx.org/libpqxx/) | PostgreSQL C++ client API used by the `postgres` command | System package if available; FetchContent fallback |
 | [PostgreSQL libpq](https://www.postgresql.org/docs/current/libpq.html) | [PostgreSQL Global Development Group](https://www.postgresql.org/community/) | PostgreSQL client C library required by libpqxx | System PostgreSQL installation |
 | [Catch2](https://github.com/catchorg/Catch2) v3.4.0 | [Catch2 contributors](https://github.com/catchorg/Catch2) | Test framework | FetchContent, tests only |
+| [gcovr](https://github.com/gcovr/gcovr) | [gcovr contributors](https://github.com/gcovr/gcovr/graphs/contributors) | Coverage report generation for CI | GitHub Actions coverage workflow only |
+| [Codecov GitHub Action](https://github.com/codecov/codecov-action) v5 | [Codecov](https://about.codecov.io/) | Upload coverage reports to Codecov | GitHub Actions coverage workflow only |
 
 ## Design notes
 
