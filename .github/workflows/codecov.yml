@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   codecov:
@@ -57,4 +56,5 @@ jobs:
         with:
           files: coverage.xml
           fail_ci_if_error: true
-          use_oidc: true
+          slug: vincentlaucsb/csvzall
+          token: ${{ secrets.CODECOV_TOKEN }}
