@@ -3,6 +3,7 @@
 <img src="assets/csvzall-logo.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
 
 A fast, single-binary CSV transformation CLI for Unix-style pipelines. Pipe CSVs through `filter`, `derive`, `summarize`, and `head` — each command reads stdin, writes stdout, logs to stderr.
+For local inspection workflows, `csvzall view <file.csv>` starts a read-only browser table view backed by the same CSV parser.
 
 ## Quick example
 
@@ -24,6 +25,31 @@ csvzall filter "Weight > 0 && Reps > 0" FitNotes_Export.csv \
 | Deadlift              | 2026-01-18 | 302.5            |
 | ...                   | ...        | ...              |
 +-----------------------+------------+------------------+
+```
+
+## Local API-to-report workflow
+
+Let a host script own API pagination and authentication, then hand deterministic
+tabular steps to csvzall:
+
+```sh
+# 1. Extract API-shaped JSON into incoming CSV.
+csvzall json extract todoist-activities.json --map todoist-map.json > incoming.csv
+
+# 2. Rerunnable keyed import: existing rows win, duplicates are skipped.
+csvzall merge activity-store.csv incoming.csv --key event_id --in-place
+
+# 3. Inspect the source table in a browser when Markdown tables get cramped.
+csvzall view activity-store.csv
+
+# 4. Produce an Obsidian-ready Markdown summary table.
+csvzall sql query --csv activity-store.csv --format markdown --sql \
+  "SELECT substr(completed_at, 1, 7) AS month, COUNT(DISTINCT due_date) AS days FROM data GROUP BY month ORDER BY month" \
+  > monthly-summary.md
+
+# 5. Render a calendar heatmap SVG.
+csvzall heatmap activity-store.csv --date due_date --start 2026-01-01 --end 2026-12-31 \
+  --title "Gym Attendance" > gym-heatmap.svg
 ```
 
 ## Commands
@@ -81,6 +107,182 @@ Print the header and first N rows as a formatted ASCII table. Useful for inspect
 ```sh
 csvzall head -n 10 data.csv
 some-command | csvzall head -
+```
+
+### `json extract <input.json> --map <mapping.json>`
+
+Extract rows from JSON into stable CSV using an explicit mapping file. This is
+not a general JSON query command; it supports a small deterministic path subset:
+`$`, `.field`, `["field name"]`, `['field name']`, `[0]`, and `[*]`.
+
+```json
+{
+  "rows": "$.results[*]",
+  "columns": {
+    "event_id": "$.id",
+    "event_type": "$.event_type",
+    "completed_at": "$.event_date",
+    "content": "$.extra_data.content",
+    "due_date": "$.extra_data.due_date",
+    "was_overdue": "$.extra_data.was_overdue"
+  }
+}
+```
+
+```sh
+csvzall json extract todoist_activities.json --map todoist_activity_map.json > incoming.csv
+csvzall merge todoist_activity_store.csv incoming.csv --key event_id --in-place
+```
+
+Optional, missing, and null values become empty CSV cells. Nested API payload
+paths such as `$.extra_data.content` are evaluated relative to each selected
+row. Scalars are emitted as stable text; objects and arrays selected as column
+values are rejected.
+
+### `sql query --csv <input.csv> --sql <query>`
+
+Query CSV directly with SQLite SQL. CSV input is loaded into a table named
+`data` by default; override it with `--table <name>`. Use `--csv -` to read
+CSV from stdin, or `--db <path>` to query an existing SQLite database file.
+Query results are streamed as CSV to stdout by default. Pass
+`--format markdown` for a deterministic, escaped Markdown table suitable for
+Obsidian notes.
+
+```sh
+csvzall sql query --csv gym-attendance.csv --sql \
+  "SELECT substr(date, 1, 7) AS month, COUNT(*) AS attendance_days FROM data GROUP BY month ORDER BY month"
+
+csvzall sql query --csv gym-events.csv --sql \
+  "SELECT COUNT(DISTINCT date) AS attendance_days FROM data"
+
+csvzall sql query --csv gym-attendance.csv --format markdown --sql \
+  "SELECT substr(date, 1, 7) AS month, COUNT(*) AS attendance_days FROM data GROUP BY month ORDER BY month"
+```
+
+SQLite-backed commands support regular expressions through both the `REGEXP`
+operator and `regexp_like(value, pattern)`. Prefix a pattern with `(?i)` for
+case-insensitive matching.
+
+```sh
+csvzall sql query --csv gym-events.csv --sql \
+  "SELECT content FROM data WHERE regexp_like(content, '(?i)\b(gym|workout|lift|weights)\b')"
+```
+
+### `max [input] --column <name>`
+
+Stream a CSV and print the maximum value in one column without loading SQLite.
+Numeric cells compare as numbers through csv-parser's scalar classification;
+other scalar text, including ISO timestamp strings, compares deterministically
+as text.
+
+```sh
+csvzall max todoist_activities.csv --column completed_at
+```
+
+### `min [input] --column <name>`
+
+Companion to `max`: stream a CSV and print the minimum value in one column with
+the same numeric and deterministic text comparison behavior.
+
+```sh
+csvzall min todoist_activities.csv --column completed_at
+```
+
+### `view <input.csv> [--no-open]`
+
+Start a local-only read-only HTTP viewer for one plain local CSV file. The
+server binds to `127.0.0.1`, prints the full viewer URL to stdout, and opens a
+browser by default unless `--no-open` is passed. API requests are gated by a
+random session token, and the file path is fixed for the lifetime of the
+process. Pass `--startup-json` to print `{"url":"http://127.0.0.1:..."}` for
+host integrations such as the Obsidian plugin.
+
+In auto mode, files at or below `--materialize-threshold-mb` (default: 200) are
+materialized once so AG Grid can provide client-side sorting, column filters,
+and quick filtering for ordinary CSVs. Larger files build a compact row-offset
+index and serve rows through paged `/api/rows?offset=...&limit=...` requests
+instead of loading the whole table in the browser. AG Grid Community handles
+column resizing and virtual scrolling, while the local API (`/api/schema`,
+`/api/rows`, `/api/health`) keeps the experience read-only by design. The view
+is a startup-time snapshot of the CSV; reopen the viewer to pick up on-disk file
+changes.
+
+Current limitation: `view` is optimized for plain local CSV files. stdin,
+`.gz`, and `.zip` inputs are rejected in this pass. Server-side global
+sort/search/filter are deferred for paged mode; the UI only enables full-table
+sort/filter when the table is materialized.
+
+```sh
+csvzall view todoist_activities.csv
+csvzall view todoist_activities.csv --no-open --port 43117
+csvzall view todoist_activities.csv --no-open --startup-json
+csvzall view todoist_activities.csv --view-mode paged
+```
+
+### `calendar [input] --start <YYYY-MM-DD> --end <YYYY-MM-DD>`
+
+Render fixed-shape `date,content` CSV as plain Markdown month tables suitable
+for Obsidian notes. The input must contain exact `date` and `content` columns;
+`date` must be ISO `YYYY-MM-DD`. Duplicate dates are rejected.
+
+```sh
+csvzall calendar habit_days.csv --start 2026-05-01 --end 2026-05-31
+csvzall calendar habit_days.csv --start 2026-05-01 --end 2026-06-30 \
+  --month-header "{month-name} {year}"
+```
+
+Additional columns are ignored. Cells outside the requested range or outside the
+current month are left empty, and the `content` value is used as the date cell
+body.
+
+### `heatmap [input] --start <YYYY-MM-DD> --end <YYYY-MM-DD>`
+
+Render dated CSV rows as a self-contained SVG calendar heatmap. The input must
+contain an ISO `YYYY-MM-DD` date column. If `--value` is omitted, each row
+contributes `1`; otherwise the named numeric column is summed per date. Use
+`--label` to include cell tooltip text.
+
+```sh
+csvzall heatmap gym-attendance.csv --start 2025-05-15 --end 2026-05-15 \
+  --date date --title "Gym Attendance" > gym.svg
+
+csvzall heatmap daily-counts.csv --start 2026-01-01 --end 2026-12-31 \
+  --date day --value count --label note > heatmap.svg
+```
+
+Duplicate dates are aggregated, rows outside the requested range are ignored by
+the chart renderer, and the SVG is written to stdout so it can be redirected or
+piped like any other csvzall command. The command is built when csvzall is
+configured with a local `svgplot` checkout.
+
+### `append <existing.csv> <incoming.csv> [--in-place]`
+
+Append one CSV to another after validating that headers match exactly. Without
+`--in-place`, the combined CSV is written to stdout. With `--in-place`, csvzall
+writes a temporary sibling file and replaces the original only after validation
+and output writing succeed. `append` does not inspect keys or deduplicate rows;
+use `merge` for rerunnable keyed imports.
+
+```sh
+csvzall append existing.csv incoming.csv > combined.csv
+csvzall append existing.csv incoming.csv --in-place
+```
+
+### `merge <existing.csv> <incoming.csv> --key <column> [--in-place]`
+
+Merge incoming rows into an existing CSV for rerunnable local imports. Headers
+must match exactly. The key column must exist in both files. Duplicate keys
+within existing fail, duplicate keys within incoming fail, and incoming rows
+whose key already exists are skipped so existing rows win.
+
+Without `--in-place`, the merged CSV is written to stdout. With `--in-place`,
+csvzall writes a temporary sibling file and replaces the original only after
+validation and output writing succeed. Added/skipped counts are reported on
+stderr unless `--quiet` is set.
+
+```sh
+csvzall merge activity-store.csv incoming.csv --key event_id > merged.csv
+csvzall merge activity-store.csv incoming.csv --key event_id --in-place
 ```
 
 ### `infer [input]`
@@ -163,15 +365,45 @@ To specify a custom csv-parser location:
 cmake -S . -B build -DCSV_PARSER_ROOT=/path/to/csv-parser
 ```
 
+To enable the `heatmap` command, keep `svgplot` as a sibling checkout or pass
+its location explicitly:
+
+```sh
+cmake -S . -B build -DSVGPLOT_ROOT=/path/to/svgplot -DSVG_ROOT=/path/to/svg
+```
+
 The binary is at `build/Release/csvzall.exe` (Windows) or `build/csvzall` (Linux/macOS).
+
+### Windows install helper
+
+Windows users can build, install, and add `csvzall` to PATH with:
+
+```powershell
+.\scripts\Install-csvzall.ps1
+```
+
+By default this installs to `C:\Program Files\csvzall`, adds
+`C:\Program Files\csvzall\bin` to the machine PATH, and relaunches with a
+Windows UAC prompt if Administrator rights are required.
+
+For a per-user install that does not require elevation:
+
+```powershell
+.\scripts\Install-csvzall.ps1 -InstallPrefix "$env:LOCALAPPDATA\csvzall" -PathScope User
+```
 
 ## Dependencies
 
 | Library | Author / maintainer | Role | How it's sourced |
 |---|---|---|---|
 | [csv-parser](https://github.com/vincentlaucsb/csv-parser) | [Vincent La](https://github.com/vincentlaucsb) | CSV parsing, writing, and scalar type classification | Local checkout preferred; FetchContent fallback |
+| [simdjson](https://github.com/simdjson/simdjson) v3.13.0 | [Daniel Lemire](https://github.com/lemire), [Geoff Langdale](https://github.com/geofflangdale), and contributors | JSON parsing for mapping-driven `json extract` | System package if available; FetchContent fallback |
+| svgplot | Local project | SVG calendar heatmap rendering for the `heatmap` command | Local checkout via `SVGPLOT_ROOT` or sibling `../svgplot`; optional |
+| [svg](https://github.com/vincentlaucsb/svg) | [Vincent La](https://github.com/vincentlaucsb) | Low-level SVG element construction used through svgplot | Local checkout via `SVG_ROOT` or svgplot's populated dependency tree |
 | [argparse](https://github.com/p-ranav/argparse) v3.1 | [Pranav](https://github.com/p-ranav) | CLI argument parsing | FetchContent |
+| [cpp-httplib](https://github.com/yhirose/cpp-httplib) v0.18.5 | [Yuji Hirose](https://github.com/yhirose) and contributors | Embedded local HTTP server for the `view` command | Vendored single header under `vendor/httplib` |
 | [indicators](https://github.com/p-ranav/indicators) v2.3 | [Pranav](https://github.com/p-ranav) | Terminal progress bars for long-running imports | FetchContent |
+| [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) v32.3.9 | [AG Grid Ltd.](https://www.ag-grid.com/) | Read-only interactive browser table for the `view` command | Vendored browser assets under `vendor/ag-grid` |
 | [zlib](https://github.com/madler/zlib) v1.3.1 | [Mark Adler](https://github.com/madler) and contributors | gzip and ZIP/deflate decompression for compressed CSV inputs | System package if available; FetchContent fallback |
 | [keychain](https://github.com/hrantzsch/keychain) v1.3.1 | [hrantzsch](https://github.com/hrantzsch) | Optional OS credential storage for PostgreSQL passwords | System package if available; FetchContent fallback; Linux requires libsecret |
 | [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite | FetchContent, with a local CMake patch |
@@ -186,7 +418,12 @@ The binary is at `build/Release/csvzall.exe` (Windows) or `build/csvzall` (Linux
 - Data flows on **stdout**, diagnostics on **stderr**. Every command is safe to pipe.
 - `-` as the input path means stdin. All commands accept it.
 - `filter` and `derive` use SQL syntax — standard `WHERE` clauses and SQL expressions.
+- SQLite-backed commands support `REGEXP` and `regexp_like(value, pattern)`;
+  NULL input does not match and invalid patterns fail the query.
+- `merge` is the keyed rerunnable import primitive; `append` is only exact-header concatenation.
 - Column matching is case-insensitive by default (SQLite identifier resolution).
+- `calendar` consumes fixed-shape `date,content` CSV, rejects duplicate dates, and renders locale-independent Sunday-first month tables.
+- `heatmap` consumes generic dated CSV, aggregates duplicate dates, and renders a self-contained SVG through svgplot when that library is configured.
 
 ## Roadmap
 
@@ -194,3 +431,4 @@ The binary is at `build/Release/csvzall.exe` (Windows) or `build/csvzall` (Linux
 - [ ] Test suite (Google Test / Catch2 via CTest)
 - [ ] Throughput stats on `--verbose` (rows/s, MiB/s)
 - [ ] Richer `summarize` aggregations: `--min`, `--mean`, `--sum`, `--count`
+- [ ] Optional JSON mapping discovery helper, e.g. `json paths <input.json> --rows <path>`

@@ -5,9 +5,13 @@
 #include <stdexcept>
 
 #ifdef _WIN32
+#include <Windows.h>
 #include <conio.h>
 #include <io.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
 #else
+#include <limits.h>
 #include <termios.h>
 #include <unistd.h>
 #endif
@@ -69,6 +73,40 @@ std::string read_password(const std::string& prompt) {
 
   std::cerr << '\n';
   return password;
+}
+
+std::filesystem::path executable_path() {
+#ifdef _WIN32
+  std::wstring buffer(MAX_PATH, L'\0');
+  while (true) {
+    const auto size = static_cast<DWORD>(buffer.size());
+    const auto copied = GetModuleFileNameW(nullptr, buffer.data(), size);
+    if (copied == 0) {
+      throw std::runtime_error("unable to resolve executable path");
+    }
+    if (copied < size) {
+      buffer.resize(copied);
+      return std::filesystem::path(buffer);
+    }
+    buffer.resize(buffer.size() * 2);
+  }
+#elif defined(__APPLE__)
+  std::uint32_t size = 0;
+  _NSGetExecutablePath(nullptr, &size);
+  std::string buffer(size, '\0');
+  if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+    throw std::runtime_error("unable to resolve executable path");
+  }
+  return std::filesystem::weakly_canonical(std::filesystem::path(buffer.c_str()));
+#else
+  std::string buffer(PATH_MAX, '\0');
+  const auto copied = readlink("/proc/self/exe", buffer.data(), buffer.size());
+  if (copied < 0) {
+    throw std::runtime_error("unable to resolve executable path");
+  }
+  buffer.resize(static_cast<std::size_t>(copied));
+  return std::filesystem::path(buffer);
+#endif
 }
 
 }  // namespace csvzall::util

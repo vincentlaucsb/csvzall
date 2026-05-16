@@ -29,6 +29,26 @@ for csv-parser follow-ups, not a committed roadmap.
   - use `csv_data_types()` when the default SQL-friendly inference is enough
   - copy the `chunk_parallel_apply()` pattern when the workflow needs more
     control over state, sampling, coercion, or error reporting
+- Tighten the `CSVField` constness story in the docs. csvzall's `heatmap`
+  command accidentally stored `row[index]` as `const auto field`, then hit MSVC
+  errors because `CSVField::is_null()`, `CSVField::get<T>()`, and
+  `CSVField::try_get<T>()` are non-const. The documentation should either show
+  local `CSVField` temporaries as mutable (`auto field = row[i]`) or explain why
+  these accessors are intentionally non-const.
+
+## Row byte offsets
+
+- csvzall's large-file read-only viewer needs stable row byte offsets so it can
+  build a compact row index and serve `/api/rows` pages without keeping every
+  cell materialized in memory.
+- `CSVRow` already tracks row-local `data_start`, which is the right primitive
+  for this workflow, but it needs the chunk's absolute source offset to become a
+  stable file offset.
+- The local csv-parser patch adds `RawCSVData::source_start` and exposes
+  `CSVRow::byte_offset()` as `source_start + data_start` (or `0` for default
+  rows). Keep this API generic; it should not mention csvzall or the viewer.
+- Backport this upstream once the paged viewer proves the API shape across
+  mmap, stream, CRLF, and quoted multiline rows.
 
 ## infer_scalar
 

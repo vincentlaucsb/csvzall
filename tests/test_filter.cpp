@@ -166,3 +166,30 @@ TEST_CASE("Filter: string LIKE pattern") {
   auto rows = tests::ParseCsv(output.str());
   REQUIRE(rows.size() == 3);  // header + alice + alex
 }
+
+TEST_CASE("Filter: supports SQLite REGEXP") {
+  auto csv = tests::MakeTestCsv(
+    {"content"},
+    {
+      {"Gym day"},
+      {"rest day"},
+      {"workout notes"}
+    }
+  );
+
+  std::istringstream input(csv);
+  std::ostringstream output;
+
+  auto options = tests::MakeTestOptions();
+  auto logger = tests::MakeNullLogger();
+  pipeline::RunStats stats;
+
+  int rc = pipeline::RunFilter(R"(content REGEXP '(?i)\b(gym|workout)\b')",
+                               input, output, options, logger, stats);
+
+  REQUIRE(rc == 0);
+  auto rows = tests::ParseCsv(output.str());
+  REQUIRE(rows.size() == 3);  // header + 2 matching rows
+  REQUIRE(rows[1][0] == "Gym day");
+  REQUIRE(rows[2][0] == "workout notes");
+}

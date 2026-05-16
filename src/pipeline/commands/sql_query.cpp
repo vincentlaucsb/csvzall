@@ -10,7 +10,9 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <ostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace csvzall::pipeline::commands {
@@ -198,12 +200,151 @@ bool IsLikelyIntegerOperand(TokenKind kind) {
   return kind == TokenKind::Identifier || kind == TokenKind::IntegerLiteral;
 }
 
+std::string EscapeMarkdownTableCell(const std::string& value) {
+  std::string escaped;
+  escaped.reserve(value.size());
+  for (const char c : value) {
+    if (c == '\\') {
+      escaped += "\\\\";
+    } else if (c == '|') {
+      escaped += "\\|";
+    } else if (c == '\n') {
+      escaped += "<br>";
+    } else if (c != '\r') {
+      escaped += c;
+    }
+  }
+  return escaped;
+}
+
+void WriteMarkdownTable(std::ostream& output,
+                        const std::vector<std::string>& headers,
+                        const std::vector<std::vector<std::string>>& rows) {
+  std::vector<std::string> escaped_headers;
+  escaped_headers.reserve(headers.size());
+  for (const auto& header : headers) {
+    escaped_headers.push_back(EscapeMarkdownTableCell(header));
+  }
+
+  std::vector<std::vector<std::string>> escaped_rows;
+  escaped_rows.reserve(rows.size());
+  for (const auto& row : rows) {
+    std::vector<std::string> escaped_row;
+    escaped_row.reserve(row.size());
+    for (const auto& cell : row) {
+      escaped_row.push_back(EscapeMarkdownTableCell(cell));
+    }
+    escaped_rows.push_back(std::move(escaped_row));
+  }
+
+  std::vector<std::size_t> widths(escaped_headers.size(), 0);
+  for (std::size_t i = 0; i < escaped_headers.size(); ++i) {
+    widths[i] = escaped_headers[i].size();
+  }
+  for (const auto& row : escaped_rows) {
+    for (std::size_t i = 0; i < row.size() && i < widths.size(); ++i) {
+      widths[i] = std::max(widths[i], row[i].size());
+    }
+  }
+
+  auto write_row = [&](const std::vector<std::string>& cells) {
+    output << '|';
+    for (std::size_t i = 0; i < widths.size(); ++i) {
+      const std::string empty;
+      const std::string& cell = i < cells.size() ? cells[i] : empty;
+      output << ' ' << cell;
+      for (std::size_t p = cell.size(); p < widths[i]; ++p) {
+        output << ' ';
+      }
+      output << " |";
+    }
+    output << '\n';
+  };
+
+  write_row(escaped_headers);
+  output << '|';
+  for (const auto width : widths) {
+    output << ' ';
+    for (std::size_t p = 0; p < std::max<std::size_t>(width, 3); ++p) {
+      output << '-';
+    }
+    output << " |";
+  }
+  output << '\n';
+
+  for (const auto& row : escaped_rows) {
+    write_row(row);
+  }
+}
+
+int WriteQueryResult(SQLite::Statement& query,
+                     const std::string& format,
+                     std::ostream& output,
+                     RunStats& stats,
+                     const LoggerCallbacks& logger) {
+  const int col_count = query.getColumnCount();
+  if (col_count <= 0) {
+    if (logger.error) {
+      logger.error("sql query: statement did not return a result set.");
+    }
+    return 1;
+  }
+
+  std::vector<std::string> out_headers;
+  out_headers.reserve(static_cast<std::size_t>(col_count));
+  for (int i = 0; i < col_count; ++i) {
+    out_headers.emplace_back(query.getColumnName(i));
+  }
+
+  if (format == "csv") {
+    auto writer = csv::make_csv_writer(output).set_auto_flush(false);
+    writer << out_headers;
+
+    while (query.executeStep()) {
+      std::vector<std::string> out_row;
+      out_row.reserve(static_cast<std::size_t>(col_count));
+      for (int i = 0; i < col_count; ++i) {
+        out_row.emplace_back(
+            query.getColumn(i).isNull() ? std::string{} : query.getColumn(i).getString());
+      }
+      writer << out_row;
+      stats.rows_processed++;
+    }
+
+    writer.flush();
+    return 0;
+  }
+
+  if (format == "markdown") {
+    std::vector<std::vector<std::string>> out_rows;
+    while (query.executeStep()) {
+      std::vector<std::string> out_row;
+      out_row.reserve(static_cast<std::size_t>(col_count));
+      for (int i = 0; i < col_count; ++i) {
+        out_row.emplace_back(
+            query.getColumn(i).isNull() ? std::string{} : query.getColumn(i).getString());
+      }
+      out_rows.push_back(std::move(out_row));
+      stats.rows_processed++;
+    }
+
+    WriteMarkdownTable(output, out_headers, out_rows);
+    return 0;
+  }
+
+  if (logger.error) {
+    logger.error("sql query: --format must be csv or markdown.");
+  }
+  return 1;
+}
+
 }  // namespace
 
 class SqlQueryCsvCommand : public CsvTransformCommand {
 public:
   SqlQueryCsvCommand(const std::string& sql_query,
                      const std::string& table_name,
+                     const std::string& format,
                      std::istream& input,
                      std::ostream& output,
                      const RunOptions& options,
@@ -211,7 +352,8 @@ public:
                      RunStats& stats)
       : CsvTransformCommand(input, output, options, logger, stats),
         sql_query_(sql_query),
-        table_name_(table_name) {}
+        table_name_(table_name),
+        format_(format) {}
 
 protected:
   int run() override {
@@ -238,35 +380,7 @@ protected:
 
     try {
       SQLite::Statement query(sdb.db(), query_text);
-      const int col_count = query.getColumnCount();
-      if (col_count <= 0) {
-        if (logger().error) {
-          logger().error("sql query: statement did not return a result set.");
-        }
-        return 1;
-      }
-
-      auto writer = csv::make_csv_writer(output()).set_auto_flush(false);
-
-      std::vector<std::string> out_headers;
-      out_headers.reserve(static_cast<std::size_t>(col_count));
-      for (int i = 0; i < col_count; ++i) {
-        out_headers.emplace_back(query.getColumnName(i));
-      }
-      writer << out_headers;
-
-      while (query.executeStep()) {
-        std::vector<std::string> out_row;
-        out_row.reserve(static_cast<std::size_t>(col_count));
-        for (int i = 0; i < col_count; ++i) {
-          out_row.emplace_back(
-              query.getColumn(i).isNull() ? std::string{} : query.getColumn(i).getString());
-        }
-        writer << out_row;
-        stats().rows_processed++;
-      }
-
-      writer.flush();
+      return WriteQueryResult(query, format_, output(), stats(), logger());
     } catch (const SQLite::Exception& ex) {
       if (logger().error) {
         logger().error(std::string("sql query: SQLite error: ") + ex.what());
@@ -280,16 +394,18 @@ protected:
 private:
   std::string sql_query_;
   std::string table_name_;
+  std::string format_;
 };
 
 int RunSqlQueryCsv(const std::string& sql_query,
                    const std::string& table_name,
+                   const std::string& format,
                    std::istream& input,
                    std::ostream& output,
                    const RunOptions& options,
                    const LoggerCallbacks& logger,
                    RunStats& stats) {
-  SqlQueryCsvCommand cmd(sql_query, table_name, input, output, options, logger, stats);
+  SqlQueryCsvCommand cmd(sql_query, table_name, format, input, output, options, logger, stats);
   return cmd.execute();
 }
 
@@ -313,6 +429,7 @@ SqlQueryInputKind DetectSqlQueryInputKind(const std::string& path) {
 
 int RunSqlQueryDb(const std::string& sql_query,
                   const std::string& db_path,
+                  const std::string& format,
                   std::ostream& output,
                   const LoggerCallbacks& logger,
                   RunStats& stats) {
@@ -332,36 +449,9 @@ int RunSqlQueryDb(const std::string& sql_query,
 
   try {
     SQLite::Database db(db_path, SQLite::OPEN_READONLY);
+    sqlite::RegisterSqliteRegexFunctions(db);
     SQLite::Statement query(db, query_text);
-
-    const int col_count = query.getColumnCount();
-    if (col_count <= 0) {
-      if (logger.error) {
-        logger.error("sql query: statement did not return a result set.");
-      }
-      return 1;
-    }
-
-    auto writer = csv::make_csv_writer(output).set_auto_flush(false);
-    std::vector<std::string> out_headers;
-    out_headers.reserve(static_cast<std::size_t>(col_count));
-    for (int i = 0; i < col_count; ++i) {
-      out_headers.emplace_back(query.getColumnName(i));
-    }
-    writer << out_headers;
-
-    while (query.executeStep()) {
-      std::vector<std::string> out_row;
-      out_row.reserve(static_cast<std::size_t>(col_count));
-      for (int i = 0; i < col_count; ++i) {
-        out_row.emplace_back(
-            query.getColumn(i).isNull() ? std::string{} : query.getColumn(i).getString());
-      }
-      writer << out_row;
-      stats.rows_processed++;
-    }
-
-    writer.flush();
+    return WriteQueryResult(query, format, output, stats, logger);
   } catch (const SQLite::Exception& ex) {
     if (logger.error) {
       logger.error(std::string("sql query: SQLite error: ") + ex.what());

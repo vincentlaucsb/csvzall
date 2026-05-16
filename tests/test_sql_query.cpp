@@ -31,6 +31,7 @@ TEST_CASE("SqlQueryCsv: runs SELECT and streams result CSV") {
   const int rc = pipeline::RunSqlQueryCsv(
       "SELECT name, value FROM \"data\" WHERE value > 7 ORDER BY value",
       "data",
+      "csv",
       input,
       output,
       options,
@@ -59,7 +60,7 @@ TEST_CASE("SqlQueryCsv: empty SQL returns error") {
       [&](const std::string& msg) { error_msg = msg; }, nullptr};
   pipeline::RunStats stats;
 
-  const int rc = pipeline::RunSqlQueryCsv("   ", "data", input, output, options, logger, stats);
+  const int rc = pipeline::RunSqlQueryCsv("   ", "data", "csv", input, output, options, logger, stats);
 
   REQUIRE(rc == 1);
   REQUIRE(!error_msg.empty());
@@ -80,6 +81,7 @@ TEST_CASE("SqlQueryCsv: non-result statement returns error") {
   const int rc = pipeline::RunSqlQueryCsv(
       "UPDATE \"data\" SET x = 2",
       "data",
+      "csv",
       input,
       output,
       options,
@@ -88,6 +90,149 @@ TEST_CASE("SqlQueryCsv: non-result statement returns error") {
 
   REQUIRE(rc == 1);
   REQUIRE(!error_msg.empty());
+}
+
+TEST_CASE("SqlQueryCsv: supports REGEXP operator") {
+  auto csv = tests::MakeTestCsv(
+      {"content"},
+      {{"Gym day"}, {"rest day"}, {"workout notes"}});
+
+  std::istringstream input(csv);
+  std::ostringstream output;
+  pipeline::RunStats stats;
+
+  const int rc = pipeline::RunSqlQueryCsv(
+      R"(SELECT content FROM data WHERE content REGEXP '(?i)\b(gym|workout)\b' ORDER BY content)",
+      "data",
+      "csv",
+      input,
+      output,
+      tests::MakeTestOptions(),
+      tests::MakeNullLogger(),
+      stats);
+
+  REQUIRE(rc == 0);
+  REQUIRE(tests::ParseCsv(output.str()) ==
+          std::vector<std::vector<std::string>>{
+              {"content"}, {"Gym day"}, {"workout notes"}});
+}
+
+TEST_CASE("SqlQueryCsv: REGEXP operator no-match returns no rows") {
+  auto csv = tests::MakeTestCsv({"content"}, {{"rest day"}});
+
+  std::istringstream input(csv);
+  std::ostringstream output;
+  pipeline::RunStats stats;
+
+  const int rc = pipeline::RunSqlQueryCsv(
+      R"(SELECT content FROM data WHERE content REGEXP '(?i)\b(gym|workout)\b')",
+      "data",
+      "csv",
+      input,
+      output,
+      tests::MakeTestOptions(),
+      tests::MakeNullLogger(),
+      stats);
+
+  REQUIRE(rc == 0);
+  REQUIRE(tests::ParseCsv(output.str()) ==
+          std::vector<std::vector<std::string>>{{"content"}});
+}
+
+TEST_CASE("SqlQueryCsv: supports regexp_like") {
+  auto csv = tests::MakeTestCsv(
+      {"content"},
+      {{"Gym day"}, {"rest day"}});
+
+  std::istringstream input(csv);
+  std::ostringstream output;
+  pipeline::RunStats stats;
+
+  const int rc = pipeline::RunSqlQueryCsv(
+      R"(SELECT regexp_like(content, '(?i)\b(gym|workout)\b') AS matched FROM data ORDER BY content)",
+      "data",
+      "csv",
+      input,
+      output,
+      tests::MakeTestOptions(),
+      tests::MakeNullLogger(),
+      stats);
+
+  REQUIRE(rc == 0);
+  REQUIRE(tests::ParseCsv(output.str()) ==
+          std::vector<std::vector<std::string>>{
+              {"matched"}, {"1"}, {"0"}});
+}
+
+TEST_CASE("SqlQueryCsv: regexp_like null input does not match") {
+  auto csv = tests::MakeTestCsv({"content"}, {{"Gym day"}});
+
+  std::istringstream input(csv);
+  std::ostringstream output;
+  pipeline::RunStats stats;
+
+  const int rc = pipeline::RunSqlQueryCsv(
+      R"(SELECT regexp_like(NULL, '(?i)\b(gym|workout)\b') AS matched FROM data LIMIT 1)",
+      "data",
+      "csv",
+      input,
+      output,
+      tests::MakeTestOptions(),
+      tests::MakeNullLogger(),
+      stats);
+
+  REQUIRE(rc == 0);
+  REQUIRE(tests::ParseCsv(output.str()) ==
+          std::vector<std::vector<std::string>>{{"matched"}, {"0"}});
+}
+
+TEST_CASE("SqlQueryCsv: invalid regex pattern returns a clear error") {
+  auto csv = tests::MakeTestCsv({"content"}, {{"Gym day"}});
+
+  std::istringstream input(csv);
+  std::ostringstream output;
+  std::string error_msg;
+  pipeline::LoggerCallbacks logger{
+      [&](const std::string& msg) { error_msg = msg; }, nullptr};
+  pipeline::RunStats stats;
+
+  const int rc = pipeline::RunSqlQueryCsv(
+      R"(SELECT content FROM data WHERE regexp_like(content, '['))",
+      "data",
+      "csv",
+      input,
+      output,
+      tests::MakeTestOptions(),
+      logger,
+      stats);
+
+  REQUIRE(rc == 1);
+  REQUIRE(error_msg.find("invalid regex pattern") != std::string::npos);
+}
+
+TEST_CASE("SqlQueryCsv: writes escaped Markdown tables") {
+  auto csv = tests::MakeTestCsv(
+      {"name", "value"},
+      {{"alice|gym", "10"}, {"bob", "20"}});
+
+  std::istringstream input(csv);
+  std::ostringstream output;
+  pipeline::RunStats stats;
+
+  const int rc = pipeline::RunSqlQueryCsv(
+      "SELECT name, value FROM data ORDER BY value",
+      "data",
+      "markdown",
+      input,
+      output,
+      tests::MakeTestOptions(),
+      tests::MakeNullLogger(),
+      stats);
+
+  REQUIRE(rc == 0);
+  REQUIRE(output.str().find("| name       | value |") != std::string::npos);
+  REQUIRE(output.str().find("alice\\|gym") != std::string::npos);
+  REQUIRE(output.str().find("| bob        | 20    |") != std::string::npos);
 }
 
   TEST_CASE("SqlQuery: auto-detects input type from file extension") {
@@ -127,6 +272,7 @@ TEST_CASE("SqlQueryCsv: non-result statement returns error") {
     const int rc = pipeline::RunSqlQueryDb(
         "SELECT name FROM data WHERE value > 10 ORDER BY value",
         db_path,
+        "csv",
         output,
         tests::MakeNullLogger(),
         stats);

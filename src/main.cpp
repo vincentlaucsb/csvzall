@@ -3,6 +3,7 @@
 #include <indicators/progress_spinner.hpp>
 #include "credentials.hpp"
 #include "head.hpp"
+#include "pipeline/common/markdown_calendar.hpp"
 #include "transform_pipeline.hpp"
 #include "util.hpp"
 
@@ -12,6 +13,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -20,6 +22,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -270,6 +273,38 @@ std::optional<char> ParseDelimiter(const std::string& s) {
   return s[0];
 }
 
+std::optional<csvzall::pipeline::ViewModeSelection> ParseViewMode(const std::string& s) {
+  if (s == "auto") return csvzall::pipeline::ViewModeSelection::Auto;
+  if (s == "materialized") return csvzall::pipeline::ViewModeSelection::Materialized;
+  if (s == "paged") return csvzall::pipeline::ViewModeSelection::Paged;
+  return std::nullopt;
+}
+
+std::string CalendarMonthName(unsigned month) {
+  static constexpr std::array<std::string_view, 12> names{
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"};
+  if (month < 1 || month > names.size()) {
+    return std::to_string(month);
+  }
+  return std::string(names[month - 1]);
+}
+
+void ReplaceAll(std::string& text, const std::string& needle, const std::string& replacement) {
+  std::size_t pos = 0;
+  while ((pos = text.find(needle, pos)) != std::string::npos) {
+    text.replace(pos, needle.size(), replacement);
+    pos += replacement.size();
+  }
+}
+
+std::string FormatCalendarMonthHeader(std::string pattern, int year, unsigned month) {
+  ReplaceAll(pattern, "{month-name}", CalendarMonthName(month));
+  ReplaceAll(pattern, "{month}", std::to_string(month));
+  ReplaceAll(pattern, "{year}", std::to_string(year));
+  return pattern;
+}
+
 // Register arguments shared by all CSV-consuming subcommands:
 // positional input, --single-threaded, --verbose, -d/--delimiter.
 void AddCsvInputArguments(argparse::ArgumentParser& cmd) {
@@ -337,7 +372,22 @@ ThroughputStats FinishStats(const csvzall::pipeline::RunStats& ps,
 
 int main(int argc, char** argv) {
   argparse::ArgumentParser program("csvzall", "0.1.0");
-  program.add_description("csvzall: high-performance CSV transformation CLI");
+  program.add_description("csvzall: high-performance CSV ETL and reporting CLI");
+  program.add_epilog(R"(Intent groups:
+  ETL/data: head, filter, derive, summarize, timeseries, sql, json, append, merge
+  Inspect/view: view
+  Rendering/report: calendar, heatmap
+
+SQL notes:
+  sql query supports SQLite plus csvzall functions: REGEXP and regexp_like(value, pattern)
+
+Workflow examples:
+  csvzall json extract activities.json --map map.json > incoming.csv
+  csvzall merge store.csv incoming.csv --key id --in-place
+  csvzall sql query --csv store.csv --format markdown --sql "SELECT substr(date,1,7) AS month, COUNT(*) AS days FROM data GROUP BY month"
+  csvzall view store.csv
+  csvzall heatmap store.csv --date date --start 2026-01-01 --end 2026-12-31 --title "Activity"
+)");
 
   argparse::ArgumentParser derive_cmd("derive");
   derive_cmd.add_description("Add or overwrite a column using an expression");
@@ -411,14 +461,325 @@ int main(int argc, char** argv) {
   AddCsvInputArguments(timeseries_cmd);
   AddExactArgument(timeseries_cmd);;
 
+  argparse::ArgumentParser max_cmd("max");
+  max_cmd.add_description("Stream a CSV and print the maximum value in one column");
+  AddCsvInputArguments(max_cmd);
+  AddExactArgument(max_cmd);
+  max_cmd.add_argument("--column")
+      .help("Column to scan")
+      .required();
+
+  argparse::ArgumentParser min_cmd("min");
+  min_cmd.add_description("Stream a CSV and print the minimum value in one column");
+  AddCsvInputArguments(min_cmd);
+  AddExactArgument(min_cmd);
+  min_cmd.add_argument("--column")
+      .help("Column to scan")
+      .required();
+
+  argparse::ArgumentParser append_cmd("append");
+  append_cmd.add_description(
+      "Append one CSV to another after validating exact header compatibility. "
+      "Output is the combined CSV to stdout unless --in-place is set.");
+  append_cmd.add_epilog(R"(Input shape:
+  existing.csv and incoming.csv must have exactly matching headers.
+
+Edge cases:
+  append does not inspect keys or deduplicate rows; use merge for rerunnable
+  keyed imports where existing rows should win on collisions.
+  --in-place writes a temporary sibling file and replaces the original only
+  after validation and output writing succeed.
+
+Examples:
+  csvzall append existing.csv incoming.csv > combined.csv
+  csvzall append existing.csv incoming.csv --in-place
+)");
+  append_cmd.add_argument("existing")
+      .help("Existing CSV file path");
+  append_cmd.add_argument("incoming")
+      .help("Incoming CSV file path");
+  append_cmd.add_argument("--in-place")
+      .help("Replace the existing CSV atomically after validation succeeds")
+      .default_value(false)
+      .implicit_value(true);
+
+  argparse::ArgumentParser merge_cmd("merge");
+  merge_cmd.add_description(
+      "Merge incoming CSV rows into an existing CSV by key. Existing rows win on key collisions.");
+  merge_cmd.add_epilog(R"(Input shape:
+  existing.csv and incoming.csv must have exactly matching headers.
+  --key names the required primary-key column.
+
+Output shape:
+  Without --in-place, merged CSV is written to stdout.
+  With --in-place, the existing file is replaced only after validation succeeds.
+  Diagnostics report added/skipped counts to stderr unless --quiet is set.
+
+Edge cases:
+  Duplicate keys within existing fail.
+  Duplicate keys within incoming fail.
+  Incoming rows whose key already exists are skipped.
+
+Examples:
+  csvzall merge activities.csv incoming.csv --key id > merged.csv
+  csvzall merge activities.csv incoming.csv --key id --in-place
+)");
+  merge_cmd.add_argument("existing")
+      .help("Existing CSV file path");
+  merge_cmd.add_argument("incoming")
+      .help("Incoming CSV file path");
+  merge_cmd.add_argument("--key")
+      .help("Primary key column used to skip already-imported rows")
+      .required();
+  merge_cmd.add_argument("--in-place")
+      .help("Replace the existing CSV atomically after validation succeeds")
+      .default_value(false)
+      .implicit_value(true);
+  merge_cmd.add_argument("--quiet")
+      .help("Suppress added/skipped row diagnostics")
+      .default_value(false)
+      .implicit_value(true);
+
+  argparse::ArgumentParser view_cmd("view");
+  view_cmd.add_description(
+      "Start a local read-only browser table viewer for one plain CSV file.");
+  view_cmd.add_epilog(R"(Input shape:
+  A plain local CSV file path is required. stdin, gzip (.gz), and zip (.zip)
+  inputs are intentionally not supported by the viewer in this pass.
+
+Output shape:
+  Prints the local viewer URL to stdout, then runs a local-only HTTP server on
+  127.0.0.1 until interrupted.
+
+  Behavior:
+  API requests require a random session token.
+  --startup-json prints {"url":"http://127.0.0.1:..."} for host integrations.
+  The viewer is read-only by design in this MVP.
+  Auto mode materializes files at or below --materialize-threshold-mb for
+  client-side sorting/filtering and uses indexed /api/rows paging for larger
+  files. Paged mode disables global sort/search/filter until server-side
+  implementations exist.
+  --once serves one successful request and exits; useful for scripts and tests.
+
+Examples:
+  csvzall view activities.csv
+  csvzall view activities.csv --no-open --port 43117
+  csvzall view activities.csv --no-open --startup-json
+  csvzall view activities.csv --view-mode paged
+
+Related:
+  Use head for terminal previews and sql query --format markdown for note-ready summaries.
+)");
+  view_cmd.add_argument("input")
+      .help("Input CSV file path")
+      .required();
+  view_cmd.add_argument("--verbose")
+      .help("Print diagnostic logs to stderr")
+      .default_value(false)
+      .implicit_value(true);
+  view_cmd.add_argument("--quiet")
+      .help("Suppress informational logs")
+      .default_value(false)
+      .implicit_value(true);
+  view_cmd.add_argument("-d", "--delimiter")
+      .help("Input field delimiter: single char, 'tab', or '\\t' (default: auto-detect)")
+      .default_value(std::string{""});
+  view_cmd.add_argument("--zip-entry")
+      .help("File entry to read from a .zip input archive")
+      .default_value(std::string{""});
+  view_cmd.add_argument("--port")
+      .help("Port to bind on 127.0.0.1. 0 chooses a random available port.")
+      .default_value(0)
+      .scan<'i', int>();
+  view_cmd.add_argument("--view-mode")
+      .help("Viewer row loading mode: auto, materialized, or paged")
+      .default_value(std::string{"auto"});
+  view_cmd.add_argument("--materialize-threshold-mb")
+      .help("Auto mode materializes plain local files at or below this size for client-side sort/filter")
+      .default_value(200)
+      .scan<'i', int>();
+  view_cmd.add_argument("--no-open")
+      .help("Print the URL without opening a browser automatically")
+      .default_value(false)
+      .implicit_value(true);
+  view_cmd.add_argument("--startup-json")
+      .help("Print startup metadata as JSON: {\"url\":\"http://127.0.0.1:...\"}")
+      .default_value(false)
+      .implicit_value(true);
+  view_cmd.add_argument("--once")
+      .help("Serve one successful request and exit")
+      .default_value(false)
+      .implicit_value(true);
+
+  argparse::ArgumentParser calendar_cmd("calendar");
+  calendar_cmd.add_description(
+      "Render fixed-shape date,content CSV as deterministic Markdown calendars. "
+      "Output is Markdown to stdout.");
+  calendar_cmd.add_epilog(R"(Input CSV schema:
+  date,content
+  2026-05-01,Done
+  2026-05-02,
+  2026-05-03,Skipped
+
+Contract:
+  date and content columns are required; additional columns are ignored.
+  date must be ISO YYYY-MM-DD.
+  Duplicate dates are rejected.
+  Cells outside the requested date range are empty.
+  Cells outside the current month are empty.
+  Default layout is deterministic and Sunday-first.
+  --month-header supports {year}, {month}, and {month-name}.
+
+Examples:
+  csvzall calendar habit-days.csv --start 2026-05-01 --end 2026-05-31
+  csvzall calendar habit-days.csv --start 2026-05-01 --end 2026-06-30 --month-header "{month-name} {year}"
+)");
+  AddCsvInputArguments(calendar_cmd);
+  AddExactArgument(calendar_cmd);
+  calendar_cmd.add_argument("--start")
+      .help("Inclusive start date, YYYY-MM-DD")
+      .required();
+  calendar_cmd.add_argument("--end")
+      .help("Inclusive end date, YYYY-MM-DD")
+      .required();
+  calendar_cmd.add_argument("--month-header")
+      .help("Month heading template; supports {year}, {month}, and {month-name}")
+      .default_value(std::string{});
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+  argparse::ArgumentParser heatmap_cmd("heatmap");
+  heatmap_cmd.add_description(
+      "Render date/value CSV as a self-contained SVG calendar heatmap. "
+      "Output is SVG to stdout.");
+  heatmap_cmd.add_epilog(R"(Input CSV shape:
+  A date column is required. It must contain ISO YYYY-MM-DD dates.
+  A numeric value column is optional. If omitted, each row contributes 1.
+  A label column is optional. Labels are included in SVG cell tooltips.
+  Duplicate dates are aggregated by summing values or row counts.
+  Rows outside --start/--end are ignored by the chart renderer.
+
+Examples:
+  csvzall heatmap gym-attendance.csv --start 2025-05-15 --end 2026-05-15 --date date --title "Gym Attendance" > gym.svg
+  csvzall heatmap daily-counts.csv --start 2026-01-01 --end 2026-12-31 --date day --value count --label note > heatmap.svg
+)");
+  AddCsvInputArguments(heatmap_cmd);
+  AddExactArgument(heatmap_cmd);
+  heatmap_cmd.add_argument("--start")
+      .help("Inclusive start date, YYYY-MM-DD")
+      .required();
+  heatmap_cmd.add_argument("--end")
+      .help("Inclusive end date, YYYY-MM-DD")
+      .required();
+  heatmap_cmd.add_argument("--date")
+      .help("Date column name (default: date)")
+      .default_value(std::string{"date"});
+  heatmap_cmd.add_argument("--value")
+      .help("Optional numeric value column. If omitted, rows are counted per date.")
+      .default_value(std::string{});
+  heatmap_cmd.add_argument("--label")
+      .help("Optional label column to include in SVG tooltips")
+      .default_value(std::string{});
+  heatmap_cmd.add_argument("--title")
+      .help("Optional SVG title")
+      .default_value(std::string{});
+#endif
+
+  argparse::ArgumentParser json_cmd("json");
+  json_cmd.add_description(
+      "JSON workflows. Use `csvzall json extract <input.json> --map <mapping.json>` "
+      "to extract mapped JSON rows as CSV to stdout.");
+  json_cmd.add_epilog(R"(json extract contract:
+  Mapping file is required via --map.
+  JSON input path is required.
+  Output is CSV to stdout; diagnostics go to stderr.
+  rows is required and selects the row objects.
+  columns is required and maps output column names to paths.
+  Column paths are evaluated relative to each selected row.
+  Optional, missing, or null fields become empty cells.
+  Nested API payload paths such as $.extra_data.content are supported.
+  Scalar values become CSV cells.
+  Objects or arrays selected as column values fail by default.
+
+Supported JSONPath subset:
+  $
+  .field
+  ["field name"]
+  ['field name']
+  [0]
+  [*]
+
+Unsupported JSONPath features:
+  recursive descent, filters, slices, unions, scripts, regex JSONPath queries
+
+Mapping example:
+  {
+    "rows": "$.results[*]",
+    "columns": {
+      "event_id": "$.id",
+      "event_type": "$.event_type",
+      "completed_at": "$.event_date",
+      "content": "$.extra_data.content",
+      "due_date": "$.extra_data.due_date",
+      "was_overdue": "$.extra_data.was_overdue"
+    }
+  }
+
+Pipeline example:
+  csvzall json extract todoist-activities.json --map todoist-map.json > todoist-activities.csv
+  csvzall merge activities.csv todoist-activities.csv --key event_id --in-place
+  csvzall sql query --csv activities.csv --format markdown --sql "SELECT content, COUNT(*) FROM data GROUP BY content"
+)");
+  json_cmd.add_argument("mode")
+      .help("JSON mode: extract")
+      .default_value(std::string{"extract"})
+      .nargs(argparse::nargs_pattern::optional);
+  json_cmd.add_argument("input")
+      .help("Input JSON file path")
+      .default_value(std::string{""})
+      .nargs(argparse::nargs_pattern::optional);
+  json_cmd.add_argument("--map")
+      .help("Mapping JSON file with required rows and columns fields")
+      .default_value(std::string{});
+
   program.add_subparser(derive_cmd);
   program.add_subparser(filter_cmd);
     program.add_subparser(head_cmd);
   program.add_subparser(summarize_cmd);
   program.add_subparser(timeseries_cmd);
+  program.add_subparser(max_cmd);
+  program.add_subparser(min_cmd);
+  program.add_subparser(append_cmd);
+  program.add_subparser(merge_cmd);
+  program.add_subparser(view_cmd);
+  program.add_subparser(calendar_cmd);
+#ifdef CSVZALL_HAVE_SVGPLOT
+  program.add_subparser(heatmap_cmd);
+#endif
+  program.add_subparser(json_cmd);
 
   argparse::ArgumentParser sql_cmd("sql");
-    sql_cmd.add_description("SQLite-backed workflows (load/query)");
+    sql_cmd.add_description(
+        "SQLite-backed workflows. Use `csvzall sql query --csv <path> --sql <query>` "
+        "to query CSV directly with SQL aggregation.");
+    sql_cmd.add_epilog(R"SQL(sql query contract:
+  --csv <path> reads CSV directly.
+  --csv - reads CSV from stdin.
+  --db <path> queries an existing SQLite database.
+  --sql <query> is required for query mode.
+  --format csv|markdown controls query output; default is csv.
+  CSV input is loaded into a SQLite table named by --table, default data.
+
+Useful SQL features:
+  WHERE, GROUP BY, COUNT, COUNT(DISTINCT ...), ORDER BY, substr, CASE,
+  REGEXP, and regexp_like.
+
+Examples:
+  csvzall sql query --csv gym-attendance.csv --sql "SELECT substr(date, 1, 7) AS month, COUNT(*) AS attendance_days FROM data GROUP BY month ORDER BY month"
+  csvzall sql query --csv gym-events.csv --sql "SELECT date, COUNT(*) AS events FROM data GROUP BY date HAVING COUNT(*) > 1 ORDER BY date"
+  csvzall sql query --csv gym-events.csv --sql "SELECT COUNT(DISTINCT date) AS attendance_days FROM data"
+  csvzall sql query --csv gym-attendance.csv --format markdown --sql "SELECT substr(date, 1, 7) AS month, COUNT(*) AS days FROM data GROUP BY month ORDER BY month"
+  csvzall sql query --csv gym-events.csv --sql "SELECT content FROM data WHERE regexp_like(content, '(?i)\b(gym|workout)\b')"
+)SQL");
 
     sql_cmd.add_argument("mode")
       .help("SQL mode: load|query")
@@ -440,6 +801,9 @@ int main(int argc, char** argv) {
     sql_cmd.add_argument("--sql")
       .help("SQL query text to execute")
       .default_value(std::string{""});
+      sql_cmd.add_argument("--format")
+        .help("Output format for query mode: csv|markdown")
+        .default_value(std::string{"csv"});
       sql_cmd.add_argument("--no-int-division-warning")
         .help("Suppress warning for likely integer division in SQL expressions")
         .default_value(false)
@@ -534,7 +898,15 @@ int main(int argc, char** argv) {
 
   if (!program.is_subcommand_used("derive") && !program.is_subcommand_used("filter") &&
       !program.is_subcommand_used("head") && !program.is_subcommand_used("summarize") &&
-      !program.is_subcommand_used("timeseries") && !program.is_subcommand_used("sql") &&
+      !program.is_subcommand_used("timeseries") && !program.is_subcommand_used("max") &&
+      !program.is_subcommand_used("min") && !program.is_subcommand_used("append") &&
+      !program.is_subcommand_used("merge") && !program.is_subcommand_used("view") &&
+      !program.is_subcommand_used("calendar") &&
+#ifdef CSVZALL_HAVE_SVGPLOT
+      !program.is_subcommand_used("heatmap") &&
+#endif
+      !program.is_subcommand_used("json") &&
+      !program.is_subcommand_used("sql") &&
       !program.is_subcommand_used("forget")
 #ifdef CSVZALL_HAVE_POSTGRESQL
       && !program.is_subcommand_used("infer")
@@ -676,6 +1048,181 @@ int main(int argc, char** argv) {
     return rc;
   }
 
+  if (program.is_subcommand_used("max")) {
+    Logger logger(max_cmd.get<bool>("--verbose"), max_cmd.get<bool>("--quiet"));
+    const std::string input_name = max_cmd.get<std::string>("input");
+    auto* input = ResolveInput(input_name, input_file, logger);
+    if (!input) {
+      logger.Error("Unable to open input file: " + input_name);
+      return 1;
+    }
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunMax(
+        max_cmd.get<std::string>("--column"),
+        *input, std::cout, BuildTransformOptions(max_cmd, input, input_name),
+        BuildCallbacks(logger), ps);
+    stats = FinishStats(ps, start);
+    MaybePrintVerboseStats(stats, logger);
+    return rc;
+  }
+
+  if (program.is_subcommand_used("min")) {
+    Logger logger(min_cmd.get<bool>("--verbose"), min_cmd.get<bool>("--quiet"));
+    const std::string input_name = min_cmd.get<std::string>("input");
+    auto* input = ResolveInput(input_name, input_file, logger);
+    if (!input) {
+      logger.Error("Unable to open input file: " + input_name);
+      return 1;
+    }
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunMin(
+        min_cmd.get<std::string>("--column"),
+        *input, std::cout, BuildTransformOptions(min_cmd, input, input_name),
+        BuildCallbacks(logger), ps);
+    stats = FinishStats(ps, start);
+    MaybePrintVerboseStats(stats, logger);
+    return rc;
+  }
+
+  if (program.is_subcommand_used("append")) {
+    Logger logger(false, false);
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunAppend(
+        append_cmd.get<std::string>("existing"),
+        append_cmd.get<std::string>("incoming"),
+        append_cmd.get<bool>("--in-place"),
+        std::cout, BuildCallbacks(logger), ps);
+    stats = FinishStats(ps, start);
+    return rc;
+  }
+
+  if (program.is_subcommand_used("merge")) {
+    Logger logger(false, merge_cmd.get<bool>("--quiet"));
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunMerge(
+        merge_cmd.get<std::string>("existing"),
+        merge_cmd.get<std::string>("incoming"),
+        merge_cmd.get<std::string>("--key"),
+        merge_cmd.get<bool>("--in-place"),
+        std::cout, BuildCallbacks(logger), ps);
+    stats = FinishStats(ps, start);
+    return rc;
+  }
+
+  if (program.is_subcommand_used("view")) {
+    Logger logger(view_cmd.get<bool>("--verbose"), view_cmd.get<bool>("--quiet"));
+    const std::string input_name = view_cmd.get<std::string>("input");
+    const int requested_port = view_cmd.get<int>("--port");
+    if (requested_port < 0 || requested_port > 65535) {
+      logger.Error("view: --port must be between 0 and 65535.");
+      return 1;
+    }
+    const auto view_mode = ParseViewMode(view_cmd.get<std::string>("--view-mode"));
+    if (!view_mode) {
+      logger.Error("view: --view-mode must be one of auto, materialized, or paged.");
+      return 1;
+    }
+    const int materialize_threshold_mb = view_cmd.get<int>("--materialize-threshold-mb");
+    if (materialize_threshold_mb < 0) {
+      logger.Error("view: --materialize-threshold-mb must be non-negative.");
+      return 1;
+    }
+
+    csvzall::pipeline::RunOptions options;
+    options.delimiter = ParseDelimiter(view_cmd.get<std::string>("--delimiter"));
+    options.input_path = input_name;
+    options.zip_entry = view_cmd.get<std::string>("--zip-entry");
+    options.view_mode = *view_mode;
+    options.view_materialize_threshold_mb = static_cast<std::size_t>(materialize_threshold_mb);
+
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunView(
+        input_name,
+        std::cout,
+        options,
+        BuildCallbacks(logger),
+        ps,
+        requested_port,
+        !view_cmd.get<bool>("--no-open"),
+        view_cmd.get<bool>("--once"),
+        view_cmd.get<bool>("--startup-json"));
+    stats = FinishStats(ps, start);
+    MaybePrintVerboseStats(stats, logger);
+    return rc;
+  }
+
+  if (program.is_subcommand_used("calendar")) {
+    Logger logger(calendar_cmd.get<bool>("--verbose"), calendar_cmd.get<bool>("--quiet"));
+    const std::string input_name = calendar_cmd.get<std::string>("input");
+    auto* input = ResolveInput(input_name, input_file, logger);
+    if (!input) {
+      logger.Error("Unable to open input file: " + input_name);
+      return 1;
+    }
+
+    csvzall::pipeline::common::MarkdownCalendarOptions calendar_options;
+    calendar_options.start_date = calendar_cmd.get<std::string>("--start");
+    calendar_options.end_date = calendar_cmd.get<std::string>("--end");
+    const auto header_template = calendar_cmd.get<std::string>("--month-header");
+    if (!header_template.empty()) {
+      calendar_options.month_header =
+          [header_template](int year, unsigned month) {
+            return FormatCalendarMonthHeader(header_template, year, month);
+          };
+    }
+
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::common::RenderMarkdownCalendarCsv(
+        *input, std::cout, BuildTransformOptions(calendar_cmd, input, input_name),
+        BuildCallbacks(logger), ps, calendar_options);
+    stats = FinishStats(ps, start);
+    MaybePrintVerboseStats(stats, logger);
+    return rc;
+  }
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+  if (program.is_subcommand_used("heatmap")) {
+    Logger logger(heatmap_cmd.get<bool>("--verbose"), heatmap_cmd.get<bool>("--quiet"));
+    const std::string input_name = heatmap_cmd.get<std::string>("input");
+    auto* input = ResolveInput(input_name, input_file, logger);
+    if (!input) {
+      logger.Error("Unable to open input file: " + input_name);
+      return 1;
+    }
+
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunHeatmap(
+        heatmap_cmd.get<std::string>("--date"),
+        heatmap_cmd.get<std::string>("--value"),
+        heatmap_cmd.get<std::string>("--label"),
+        heatmap_cmd.get<std::string>("--start"),
+        heatmap_cmd.get<std::string>("--end"),
+        heatmap_cmd.get<std::string>("--title"),
+        *input, std::cout, BuildTransformOptions(heatmap_cmd, input, input_name),
+        BuildCallbacks(logger), ps);
+    stats = FinishStats(ps, start);
+    MaybePrintVerboseStats(stats, logger);
+    return rc;
+  }
+#endif
+
+  if (program.is_subcommand_used("json")) {
+    Logger logger(false, false);
+    const auto mode = json_cmd.get<std::string>("mode");
+    if (mode != "extract") {
+      logger.Error("json: mode must be 'extract'.");
+      return 1;
+    }
+
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunJsonExtract(
+        json_cmd.get<std::string>("input"),
+        json_cmd.get<std::string>("--map"),
+        std::cout, BuildCallbacks(logger), ps);
+    stats = FinishStats(ps, start);
+    return rc;
+  }
+
   if (program.is_subcommand_used("sql")) {
     Logger logger(sql_cmd.get<bool>("--verbose"), sql_cmd.get<bool>("--quiet"));
     const std::string mode = sql_cmd.get<std::string>("mode");
@@ -684,7 +1231,12 @@ int main(int argc, char** argv) {
       const std::string csv_override = sql_cmd.get<std::string>("--csv");
       const std::string db_override = sql_cmd.get<std::string>("--db");
       const std::string query_text = sql_cmd.get<std::string>("--sql");
+      const std::string output_format = sql_cmd.get<std::string>("--format");
       const bool suppress_int_div_warning = sql_cmd.get<bool>("--no-int-division-warning");
+      if (output_format != "csv" && output_format != "markdown") {
+        logger.Error("sql query: --format must be csv or markdown.");
+        return 1;
+      }
       if (!csv_override.empty() && !db_override.empty()) {
         logger.Error("sql query: pass only one of --csv or --db.");
         return 1;
@@ -727,7 +1279,7 @@ int main(int argc, char** argv) {
       if (input_kind == csvzall::pipeline::SqlQueryInputKind::kSqlite) {
         csvzall::pipeline::RunStats ps;
         const auto rc = csvzall::pipeline::RunSqlQueryDb(
-            query_text, source_path, std::cout, BuildCallbacks(logger), ps);
+            query_text, source_path, output_format, std::cout, BuildCallbacks(logger), ps);
         stats = FinishStats(ps, start);
         MaybePrintVerboseStats(stats, logger);
         return rc;
@@ -750,6 +1302,7 @@ int main(int argc, char** argv) {
       const auto rc = csvzall::pipeline::RunSqlQueryCsv(
           query_text,
           sql_cmd.get<std::string>("--table"),
+          output_format,
           *input, std::cout, options, BuildCallbacks(logger), ps);
       stats = FinishStats(ps, start);
       MaybePrintVerboseStats(stats, logger);

@@ -16,6 +16,8 @@ This file is the canonical AI reference for this repository.
 - **Streaming** (`head`): row-by-row, no buffering, no SQLite.
 - **SQLite-backed** (`filter`, `derive`, `summarize`, `timeseries`): load CSV into SQLite, execute SQL, stream output.
 - **Export** (`sql`): load CSV into a persistent SQLite database file; no transform output stream.
+- **File update** (`append`, `merge`): exact-header CSV file combination; `merge` is the keyed rerunnable import primitive.
+- **Rendering** (`calendar`, `heatmap`): convert fixed-shape tabular data to Markdown or SVG report artifacts.
 
 ## SQLite conventions
 
@@ -35,6 +37,12 @@ This file is the canonical AI reference for this repository.
 - Keep stdout for data output and stderr for diagnostics.
 - Keep `RunOptions` as the shared flow point for cross-command behavior (for example exact matching and SQLite threshold).
 - Avoid duplicating logic. Move shared helpers to `src/pipeline/common/` (general) or `src/pipeline/sqlite/` (SQLite-specific). If no clean home exists, add a `// TODO(dedup):` comment rather than copying.
+
+## CLI help quality
+
+- Every public CLI command must be self-discoverable from `--help`.
+- Command help must include the required input shape, output shape, one realistic example, important edge-case behavior, and related commands or a pipeline example when relevant.
+- Do not rely on README-only documentation for command-critical behavior. Agents often inspect `--help` before reading project docs.
 
 ## Dependency documentation
 

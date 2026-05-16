@@ -26,6 +26,8 @@ option(CSVZALL_PREFER_SIBLING_CSV_PARSER "Prefer ../csv-parser over other csv-pa
 option(CSVZALL_ENABLE_KEYCHAIN "Enable OS keychain credential storage when available" ON)
 option(CSVZALL_FETCH_KEYCHAIN "Fetch hrantzsch/keychain when not found on system" ON)
 option(CSVZALL_FETCH_ZLIB "Fetch zlib when not found on system" ON)
+option(CSVZALL_FETCH_SIMDJSON "Fetch simdjson when not found on system" ON)
+option(CSVZALL_ENABLE_SVGPLOT "Enable SVG chart output through a local svgplot checkout" ON)
 set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT ON)
 if(MSVC)
   set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT OFF)
@@ -63,7 +65,34 @@ set(BUILD_PYTHON OFF CACHE BOOL "Disable csv-parser Python bindings" FORCE)
 set(CSV_BUILD_SINGLE_INCLUDE_TEST OFF CACHE BOOL "Disable csv-parser single include test" FORCE)
 set(CSV_CXX_STANDARD "${CSVZALL_CXX_STANDARD}" CACHE STRING "C++ standard for csv-parser" FORCE)
 
+set(CSVZALL_CSV_PARSER_PATCH_SCRIPT
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch_csv_parser_row_offsets.cmake")
+
+function(csvzall_patch_csv_parser source_dir)
+  execute_process(
+    COMMAND ${CMAKE_COMMAND}
+      -D "CSV_PARSER_SOURCE_DIR=${source_dir}"
+      -P "${CSVZALL_CSV_PARSER_PATCH_SCRIPT}"
+    COMMAND_ERROR_IS_FATAL ANY)
+endfunction()
+
+function(csvzall_prepare_local_csv_parser source_dir out_var)
+  get_filename_component(_csvzall_csv_parser_source "${source_dir}" ABSOLUTE)
+  set(_csvzall_csv_parser_patched "${CMAKE_BINARY_DIR}/csv-parser-patched")
+  file(REMOVE_RECURSE "${_csvzall_csv_parser_patched}")
+  file(MAKE_DIRECTORY "${_csvzall_csv_parser_patched}")
+  file(COPY "${_csvzall_csv_parser_source}/"
+       DESTINATION "${_csvzall_csv_parser_patched}"
+       PATTERN ".git" EXCLUDE
+       PATTERN ".vs" EXCLUDE
+       PATTERN "out" EXCLUDE
+       PATTERN "build" EXCLUDE)
+  csvzall_patch_csv_parser("${_csvzall_csv_parser_patched}")
+  set(${out_var} "${_csvzall_csv_parser_patched}" PARENT_SCOPE)
+endfunction()
+
 set(CSVZALL_LOCAL_CSV_PARSER_ROOT "")
+set(CSVZALL_CSV_PARSER_SOURCE_DIR "")
 if(NOT CSV_PARSER_ROOT STREQUAL "")
   get_filename_component(CSVZALL_LOCAL_CSV_PARSER_ROOT "${CSV_PARSER_ROOT}" ABSOLUTE)
 elseif(CSVZALL_PREFER_SIBLING_CSV_PARSER AND EXISTS "${CSVZALL_SIBLING_CSV_PARSER_ROOT}")
@@ -78,7 +107,9 @@ if(NOT CSVZALL_LOCAL_CSV_PARSER_ROOT STREQUAL "")
   endif()
 
   message(STATUS "Using csv-parser from: ${CSVZALL_LOCAL_CSV_PARSER_ROOT}")
-  add_subdirectory("${CSVZALL_LOCAL_CSV_PARSER_ROOT}" "${CMAKE_BINARY_DIR}/csv-parser" EXCLUDE_FROM_ALL)
+  csvzall_prepare_local_csv_parser("${CSVZALL_LOCAL_CSV_PARSER_ROOT}" CSVZALL_CSV_PARSER_SOURCE_DIR)
+  message(STATUS "Using patched csv-parser copy: ${CSVZALL_CSV_PARSER_SOURCE_DIR}")
+  add_subdirectory("${CSVZALL_CSV_PARSER_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/csv-parser-patched-build" EXCLUDE_FROM_ALL)
 elseif(CSVZALL_FETCH_CSV_PARSER)
   message(STATUS "Fetching csv-parser with FetchContent")
   FetchContent_Declare(
@@ -86,12 +117,22 @@ elseif(CSVZALL_FETCH_CSV_PARSER)
     GIT_REPOSITORY https://github.com/vincentlaucsb/csv-parser.git
     GIT_TAG master
     GIT_SHALLOW TRUE
+    PATCH_COMMAND
+      ${CMAKE_COMMAND}
+        -D "CSV_PARSER_SOURCE_DIR=<SOURCE_DIR>"
+        -P "${CSVZALL_CSV_PARSER_PATCH_SCRIPT}"
     UPDATE_DISCONNECTED TRUE
   )
   FetchContent_MakeAvailable(csv_parser)
+  FetchContent_GetProperties(csv_parser SOURCE_DIR CSVZALL_CSV_PARSER_SOURCE_DIR)
+  if(CSVZALL_CSV_PARSER_SOURCE_DIR)
+    csvzall_patch_csv_parser("${CSVZALL_CSV_PARSER_SOURCE_DIR}")
+  endif()
 elseif(EXISTS "${CSVZALL_IN_REPO_CSV_PARSER_ROOT}")
   message(STATUS "Using csv-parser from: ${CSVZALL_IN_REPO_CSV_PARSER_ROOT}")
-  add_subdirectory("${CSVZALL_IN_REPO_CSV_PARSER_ROOT}" "${CMAKE_BINARY_DIR}/csv-parser" EXCLUDE_FROM_ALL)
+  csvzall_prepare_local_csv_parser("${CSVZALL_IN_REPO_CSV_PARSER_ROOT}" CSVZALL_CSV_PARSER_SOURCE_DIR)
+  message(STATUS "Using patched csv-parser copy: ${CSVZALL_CSV_PARSER_SOURCE_DIR}")
+  add_subdirectory("${CSVZALL_CSV_PARSER_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/csv-parser-patched-build" EXCLUDE_FROM_ALL)
 else()
   message(FATAL_ERROR
     "csv-parser not found.\n"
@@ -171,6 +212,86 @@ set(SQLITECPP_RUN_CPPLINT    OFF CACHE BOOL "" FORCE)
 set(SQLITECPP_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(SQLITECPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SQLiteCpp)
+
+find_package(simdjson CONFIG QUIET)
+if(NOT TARGET simdjson::simdjson AND NOT TARGET simdjson AND CSVZALL_FETCH_SIMDJSON)
+  message(STATUS "simdjson not found; using FetchContent cache/fetch")
+  FetchContent_Declare(
+    simdjson
+    GIT_REPOSITORY https://github.com/simdjson/simdjson.git
+    GIT_TAG v3.13.0
+    GIT_SHALLOW TRUE
+    UPDATE_DISCONNECTED TRUE
+  )
+  set(SIMDJSON_BUILD_STATIC ON CACHE BOOL "Build static simdjson" FORCE)
+  set(SIMDJSON_BUILD_TESTS OFF CACHE BOOL "Disable simdjson tests" FORCE)
+  set(SIMDJSON_BUILD_BENCHMARKS OFF CACHE BOOL "Disable simdjson benchmarks" FORCE)
+  set(SIMDJSON_BUILD_EXAMPLES OFF CACHE BOOL "Disable simdjson examples" FORCE)
+  FetchContent_MakeAvailable(simdjson)
+endif()
+
+set(CSVZALL_SIMDJSON_TARGET "")
+if(TARGET simdjson::simdjson)
+  set(CSVZALL_SIMDJSON_TARGET simdjson::simdjson)
+elseif(TARGET simdjson)
+  set(CSVZALL_SIMDJSON_TARGET simdjson)
+endif()
+if(CSVZALL_SIMDJSON_TARGET STREQUAL "")
+  message(FATAL_ERROR "simdjson is required for JSON extraction. Install simdjson or enable CSVZALL_FETCH_SIMDJSON.")
+endif()
+
+set(SVGPLOT_ROOT "" CACHE PATH "Path to svgplot checkout (must contain include/svgplot/svgplot.hpp)")
+set(SVG_ROOT "" CACHE PATH "Path to vincentlaucsb/svg checkout (must contain src/svg.hpp)")
+set(CSVZALL_HAVE_SVGPLOT OFF)
+set(CSVZALL_SVGPLOT_TARGET "")
+set(CSVZALL_SIBLING_SVGPLOT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../svgplot")
+get_filename_component(CSVZALL_SIBLING_SVGPLOT_ROOT "${CSVZALL_SIBLING_SVGPLOT_ROOT}" ABSOLUTE)
+
+if(CSVZALL_ENABLE_SVGPLOT)
+  set(CSVZALL_LOCAL_SVGPLOT_ROOT "")
+  if(NOT SVGPLOT_ROOT STREQUAL "")
+    get_filename_component(CSVZALL_LOCAL_SVGPLOT_ROOT "${SVGPLOT_ROOT}" ABSOLUTE)
+  elseif(EXISTS "${CSVZALL_SIBLING_SVGPLOT_ROOT}/include/svgplot/svgplot.hpp")
+    set(CSVZALL_LOCAL_SVGPLOT_ROOT "${CSVZALL_SIBLING_SVGPLOT_ROOT}")
+  endif()
+
+  if(NOT CSVZALL_LOCAL_SVGPLOT_ROOT STREQUAL "" AND
+     EXISTS "${CSVZALL_LOCAL_SVGPLOT_ROOT}/include/svgplot/svgplot.hpp")
+    set(CSVZALL_LOCAL_SVG_ROOT "")
+    if(NOT SVG_ROOT STREQUAL "")
+      get_filename_component(CSVZALL_LOCAL_SVG_ROOT "${SVG_ROOT}" ABSOLUTE)
+    else()
+      set(_csvzall_svg_candidates
+        "${CSVZALL_LOCAL_SVGPLOT_ROOT}/out/build/x64-Release/_deps/svg-src"
+        "${CSVZALL_LOCAL_SVGPLOT_ROOT}/out/build/x64-Debug/_deps/svg-src"
+        "${CSVZALL_LOCAL_SVGPLOT_ROOT}/out/build/_deps/svg-src")
+      foreach(_candidate IN LISTS _csvzall_svg_candidates)
+        if(EXISTS "${_candidate}/src/svg.hpp")
+          set(CSVZALL_LOCAL_SVG_ROOT "${_candidate}")
+          break()
+        endif()
+      endforeach()
+    endif()
+
+    if(CSVZALL_LOCAL_SVG_ROOT STREQUAL "" OR NOT EXISTS "${CSVZALL_LOCAL_SVG_ROOT}/src/svg.hpp")
+      message(STATUS "svgplot found, but vincentlaucsb/svg was not found; heatmap command disabled. Set -DSVG_ROOT=<path-to-svg>.")
+    else()
+      message(STATUS "Using svgplot from: ${CSVZALL_LOCAL_SVGPLOT_ROOT}")
+      message(STATUS "Using svg dependency from: ${CSVZALL_LOCAL_SVG_ROOT}")
+      add_library(csvzall_svgplot INTERFACE)
+      target_include_directories(csvzall_svgplot INTERFACE
+        "${CSVZALL_LOCAL_SVGPLOT_ROOT}/include"
+        "${CSVZALL_LOCAL_SVG_ROOT}/src")
+      target_compile_features(csvzall_svgplot INTERFACE cxx_std_23)
+      set(CSVZALL_SVGPLOT_TARGET csvzall_svgplot)
+      set(CSVZALL_HAVE_SVGPLOT ON)
+    endif()
+  else()
+    message(STATUS "svgplot checkout not found; heatmap command disabled. Set -DSVGPLOT_ROOT=<path-to-svgplot>.")
+  endif()
+else()
+  message(STATUS "SVG chart output disabled (CSVZALL_ENABLE_SVGPLOT=OFF)")
+endif()
 
 find_package(Threads REQUIRED)
 
@@ -287,6 +408,18 @@ function(csvzall_copy_runtime_dependencies target_name)
   endif()
 endfunction()
 
+function(csvzall_copy_viewer_assets target_name)
+  add_custom_command(TARGET ${target_name} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+      "$<TARGET_FILE_DIR:${target_name}>/assets/viewer/vendor"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${PROJECT_SOURCE_DIR}/vendor/ag-grid/ag-grid-community.min.js"
+      "${PROJECT_SOURCE_DIR}/vendor/ag-grid/ag-grid.css"
+      "${PROJECT_SOURCE_DIR}/vendor/ag-grid/ag-theme-alpine.css"
+      "$<TARGET_FILE_DIR:${target_name}>/assets/viewer/vendor"
+    VERBATIM)
+endfunction()
+
 # PostgreSQL support via libpqxx (modern C++ wrapper around libpq).
 # Strategy:
 # 1) Respect CSVZALL_ENABLE_POSTGRESQL
@@ -396,17 +529,28 @@ set(CSVZALL_APP_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/transform_pipeline.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/column_lookup.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/gzip_stream.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/json_path.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/markdown_calendar.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/row_utils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/sqlite/sqlite_db.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/sqlite/csv_loader.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/append.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/CsvInputCommand.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/CsvTransformCommand.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/derive.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/filter.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/json_extract.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/max.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/sql_query.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/sql_export.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/summarize.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/timeseries.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/timeseries.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view.cpp)
+
+if(CSVZALL_HAVE_SVGPLOT)
+  list(APPEND CSVZALL_APP_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/heatmap.cpp)
+endif()
 
 if(CSVZALL_HAVE_POSTGRESQL)
   list(APPEND CSVZALL_APP_SOURCES
@@ -420,6 +564,7 @@ function(csvzall_configure_app target_name)
   set(LINK_LIBS
     ${CSVZALL_ARGPARSE_TARGET}
     ${CSVZALL_INDICATORS_TARGET}
+    ${CSVZALL_SIMDJSON_TARGET}
     csv
     SQLiteCpp
     Threads::Threads
@@ -431,6 +576,9 @@ function(csvzall_configure_app target_name)
   if(CSVZALL_HAVE_KEYCHAIN)
     list(APPEND LINK_LIBS ${CSVZALL_KEYCHAIN_TARGET})
   endif()
+  if(CSVZALL_HAVE_SVGPLOT)
+    list(APPEND LINK_LIBS ${CSVZALL_SVGPLOT_TARGET})
+  endif()
 
   target_link_libraries(${target_name} PRIVATE ${LINK_LIBS})
   csvzall_copy_runtime_dependencies(${target_name})
@@ -439,11 +587,16 @@ function(csvzall_configure_app target_name)
   set_property(TARGET ${target_name} PROPERTY CXX_STANDARD_REQUIRED ON)
   set_property(TARGET ${target_name} PROPERTY CXX_EXTENSIONS OFF)
 
+  target_compile_definitions(${target_name} PRIVATE CSVZALL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
   if(CSVZALL_HAVE_POSTGRESQL)
     target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_POSTGRESQL=1)
   endif()
   if(CSVZALL_HAVE_KEYCHAIN)
     target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_KEYCHAIN=1)
+  endif()
+  if(CSVZALL_HAVE_SVGPLOT)
+    target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_SVGPLOT=1)
   endif()
 
   if(MSVC)
@@ -461,11 +614,19 @@ endfunction()
 
 add_executable(csvzall ${CSVZALL_APP_SOURCES})
 csvzall_configure_app(csvzall)
+csvzall_copy_viewer_assets(csvzall)
 
 add_subdirectory(programs)
 
 install(TARGETS csvzall
-  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+  RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+  COMPONENT csvzall)
+install(FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-grid-community.min.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-grid.css"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-theme-alpine.css"
+  DESTINATION "${CMAKE_INSTALL_BINDIR}/assets/viewer/vendor"
+  COMPONENT csvzall)
 
 if(BUILD_TESTING)
   add_subdirectory(tests)
