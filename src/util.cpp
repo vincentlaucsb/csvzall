@@ -1,6 +1,7 @@
 #include "util.hpp"
 
 #include <cstdio>
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
 
@@ -8,12 +9,15 @@
 #include <Windows.h>
 #include <conio.h>
 #include <io.h>
-#elif defined(__APPLE__)
-#include <mach-o/dyld.h>
 #else
-#include <limits.h>
 #include <termios.h>
 #include <unistd.h>
+#endif
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#elif !defined(_WIN32)
+#include <limits.h>
 #endif
 
 namespace csvzall::util {
