@@ -47,6 +47,11 @@ for csv-parser follow-ups, not a committed roadmap.
 - The local csv-parser patch adds `RawCSVData::source_start` and exposes
   `CSVRow::byte_offset()` as `source_start + data_start` (or `0` for default
   rows). Keep this API generic; it should not mention csvzall or the viewer.
+- csvzall's CMake patch is intentionally a temporary bridge, but it is brittle
+  against parser-internal refactors. A macOS AppleClang CI failure showed a
+  duplicate patched `parse_chunk(..., size_t source_start)` overload after the
+  fetched source patch was applied more than once. Upstreaming the row-offset
+  API would remove this text-patching failure mode entirely.
 - Backport this upstream once the paged viewer proves the API shape across
   mmap, stream, CRLF, and quoted multiline rows.
 

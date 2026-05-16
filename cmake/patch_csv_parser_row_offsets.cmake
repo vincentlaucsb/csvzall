@@ -59,7 +59,7 @@ if(EXISTS "${_new_core}" AND EXISTS "${_new_orchestrator}")
       "                this->data_ptr_->data = chunk;\n                this->data_ptr_->source_start = options.source_start;\n"
       _core "${_core}")
   endif()
-  if(NOT _core MATCHES "RowSink& output,\\n                size_t source_start")
+  if(NOT _core MATCHES "RowSink& output,[ \t\r\n]+size_t source_start")
     string(REPLACE
       "            ParserChunkResult parse_chunk(\n                csv::string_view chunk,\n                std::shared_ptr<void> owner,\n                RowSink& output,\n                const ParserChunkOptions& options\n            ) {"
       "            ParserChunkResult parse_chunk(\n                csv::string_view chunk,\n                std::shared_ptr<void> owner,\n                RowSink& output,\n                size_t source_start\n            ) {\n                return this->parse_chunk(\n                    chunk,\n                    std::move(owner),\n                    output,\n                    ParserChunkOptions(this->initial_state_, true, source_start)\n                );\n            }\n\n            ParserChunkResult parse_chunk(\n                csv::string_view chunk,\n                std::shared_ptr<void> owner,\n                RowSink& output,\n                const ParserChunkOptions& options\n            ) {"

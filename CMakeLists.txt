@@ -117,10 +117,6 @@ elseif(CSVZALL_FETCH_CSV_PARSER)
     GIT_REPOSITORY https://github.com/vincentlaucsb/csv-parser.git
     GIT_TAG master
     GIT_SHALLOW TRUE
-    PATCH_COMMAND
-      ${CMAKE_COMMAND}
-        -D "CSV_PARSER_SOURCE_DIR=<SOURCE_DIR>"
-        -P "${CSVZALL_CSV_PARSER_PATCH_SCRIPT}"
     UPDATE_DISCONNECTED TRUE
   )
   FetchContent_MakeAvailable(csv_parser)
