@@ -88,6 +88,7 @@ run_csvzall_case("top-level help mentions sql regex functions" 0 "regexp_like\\(
 run_csvzall_case("merge help documents existing wins" 0 "Existing rows win" "" merge --help)
 run_csvzall_case("view help documents token-gated local server" 0 "API requests require a random session token" "" view --help)
 run_csvzall_case("view help documents startup-json" 0 "--startup-json" "" view --help)
+run_csvzall_case("view help documents edit mode" 0 "--edit" "" view --help)
 run_csvzall_case("calendar help documents fixed schema" 0 "date,content" "" calendar --help)
 run_csvzall_case("calendar help documents duplicate behavior" 0 "Duplicate dates are rejected" "" calendar --help)
 if(CSVZALL_HAVE_SVGPLOT)

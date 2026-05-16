@@ -50,6 +50,9 @@ struct RunOptions {
   // view_materialize_threshold_mb and uses row-offset paging for larger files.
   ViewModeSelection view_mode = ViewModeSelection::Auto;
   std::size_t view_materialize_threshold_mb = 200;
+  // Enable csvzall view's explicit editable mode. Editing always uses
+  // materialized local-file data so save can rewrite the CSV deterministically.
+  bool view_edit = false;
 };
 
 struct RunStats {

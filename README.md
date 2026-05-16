@@ -207,6 +207,12 @@ column resizing and virtual scrolling, while the local API (`/api/schema`,
 is a startup-time snapshot of the CSV; reopen the viewer to pick up on-disk file
 changes.
 
+Pass `--edit` to enable explicit editable mode. Editable mode materializes the
+CSV, allows cell edits plus row insert/delete in the browser, tracks dirty state,
+and saves by writing a temporary sibling CSV before atomically replacing the
+source. Save refuses if the source file size or mtime changed after the viewer
+opened.
+
 Current limitation: `view` is optimized for plain local CSV files. stdin,
 `.gz`, and `.zip` inputs are rejected in this pass. Server-side global
 sort/search/filter are deferred for paged mode; the UI only enables full-table
@@ -214,6 +220,7 @@ sort/filter when the table is materialized.
 
 ```sh
 csvzall view todoist_activities.csv
+csvzall view todoist_activities.csv --edit
 csvzall view todoist_activities.csv --no-open --port 43117
 csvzall view todoist_activities.csv --no-open --startup-json
 csvzall view todoist_activities.csv --view-mode paged

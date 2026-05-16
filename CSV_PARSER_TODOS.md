@@ -50,6 +50,17 @@ for csv-parser follow-ups, not a committed roadmap.
 - Backport this upstream once the paged viewer proves the API shape across
   mmap, stream, CRLF, and quoted multiline rows.
 
+## DataFrame editing
+
+- csvzall view editing currently uses DataFrame as the materialized read model,
+  then keeps a simple row-vector edit model for cell edits and arbitrary row
+  insertion before rewriting the CSV.
+- DataFrame already has row deletion helpers, but unkeyed positional cell
+  mutation and arbitrary row insertion are not a clean public API yet.
+- Backport or redesign a small DataFrame editing surface later: positional
+  `set_at`, `insert_row_at`, row shape validation, and deterministic row export
+  would let csvzall remove its local row-vector bridge.
+
 ## infer_scalar
 
 - Consider evolving `data_type()` into a public `infer_scalar` API, separate

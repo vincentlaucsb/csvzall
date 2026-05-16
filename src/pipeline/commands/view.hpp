@@ -7,6 +7,7 @@
 #include <memory>
 #include <ostream>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -47,7 +48,10 @@ struct CsvMaterializedFile {
   std::string input_path;
   std::string file_name;
   std::vector<std::string> headers;
+  std::shared_ptr<csv::DataFrame<>> frame;
   std::vector<std::vector<std::string>> rows;
+  std::uint64_t source_size = 0;
+  std::filesystem::file_time_type source_mtime{};
 };
 
 enum class CsvViewDataMode {
@@ -73,6 +77,11 @@ class CsvViewData {
       std::uint64_t offset,
       std::uint64_t limit) const;
 
+  void edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
+  void delete_row(std::uint64_t row);
+  void insert_row(std::uint64_t row, const std::vector<std::string>& values);
+  void save();
+
  private:
   explicit CsvViewData(CsvMaterializedFile materialized);
   explicit CsvViewData(CsvIndexedFile indexed);
@@ -83,6 +92,7 @@ class CsvViewData {
 struct ViewServerOptions {
   int requested_port = 0;
   bool serve_once = false;
+  bool editable = false;
   std::string session_token;
 };
 

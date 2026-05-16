@@ -555,6 +555,9 @@ Output shape:
   API requests require a random session token.
   --startup-json prints {"url":"http://127.0.0.1:..."} for host integrations.
   The viewer is read-only by design in this MVP.
+  Pass --edit to enable explicit editable mode. Editable mode materializes the
+  file, tracks dirty state in the browser, and saves by atomically rewriting the
+  source CSV after checking that size and mtime did not change externally.
   Auto mode materializes files at or below --materialize-threshold-mb for
   client-side sorting/filtering and uses indexed /api/rows paging for larger
   files. Paged mode disables global sort/search/filter until server-side
@@ -563,6 +566,7 @@ Output shape:
 
 Examples:
   csvzall view activities.csv
+  csvzall view activities.csv --edit
   csvzall view activities.csv --no-open --port 43117
   csvzall view activities.csv --no-open --startup-json
   csvzall view activities.csv --view-mode paged
@@ -598,6 +602,10 @@ Related:
       .help("Auto mode materializes plain local files at or below this size for client-side sort/filter")
       .default_value(200)
       .scan<'i', int>();
+  view_cmd.add_argument("--edit")
+      .help("Enable explicit editable mode with cell edits, row insert/delete, and atomic save")
+      .default_value(false)
+      .implicit_value(true);
   view_cmd.add_argument("--no-open")
       .help("Print the URL without opening a browser automatically")
       .default_value(false)
@@ -1134,6 +1142,7 @@ Examples:
     options.zip_entry = view_cmd.get<std::string>("--zip-entry");
     options.view_mode = *view_mode;
     options.view_materialize_threshold_mb = static_cast<std::size_t>(materialize_threshold_mb);
+    options.view_edit = view_cmd.get<bool>("--edit");
 
     csvzall::pipeline::RunStats ps;
     const auto rc = csvzall::pipeline::RunView(
