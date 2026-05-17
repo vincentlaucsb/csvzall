@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>csvzall view</title>
+  <link rel="stylesheet" href="/assets/ag-grid.css">
+  <link rel="stylesheet" href="/assets/ag-theme-alpine.css">
+  <link rel="stylesheet" href="/assets/viewer.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="file-meta">
+        <h1 id="file-name">Loading…</h1>
+        <span id="summary" class="summary">Preparing read-only table view.</span>
+      </div>
+      <label class="search">
+        <span id="mode-label">Loading rows</span>
+        <input id="quick-filter" type="search" placeholder="Filter loaded table">
+      </label>
+      <div id="edit-toolbar" class="edit-toolbar" hidden>
+        <button id="insert-row" type="button">Insert row</button>
+        <button id="delete-row" type="button">Delete row</button>
+        <button id="insert-column" type="button">Insert column</button>
+        <button id="delete-column" type="button">Delete column</button>
+        <button id="reset" type="button" disabled>Reset</button>
+        <button id="save" type="button" disabled>Save</button>
+      </div>
+    </header>
+    <main class="grid-wrap">
+      <div id="grid" class="ag-theme-alpine-auto-dark"></div>
+    </main>
+    <footer class="footer">
+      <span>Local-only session.</span>
+      <span id="status">Connecting…</span>
+    </footer>
+  </div>
+  <dialog id="insert-column-dialog" class="csvzall-dialog">
+    <form id="insert-column-form" class="dialog-form">
+      <h2>Insert column</h2>
+      <label>
+        <span>Column name</span>
+        <input id="insert-column-name" type="text" autocomplete="off" required>
+      </label>
+      <p id="insert-column-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancel-insert-column" type="button">Cancel</button>
+        <button type="submit">Insert</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/assets/ag-grid-community.min.js"></script>
+  <script src="/assets/viewer.js"></script>
+</body>
+</html>

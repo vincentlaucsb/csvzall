@@ -14,11 +14,6 @@ for csv-parser follow-ups, not a committed roadmap.
 - `csv::chunk_parallel_apply()` is the more important building block for those
   advanced cases. It gives callers bounded chunking and per-column parallelism
   while leaving the inference policy under application control.
-- Make `CSVReader`'s default variable-column behavior obvious in the docs:
-  rows that are too short or too long are ignored by default. Generic ETL
-  callers can rely on that instead of duplicating row-width checks after
-  `read_chunk()`, and users who want different behavior should be pointed at
-  the variable-columns configuration.
 - Document that `CSVField::is_null()` is backed by scalar classification via
   `CSVField::type()`. This is the right default because null semantics stay in
   one place, but it matters in ultra-hot ETL loops: callers that only need the
@@ -35,36 +30,6 @@ for csv-parser follow-ups, not a committed roadmap.
   `CSVField::try_get<T>()` are non-const. The documentation should either show
   local `CSVField` temporaries as mutable (`auto field = row[i]`) or explain why
   these accessors are intentionally non-const.
-
-## Row byte offsets
-
-- csvzall's large-file read-only viewer needs stable row byte offsets so it can
-  build a compact row index and serve `/api/rows` pages without keeping every
-  cell materialized in memory.
-- `CSVRow` already tracks row-local `data_start`, which is the right primitive
-  for this workflow, but it needs the chunk's absolute source offset to become a
-  stable file offset.
-- The local csv-parser patch adds `RawCSVData::source_start` and exposes
-  `CSVRow::byte_offset()` as `source_start + data_start` (or `0` for default
-  rows). Keep this API generic; it should not mention csvzall or the viewer.
-- csvzall's CMake patch is intentionally a temporary bridge, but it is brittle
-  against parser-internal refactors. A macOS AppleClang CI failure showed a
-  duplicate patched `parse_chunk(..., size_t source_start)` overload after the
-  fetched source patch was applied more than once. Upstreaming the row-offset
-  API would remove this text-patching failure mode entirely.
-- Backport this upstream once the paged viewer proves the API shape across
-  mmap, stream, CRLF, and quoted multiline rows.
-
-## DataFrame editing
-
-- csvzall view editing currently uses DataFrame as the materialized read model,
-  then keeps a simple row-vector edit model for cell edits and arbitrary row
-  insertion before rewriting the CSV.
-- DataFrame already has row deletion helpers, but unkeyed positional cell
-  mutation and arbitrary row insertion are not a clean public API yet.
-- Backport or redesign a small DataFrame editing surface later: positional
-  `set_at`, `insert_row_at`, row shape validation, and deterministic row export
-  would let csvzall remove its local row-vector bridge.
 
 ## infer_scalar
 

@@ -280,6 +280,22 @@ std::optional<csvzall::pipeline::ViewModeSelection> ParseViewMode(const std::str
   return std::nullopt;
 }
 
+std::string GetEnvString(const char* name) {
+#ifdef _WIN32
+  char* value = nullptr;
+  std::size_t size = 0;
+  if (_dupenv_s(&value, &size, name) != 0 || value == nullptr) {
+    return {};
+  }
+  std::string result(value, size > 0 ? size - 1 : 0);
+  std::free(value);
+  return result;
+#else
+  const char* value = std::getenv(name);
+  return value == nullptr ? std::string{} : std::string(value);
+#endif
+}
+
 std::string CalendarMonthName(unsigned month) {
   static constexpr std::array<std::string_view, 12> names{
       "January", "February", "March", "April", "May", "June",
@@ -542,7 +558,7 @@ Examples:
 
   argparse::ArgumentParser view_cmd("view");
   view_cmd.add_description(
-      "Start a local read-only browser table viewer for one plain CSV file.");
+      "Start a local browser table viewer for one plain CSV file.");
   view_cmd.add_epilog(R"(Input shape:
   A plain local CSV file path is required. stdin, gzip (.gz), and zip (.zip)
   inputs are intentionally not supported by the viewer in this pass.
@@ -554,10 +570,16 @@ Output shape:
   Behavior:
   API requests require a random session token.
   --startup-json prints {"url":"http://127.0.0.1:..."} for host integrations.
-  The viewer is read-only by design in this MVP.
+  The viewer is read-only unless --edit is provided.
   Pass --edit to enable explicit editable mode. Editable mode materializes the
-  file, tracks dirty state in the browser, and saves by atomically rewriting the
-  source CSV after checking that size and mtime did not change externally.
+  file, tracks dirty state in the browser, supports cell edits plus row/column
+  insert/delete, exposes row deletion from the context menu, and saves by
+  atomically rewriting the source CSV after checking that size and mtime did not
+  change externally.
+  --viewer-assets <dir> is a developer override that serves index.html,
+  viewer.css, and viewer.js from disk on every request; embedded assets remain
+  the default. CSVZALL_VIEWER_ASSETS provides the same override. AG Grid and
+  Popright vendor files remain embedded.
   Auto mode materializes files at or below --materialize-threshold-mb for
   client-side sorting/filtering and uses indexed /api/rows paging for larger
   files. Paged mode disables global sort/search/filter until server-side
@@ -603,9 +625,12 @@ Related:
       .default_value(200)
       .scan<'i', int>();
   view_cmd.add_argument("--edit")
-      .help("Enable explicit editable mode with cell edits, row insert/delete, and atomic save")
+      .help("Enable explicit editable mode with cell edits, row/column insert/delete, reset, and atomic save")
       .default_value(false)
       .implicit_value(true);
+  view_cmd.add_argument("--viewer-assets")
+      .help("Developer mode: serve index.html, viewer.css, and viewer.js from this directory instead of embedded copies")
+      .default_value(std::string{""});
   view_cmd.add_argument("--no-open")
       .help("Print the URL without opening a browser automatically")
       .default_value(false)
@@ -1143,6 +1168,10 @@ Examples:
     options.view_mode = *view_mode;
     options.view_materialize_threshold_mb = static_cast<std::size_t>(materialize_threshold_mb);
     options.view_edit = view_cmd.get<bool>("--edit");
+    options.view_asset_dir = view_cmd.get<std::string>("--viewer-assets");
+    if (options.view_asset_dir.empty()) {
+      options.view_asset_dir = GetEnvString("CSVZALL_VIEWER_ASSETS");
+    }
 
     csvzall::pipeline::RunStats ps;
     const auto rc = csvzall::pipeline::RunView(

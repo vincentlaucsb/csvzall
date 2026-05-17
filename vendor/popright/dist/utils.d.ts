@@ -1,0 +1,21 @@
+import type { MenuChildItem, ContextMenuOptions, MenuContext, MenuItem, MenuItemsInput, MenuSelectableItem, NormalizedContextMenuOptions, OpenInput } from "./types.js";
+export declare function normalizeOptions(options: ContextMenuOptions): NormalizedContextMenuOptions;
+export declare function normalizeTargets(target: unknown): EventTarget[];
+export declare function isEventTarget(value: unknown): value is EventTarget;
+export declare function resolveItems(items: MenuItemsInput, context: MenuContext): MenuItem[];
+export declare function normalizeItems(items: unknown): MenuItem[];
+export declare function hasSelectableOrLabelContent(items: MenuItem[]): boolean;
+export declare function selectableIndexes(items: MenuItem[]): number[];
+export declare function firstSelectableIndex(items: MenuItem[]): number;
+export declare function lastSelectableIndex(items: MenuItem[]): number;
+export declare function isSelectable(item: MenuItem | undefined): item is MenuSelectableItem;
+export declare function isChildMenuItem(item: MenuItem): item is MenuChildItem;
+export declare function createMenuContext(input: OpenInput): MenuContext;
+export declare function containsEventTarget(candidate: EventTarget, target: EventTarget | null): boolean;
+export declare function applyStyle(element: HTMLElement, style: Partial<CSSStyleDeclaration> | undefined): void;
+export declare function composeClass(...values: Array<string | false | null | undefined>): string;
+export declare function splitClasses(value: string): string[];
+export declare function toCssValue(value: number | string): string;
+export declare function kebabCase(value: string): string;
+export declare function canUseDom(): boolean;
+//# sourceMappingURL=utils.d.ts.map

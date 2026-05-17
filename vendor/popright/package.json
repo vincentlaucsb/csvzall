@@ -1,0 +1,44 @@
+{
+  "name": "popright",
+  "version": "0.0.1",
+  "description": "A tiny, typed, data-driven context menu primitive for modern web apps.",
+  "type": "module",
+  "homepage": "https://github.com/vincentlaucsb/popright#readme",
+  "bugs": {
+    "url": "https://github.com/vincentlaucsb/popright/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vincentlaucsb/popright.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "context-menu",
+    "menu",
+    "typescript",
+    "headless-ui"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": [
+    "./styles.css"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./styles.css": "./dist/styles.css"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build.mjs",
+    "test": "vitest run --pool=threads"
+  },
+  "license": "MIT"
+}

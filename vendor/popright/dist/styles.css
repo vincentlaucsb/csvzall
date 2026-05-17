@@ -1,0 +1,168 @@
+:root {
+  --popright-bg: #ffffff;
+  --popright-color: #111827;
+  --popright-border: #d4d4d4;
+  --popright-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
+  --popright-radius: 6px;
+  --popright-padding: 4px;
+  --popright-item-height: 28px;
+  --popright-item-gap: 24px;
+  --popright-item-cursor: pointer;
+  --popright-item-disabled-cursor: not-allowed;
+  --popright-icon-size: 16px;
+  --popright-active-bg: #f4f4f5;
+  --popright-disabled-color: #71717a;
+  --popright-danger-color: #dc2626;
+  --popright-z-index: 1000;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --popright-bg: #18181b;
+    --popright-color: #fafafa;
+    --popright-border: #3f3f46;
+    --popright-active-bg: #27272a;
+    --popright-disabled-color: #71717a;
+    --popright-danger-color: #f87171;
+    --popright-shadow: 0 10px 28px rgb(0 0 0 / 0.34);
+  }
+}
+
+[data-popright-theme="light"] {
+  color-scheme: light;
+  --popright-bg: #ffffff;
+  --popright-color: #111827;
+  --popright-border: #d4d4d4;
+  --popright-active-bg: #f4f4f5;
+  --popright-disabled-color: #71717a;
+  --popright-danger-color: #dc2626;
+}
+
+[data-popright-theme="dark"] {
+  color-scheme: dark;
+  --popright-bg: #18181b;
+  --popright-color: #fafafa;
+  --popright-border: #3f3f46;
+  --popright-active-bg: #27272a;
+  --popright-disabled-color: #71717a;
+  --popright-danger-color: #f87171;
+  --popright-shadow: 0 10px 28px rgb(0 0 0 / 0.34);
+}
+
+.popright-menu,
+[data-popright-menu] {
+  box-sizing: border-box;
+  min-width: 160px;
+  padding: var(--popright-padding);
+  color: var(--popright-color);
+  background: var(--popright-bg);
+  border: 1px solid var(--popright-border);
+  border-radius: var(--popright-radius);
+  box-shadow: var(--popright-shadow);
+  z-index: var(--popright-z-index);
+  font: 13px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  outline: none;
+  user-select: none;
+}
+
+.popright-item,
+[data-popright-item] {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: var(--popright-item-height);
+  gap: var(--popright-item-gap);
+  padding: 0 8px;
+  border-radius: 4px;
+  color: inherit;
+  white-space: nowrap;
+  cursor: var(--popright-item-cursor);
+}
+
+[data-popright-menu][data-popright-has-icons] [data-popright-item],
+.popright-menu[data-popright-has-icons] .popright-item {
+  grid-template-columns: var(--popright-icon-size) minmax(0, 1fr) auto;
+}
+
+.popright-icon,
+[data-popright-icon] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--popright-icon-size);
+  height: var(--popright-icon-size);
+  color: var(--popright-disabled-color);
+}
+
+.popright-item-active,
+[data-popright-item][data-active] {
+  background: var(--popright-active-bg);
+}
+
+.popright-item-disabled,
+[data-popright-item][data-disabled] {
+  color: var(--popright-disabled-color);
+  cursor: var(--popright-item-disabled-cursor);
+}
+
+.popright-item-danger,
+[data-popright-item][data-variant="danger"] {
+  color: var(--popright-danger-color);
+}
+
+.popright-separator,
+[data-popright-separator] {
+  height: 1px;
+  margin: 4px;
+  background: var(--popright-border);
+}
+
+.popright-header,
+[data-popright-header] {
+  padding: 6px 8px 5px;
+  color: var(--popright-color);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+[data-popright-header-align="right"] {
+  text-align: right;
+}
+
+[data-popright-menu][data-popright-has-icons] [data-popright-header-align="items"],
+.popright-menu[data-popright-has-icons] .popright-header[data-popright-header-align="items"] {
+  padding-inline-start: calc(8px + var(--popright-icon-size) + var(--popright-item-gap));
+}
+
+[data-popright-label] {
+  min-height: 24px;
+  padding: 4px 8px 2px;
+  color: var(--popright-disabled-color);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+[data-popright-label-text] {
+  color: inherit;
+}
+
+.popright-shortcut,
+[data-popright-shortcut] {
+  color: var(--popright-disabled-color);
+  font-size: 12px;
+}
+
+.popright-submenu,
+[data-popright-submenu] {
+  min-width: 180px;
+}
+
+.popright-submenu-trigger,
+[data-popright-submenu-arrow] {
+  color: var(--popright-disabled-color);
+  font-size: 16px;
+  line-height: 1;
+}

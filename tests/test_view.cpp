@@ -33,6 +33,30 @@ std::vector<std::vector<std::string>> ReadAllRows(const std::filesystem::path& p
   return rows;
 }
 
+std::vector<std::string> ReadHeaders(const std::filesystem::path& path) {
+  csv::CSVReader reader(path.string(), csv::CSVFormat().header_row(0));
+  return reader.get_col_names();
+}
+
+std::filesystem::path WriteTempViewerAssets(const std::string& name) {
+  const auto dir = std::filesystem::temp_directory_path() / name;
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  {
+    std::ofstream output(dir / "index.html", std::ios::binary);
+    output << "<!doctype html><title>dev viewer</title>";
+  }
+  {
+    std::ofstream output(dir / "viewer.css", std::ios::binary);
+    output << "body { color: rgb(1, 2, 3); }";
+  }
+  {
+    std::ofstream output(dir / "viewer.js", std::ios::binary);
+    output << "window.csvzallDevViewer = true;";
+  }
+  return dir;
+}
+
 }  // namespace
 
 TEST_CASE("view: loads CSV rows with shared parser behavior") {
@@ -220,6 +244,26 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer->status == 200);
   REQUIRE(viewer->body.find("csvzall view") != std::string::npos);
 
+  const auto viewer_js = client.Get("/assets/viewer.js");
+  REQUIRE(viewer_js);
+  REQUIRE(viewer_js->status == 200);
+  REQUIRE(viewer_js->body.find("csvzallViewBootstrap") != std::string::npos);
+
+  const auto ag_grid_css = client.Get("/assets/ag-grid.css");
+  REQUIRE(ag_grid_css);
+  REQUIRE(ag_grid_css->status == 200);
+  REQUIRE(ag_grid_css->body.find(".ag-") != std::string::npos);
+
+  const auto popright_css = client.Get("/assets/popright/styles.css");
+  REQUIRE(popright_css);
+  REQUIRE(popright_css->status == 200);
+  REQUIRE(popright_css->body.find("popright-menu") != std::string::npos);
+
+  const auto popright_js = client.Get("/assets/popright/index.js");
+  REQUIRE(popright_js);
+  REQUIRE(popright_js->status == 200);
+  REQUIRE(popright_js->body.find("createContextMenu") != std::string::npos);
+
   const auto schema = client.Get("/api/schema", headers);
   REQUIRE(schema);
   REQUIRE(schema->status == 200);
@@ -261,6 +305,78 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   const auto post_rows = client.Post("/api/rows", headers, "", "application/json");
   REQUIRE(post_rows);
   REQUIRE(post_rows->status == 404);
+
+  server.Stop();
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("view: developer asset directory overrides first-party embedded viewer assets") {
+  const auto csv = tests::MakeTestCsv(
+      {"name", "value"},
+      {{"alice", "10"}});
+  const auto path = WriteTempCsv(csv, "csvzall_view_dev_assets.csv");
+  const auto asset_dir = WriteTempViewerAssets("csvzall_view_dev_assets");
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_mode = pipeline::ViewModeSelection::Paged;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, false, "test-token", asset_dir.string()}) == 0);
+
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto viewer = client.Get("/?token=test-token");
+  REQUIRE(viewer);
+  REQUIRE(viewer->status == 200);
+  REQUIRE(viewer->body.find("dev viewer") != std::string::npos);
+
+  const auto viewer_js = client.Get("/assets/viewer.js");
+  REQUIRE(viewer_js);
+  REQUIRE(viewer_js->status == 200);
+  REQUIRE(viewer_js->body.find("csvzallDevViewer") != std::string::npos);
+
+  const auto ag_grid_css = client.Get("/assets/ag-grid.css");
+  REQUIRE(ag_grid_css);
+  REQUIRE(ag_grid_css->status == 200);
+  REQUIRE(ag_grid_css->body.find(".ag-") != std::string::npos);
+
+  server.Stop();
+  std::filesystem::remove(path);
+  std::filesystem::remove_all(asset_dir);
+}
+
+TEST_CASE("view: developer asset directory resolves relative to source tree") {
+  const auto csv = tests::MakeTestCsv(
+      {"name", "value"},
+      {{"alice", "10"}});
+  const auto path = WriteTempCsv(csv, "csvzall_view_source_relative_dev_assets.csv");
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_mode = pipeline::ViewModeSelection::Paged;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  const auto old_cwd = std::filesystem::current_path();
+  std::filesystem::current_path(std::filesystem::temp_directory_path());
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  const auto start_result = server.Start({0, false, false, "test-token", "src/viewer"});
+  std::filesystem::current_path(old_cwd);
+  REQUIRE(start_result == 0);
+
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto viewer = client.Get("/?token=test-token");
+  REQUIRE(viewer);
+  REQUIRE(viewer->status == 200);
+  REQUIRE(viewer->body.find("csvzall view") != std::string::npos);
 
   server.Stop();
   std::filesystem::remove(path);
@@ -395,6 +511,122 @@ TEST_CASE("view edit: arbitrary row insertion persists through save") {
 
   REQUIRE(ReadAllRows(path) == std::vector<std::vector<std::string>>{
       {"alice", "10"}, {"bob", "20"}, {"charlie", "30"}});
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("view edit: column insertion persists through save") {
+  const auto csv = tests::MakeTestCsv(
+      {"name", "value"},
+      {{"alice", "10"}, {"bob", "20"}});
+  const auto path = WriteTempCsv(csv, "csvzall_view_edit_insert_column.csv");
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_edit = true;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, true, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto insert = client.Post(
+      "/api/insert-column", headers, R"({"column":1,"name":"note","value":"x"})",
+      "application/json");
+  REQUIRE(insert);
+  REQUIRE(insert->status == 200);
+  const auto save = client.Post("/api/save", headers, "{}", "application/json");
+  REQUIRE(save);
+  REQUIRE(save->status == 200);
+  server.Stop();
+
+  REQUIRE(ReadHeaders(path) == std::vector<std::string>{"name", "note", "value"});
+  REQUIRE(ReadAllRows(path) == std::vector<std::vector<std::string>>{
+      {"alice", "x", "10"}, {"bob", "x", "20"}});
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("view edit: column deletion persists through save") {
+  const auto csv = tests::MakeTestCsv(
+      {"name", "note", "value"},
+      {{"alice", "x", "10"}, {"bob", "y", "20"}});
+  const auto path = WriteTempCsv(csv, "csvzall_view_edit_delete_column.csv");
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_edit = true;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, true, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto del = client.Post(
+      "/api/delete-column", headers, R"({"column":"note"})", "application/json");
+  REQUIRE(del);
+  REQUIRE(del->status == 200);
+  const auto save = client.Post("/api/save", headers, "{}", "application/json");
+  REQUIRE(save);
+  REQUIRE(save->status == 200);
+  server.Stop();
+
+  REQUIRE(ReadHeaders(path) == std::vector<std::string>{"name", "value"});
+  REQUIRE(ReadAllRows(path) == std::vector<std::vector<std::string>>{
+      {"alice", "10"}, {"bob", "20"}});
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("view edit: reset reloads source from disk and discards unsaved changes") {
+  const auto csv = tests::MakeTestCsv(
+      {"name", "value"},
+      {{"alice", "10"}, {"bob", "20"}});
+  const auto path = WriteTempCsv(csv, "csvzall_view_edit_reset.csv");
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_edit = true;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, true, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto edit = client.Post(
+      "/api/edit-cell", headers, R"({"row":0,"column":"value","value":"99"})",
+      "application/json");
+  REQUIRE(edit);
+  REQUIRE(edit->status == 200);
+  const auto insert_column = client.Post(
+      "/api/insert-column", headers, R"({"column":1,"name":"note","value":""})",
+      "application/json");
+  REQUIRE(insert_column);
+  REQUIRE(insert_column->status == 200);
+
+  const auto reset = client.Post("/api/reset", headers, "{}", "application/json");
+  REQUIRE(reset);
+  REQUIRE(reset->status == 200);
+
+  const auto schema = client.Get("/api/schema", headers);
+  REQUIRE(schema);
+  REQUIRE(schema->status == 200);
+  REQUIRE(
+      schema->body ==
+      R"({"file":"csvzall_view_edit_reset.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2})");
+
+  const auto rows = client.Get("/api/rows?offset=0&limit=2", headers);
+  REQUIRE(rows);
+  REQUIRE(rows->status == 200);
+  REQUIRE(rows->body.find("\"rows\":[[\"alice\",\"10\"],[\"bob\",\"20\"]]") != std::string::npos);
+
+  server.Stop();
   std::filesystem::remove(path);
 }
 

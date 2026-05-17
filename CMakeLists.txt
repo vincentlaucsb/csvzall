@@ -65,30 +65,25 @@ set(BUILD_PYTHON OFF CACHE BOOL "Disable csv-parser Python bindings" FORCE)
 set(CSV_BUILD_SINGLE_INCLUDE_TEST OFF CACHE BOOL "Disable csv-parser single include test" FORCE)
 set(CSV_CXX_STANDARD "${CSVZALL_CXX_STANDARD}" CACHE STRING "C++ standard for csv-parser" FORCE)
 
-set(CSVZALL_CSV_PARSER_PATCH_SCRIPT
-  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch_csv_parser_row_offsets.cmake")
+function(csvzall_validate_csv_parser source_dir)
+  set(_csvzall_csv_row "${source_dir}/include/internal/csv_row.hpp")
+  set(_csvzall_data_frame "${source_dir}/include/internal/data_frame/data_frame.hpp")
+  if(NOT EXISTS "${_csvzall_csv_row}" OR NOT EXISTS "${_csvzall_data_frame}")
+    message(FATAL_ERROR
+      "csv-parser checkout is too old for csvzall: ${source_dir}\n"
+      "Expected split DataFrame headers and native CSVRow::byte_offset().")
+  endif()
 
-function(csvzall_patch_csv_parser source_dir)
-  execute_process(
-    COMMAND ${CMAKE_COMMAND}
-      -D "CSV_PARSER_SOURCE_DIR=${source_dir}"
-      -P "${CSVZALL_CSV_PARSER_PATCH_SCRIPT}"
-    COMMAND_ERROR_IS_FATAL ANY)
-endfunction()
-
-function(csvzall_prepare_local_csv_parser source_dir out_var)
-  get_filename_component(_csvzall_csv_parser_source "${source_dir}" ABSOLUTE)
-  set(_csvzall_csv_parser_patched "${CMAKE_BINARY_DIR}/csv-parser-patched")
-  file(REMOVE_RECURSE "${_csvzall_csv_parser_patched}")
-  file(MAKE_DIRECTORY "${_csvzall_csv_parser_patched}")
-  file(COPY "${_csvzall_csv_parser_source}/"
-       DESTINATION "${_csvzall_csv_parser_patched}"
-       PATTERN ".git" EXCLUDE
-       PATTERN ".vs" EXCLUDE
-       PATTERN "out" EXCLUDE
-       PATTERN "build" EXCLUDE)
-  csvzall_patch_csv_parser("${_csvzall_csv_parser_patched}")
-  set(${out_var} "${_csvzall_csv_parser_patched}" PARENT_SCOPE)
+  file(READ "${_csvzall_csv_row}" _csvzall_csv_row_content)
+  file(READ "${_csvzall_data_frame}" _csvzall_data_frame_content)
+  if(NOT _csvzall_csv_row_content MATCHES "byte_offset\\(" OR
+     NOT _csvzall_data_frame_content MATCHES "insert_column\\(" OR
+     NOT _csvzall_data_frame_content MATCHES "insert_row\\(")
+    message(FATAL_ERROR
+      "csv-parser checkout is too old for csvzall: ${source_dir}\n"
+      "Update csv-parser to a revision with CSVRow::byte_offset(), "
+      "DataFrame::insert_row(), and DataFrame::insert_column().")
+  endif()
 endfunction()
 
 set(CSVZALL_LOCAL_CSV_PARSER_ROOT "")
@@ -107,9 +102,9 @@ if(NOT CSVZALL_LOCAL_CSV_PARSER_ROOT STREQUAL "")
   endif()
 
   message(STATUS "Using csv-parser from: ${CSVZALL_LOCAL_CSV_PARSER_ROOT}")
-  csvzall_prepare_local_csv_parser("${CSVZALL_LOCAL_CSV_PARSER_ROOT}" CSVZALL_CSV_PARSER_SOURCE_DIR)
-  message(STATUS "Using patched csv-parser copy: ${CSVZALL_CSV_PARSER_SOURCE_DIR}")
-  add_subdirectory("${CSVZALL_CSV_PARSER_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/csv-parser-patched-build" EXCLUDE_FROM_ALL)
+  set(CSVZALL_CSV_PARSER_SOURCE_DIR "${CSVZALL_LOCAL_CSV_PARSER_ROOT}")
+  csvzall_validate_csv_parser("${CSVZALL_CSV_PARSER_SOURCE_DIR}")
+  add_subdirectory("${CSVZALL_CSV_PARSER_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/csv-parser-local-build" EXCLUDE_FROM_ALL)
 elseif(CSVZALL_FETCH_CSV_PARSER)
   message(STATUS "Fetching csv-parser with FetchContent")
   FetchContent_Declare(
@@ -122,13 +117,13 @@ elseif(CSVZALL_FETCH_CSV_PARSER)
   FetchContent_MakeAvailable(csv_parser)
   FetchContent_GetProperties(csv_parser SOURCE_DIR CSVZALL_CSV_PARSER_SOURCE_DIR)
   if(CSVZALL_CSV_PARSER_SOURCE_DIR)
-    csvzall_patch_csv_parser("${CSVZALL_CSV_PARSER_SOURCE_DIR}")
+    csvzall_validate_csv_parser("${CSVZALL_CSV_PARSER_SOURCE_DIR}")
   endif()
 elseif(EXISTS "${CSVZALL_IN_REPO_CSV_PARSER_ROOT}")
   message(STATUS "Using csv-parser from: ${CSVZALL_IN_REPO_CSV_PARSER_ROOT}")
-  csvzall_prepare_local_csv_parser("${CSVZALL_IN_REPO_CSV_PARSER_ROOT}" CSVZALL_CSV_PARSER_SOURCE_DIR)
-  message(STATUS "Using patched csv-parser copy: ${CSVZALL_CSV_PARSER_SOURCE_DIR}")
-  add_subdirectory("${CSVZALL_CSV_PARSER_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/csv-parser-patched-build" EXCLUDE_FROM_ALL)
+  set(CSVZALL_CSV_PARSER_SOURCE_DIR "${CSVZALL_IN_REPO_CSV_PARSER_ROOT}")
+  csvzall_validate_csv_parser("${CSVZALL_CSV_PARSER_SOURCE_DIR}")
+  add_subdirectory("${CSVZALL_CSV_PARSER_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/csv-parser-local-build" EXCLUDE_FROM_ALL)
 else()
   message(FATAL_ERROR
     "csv-parser not found.\n"
@@ -404,18 +399,6 @@ function(csvzall_copy_runtime_dependencies target_name)
   endif()
 endfunction()
 
-function(csvzall_copy_viewer_assets target_name)
-  add_custom_command(TARGET ${target_name} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-      "$<TARGET_FILE_DIR:${target_name}>/assets/viewer/vendor"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${PROJECT_SOURCE_DIR}/vendor/ag-grid/ag-grid-community.min.js"
-      "${PROJECT_SOURCE_DIR}/vendor/ag-grid/ag-grid.css"
-      "${PROJECT_SOURCE_DIR}/vendor/ag-grid/ag-theme-alpine.css"
-      "$<TARGET_FILE_DIR:${target_name}>/assets/viewer/vendor"
-    VERBATIM)
-endfunction()
-
 # PostgreSQL support via libpqxx (modern C++ wrapper around libpq).
 # Strategy:
 # 1) Respect CSVZALL_ENABLE_POSTGRESQL
@@ -518,7 +501,55 @@ if(CSVZALL_HAVE_POSTGRESQL AND WIN32)
   endif()
 endif()
 
+set(CSVZALL_VIEWER_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/viewer")
+set(CSVZALL_VIEWER_ASSET_CPP "${CSVZALL_VIEWER_GENERATED_DIR}/viewer_assets.cpp")
+set(CSVZALL_VIEWER_ASSET_HPP "${CSVZALL_VIEWER_GENERATED_DIR}/viewer_assets.hpp")
+set(CSVZALL_VIEWER_ASSET_INPUTS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/index.html"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/viewer.css"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/viewer.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-grid-community.min.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-grid.css"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-theme-alpine.css"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/constants.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/ContextMenu.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/index.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/MenuController.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/positioning.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/styles.css"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/theme-utils.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/theme.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/ThemeStore.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/types.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/utils.js")
+
+add_custom_command(
+  OUTPUT "${CSVZALL_VIEWER_ASSET_CPP}" "${CSVZALL_VIEWER_ASSET_HPP}"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${CSVZALL_VIEWER_GENERATED_DIR}"
+  COMMAND ${CMAKE_COMMAND}
+    -D "OUTPUT_CPP=${CSVZALL_VIEWER_ASSET_CPP}"
+    -D "OUTPUT_HPP=${CSVZALL_VIEWER_ASSET_HPP}"
+    -D "VIEWER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/src/viewer"
+    -D "AG_GRID_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid"
+    -D "POPRIGHT_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_viewer_assets.cmake"
+  DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_viewer_assets.cmake"
+    ${CSVZALL_VIEWER_ASSET_INPUTS}
+  VERBATIM)
+
+set_source_files_properties(
+  "${CSVZALL_VIEWER_ASSET_CPP}"
+  "${CSVZALL_VIEWER_ASSET_HPP}"
+  PROPERTIES GENERATED TRUE)
+
+add_custom_target(csvzall_viewer_assets
+  DEPENDS "${CSVZALL_VIEWER_ASSET_CPP}" "${CSVZALL_VIEWER_ASSET_HPP}")
+
 set(CSVZALL_APP_SOURCES
+  ${CSVZALL_VIEWER_ASSET_CPP}
+  ${CSVZALL_VIEWER_ASSET_HPP}
   ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/credentials.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/util.cpp
@@ -578,6 +609,8 @@ function(csvzall_configure_app target_name)
 
   target_link_libraries(${target_name} PRIVATE ${LINK_LIBS})
   csvzall_copy_runtime_dependencies(${target_name})
+  add_dependencies(${target_name} csvzall_viewer_assets)
+  target_include_directories(${target_name} PRIVATE "${CSVZALL_VIEWER_GENERATED_DIR}")
 
   set_property(TARGET ${target_name} PROPERTY CXX_STANDARD ${CSVZALL_CXX_STANDARD})
   set_property(TARGET ${target_name} PROPERTY CXX_STANDARD_REQUIRED ON)
@@ -610,18 +643,11 @@ endfunction()
 
 add_executable(csvzall ${CSVZALL_APP_SOURCES})
 csvzall_configure_app(csvzall)
-csvzall_copy_viewer_assets(csvzall)
 
 add_subdirectory(programs)
 
 install(TARGETS csvzall
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-  COMPONENT csvzall)
-install(FILES
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-grid-community.min.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-grid.css"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-theme-alpine.css"
-  DESTINATION "${CMAKE_INSTALL_BINDIR}/assets/viewer/vendor"
   COMPONENT csvzall)
 
 if(BUILD_TESTING)

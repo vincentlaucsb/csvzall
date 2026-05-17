@@ -203,15 +203,21 @@ and quick filtering for ordinary CSVs. Larger files build a compact row-offset
 index and serve rows through paged `/api/rows?offset=...&limit=...` requests
 instead of loading the whole table in the browser. AG Grid Community handles
 column resizing and virtual scrolling, while the local API (`/api/schema`,
-`/api/rows`, `/api/health`) keeps the experience read-only by design. The view
-is a startup-time snapshot of the CSV; reopen the viewer to pick up on-disk file
-changes.
+`/api/rows`, `/api/health`) keeps the default experience read-only by design.
+Viewer HTML, CSS, JavaScript, and AG Grid assets are embedded in the binary.
+The view is a startup-time snapshot of the CSV; reopen the viewer to pick up
+on-disk file changes.
+
+For viewer development, pass `--viewer-assets <dir>` or set
+`CSVZALL_VIEWER_ASSETS=<dir>` to serve first-party `index.html`, `viewer.css`,
+and `viewer.js` from disk on every request. AG Grid and Popright remain
+embedded.
 
 Pass `--edit` to enable explicit editable mode. Editable mode materializes the
-CSV, allows cell edits plus row insert/delete in the browser, tracks dirty state,
-and saves by writing a temporary sibling CSV before atomically replacing the
-source. Save refuses if the source file size or mtime changed after the viewer
-opened.
+CSV, allows cell edits plus row/column insert/delete in the browser, tracks
+dirty state, supports reset from disk, and saves by writing a temporary sibling
+CSV before atomically replacing the source. Save refuses if the source file size
+or mtime changed after the viewer opened.
 
 Current limitation: `view` is optimized for plain local CSV files. stdin,
 `.gz`, and `.zip` inputs are rejected in this pass. Server-side global
@@ -224,6 +230,7 @@ csvzall view todoist_activities.csv --edit
 csvzall view todoist_activities.csv --no-open --port 43117
 csvzall view todoist_activities.csv --no-open --startup-json
 csvzall view todoist_activities.csv --view-mode paged
+csvzall view todoist_activities.csv --viewer-assets src/viewer
 ```
 
 ### `calendar [input] --start <YYYY-MM-DD> --end <YYYY-MM-DD>`
@@ -410,7 +417,8 @@ For a per-user install that does not require elevation:
 | [argparse](https://github.com/p-ranav/argparse) v3.1 | [Pranav](https://github.com/p-ranav) | CLI argument parsing | FetchContent |
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) v0.18.5 | [Yuji Hirose](https://github.com/yhirose) and contributors | Embedded local HTTP server for the `view` command | Vendored single header under `vendor/httplib` |
 | [indicators](https://github.com/p-ranav/indicators) v2.3 | [Pranav](https://github.com/p-ranav) | Terminal progress bars for long-running imports | FetchContent |
-| [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) v32.3.9 | [AG Grid Ltd.](https://www.ag-grid.com/) | Read-only interactive browser table for the `view` command | Vendored browser assets under `vendor/ag-grid` |
+| [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) v32.3.9 | [AG Grid Ltd.](https://www.ag-grid.com/) | Interactive browser table for the `view` command | Vendored browser assets under `vendor/ag-grid`, embedded into csvzall at build time |
+| [Popright](https://github.com/vincentlaucsb/popright) v0.0.1 | [Vincent Lau](https://github.com/vincentlaucsb) | Context menu primitive for the `view` command | Vendored npm package under `vendor/popright`, embedded into csvzall at build time |
 | [zlib](https://github.com/madler/zlib) v1.3.1 | [Mark Adler](https://github.com/madler) and contributors | gzip and ZIP/deflate decompression for compressed CSV inputs | System package if available; FetchContent fallback |
 | [keychain](https://github.com/hrantzsch/keychain) v1.3.1 | [hrantzsch](https://github.com/hrantzsch) | Optional OS credential storage for PostgreSQL passwords | System package if available; FetchContent fallback; Linux requires libsecret |
 | [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite | FetchContent, with a local CMake patch |

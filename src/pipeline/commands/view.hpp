@@ -47,9 +47,8 @@ class CsvIndexedFile {
 struct CsvMaterializedFile {
   std::string input_path;
   std::string file_name;
-  std::vector<std::string> headers;
   std::shared_ptr<csv::DataFrame<>> frame;
-  std::vector<std::vector<std::string>> rows;
+  csv::CSVFormat format;
   std::uint64_t source_size = 0;
   std::filesystem::file_time_type source_mtime{};
 };
@@ -80,6 +79,9 @@ class CsvViewData {
   void edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
   void delete_row(std::uint64_t row);
   void insert_row(std::uint64_t row, const std::vector<std::string>& values);
+  void insert_column(std::uint64_t column, const std::string& name, const std::string& value);
+  void delete_column(const std::string& column);
+  void reset();
   void save();
 
  private:
@@ -94,6 +96,7 @@ struct ViewServerOptions {
   bool serve_once = false;
   bool editable = false;
   std::string session_token;
+  std::string viewer_asset_dir;
 };
 
 class ViewServer {

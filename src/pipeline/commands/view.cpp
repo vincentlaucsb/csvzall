@@ -1,9 +1,9 @@
 #include "view.hpp"
 
-#include "../../util.hpp"
 #include "../common/gzip_stream.hpp"
 
 #include "commands.hpp"
+#include "viewer_assets.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -14,6 +14,7 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -36,512 +37,6 @@ namespace {
 constexpr std::uint64_t kDefaultRowsPerPage = 500;
 constexpr std::uint64_t kMaxRowsPerPage = 5000;
 constexpr std::uint64_t kBytesPerMiB = 1024 * 1024;
-
-constexpr std::string_view kViewerHtml = R"(<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>csvzall view</title>
-  <link rel="stylesheet" href="/assets/ag-grid.css">
-  <link rel="stylesheet" href="/assets/ag-theme-alpine.css">
-  <link rel="stylesheet" href="/assets/viewer.css">
-</head>
-<body>
-  <div class="app-shell">
-    <header class="topbar">
-      <div class="file-meta">
-        <h1 id="file-name">Loading…</h1>
-        <span id="summary" class="summary">Preparing read-only table view.</span>
-      </div>
-      <label class="search">
-        <span id="mode-label">Loading rows</span>
-        <input id="quick-filter" type="search" placeholder="Filter loaded table">
-      </label>
-      <div id="edit-toolbar" class="edit-toolbar" hidden>
-        <button id="insert-row" type="button">Insert row</button>
-        <button id="delete-row" type="button">Delete row</button>
-        <button id="save" type="button" disabled>Save</button>
-      </div>
-    </header>
-    <main class="grid-wrap">
-      <div id="grid" class="ag-theme-alpine-auto-dark"></div>
-    </main>
-    <footer class="footer">
-      <span>Local-only session.</span>
-      <span id="status">Connecting…</span>
-    </footer>
-  </div>
-  <script src="/assets/ag-grid-community.min.js"></script>
-  <script src="/assets/viewer.js"></script>
-</body>
-</html>
-)";
-
-constexpr std::string_view kViewerCss = R"(html, body {
-  height: 100%;
-  margin: 0;
-  font-family: var(--csvzall-font-family);
-  background: var(--csvzall-background-primary);
-  color: var(--csvzall-text-normal);
-}
-
-* {
-  box-sizing: border-box;
-  font-family: inherit;
-}
-
-:root {
-  color-scheme: light;
-  --csvzall-font-family: var(--font-interface, ui-sans-serif), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --csvzall-background-primary: var(--background-primary, #ffffff);
-  --csvzall-background-secondary: var(--background-secondary, #f6f7f8);
-  --csvzall-background-hover: var(--background-modifier-hover, #f2f3f5);
-  --csvzall-border: var(--background-modifier-border, #d6d6d6);
-  --csvzall-text-normal: var(--text-normal, #2e3338);
-  --csvzall-text-muted: var(--text-muted, #6f7680);
-  --csvzall-accent: var(--interactive-accent, #7c3aed);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --csvzall-background-primary: var(--background-primary, #111317);
-    --csvzall-background-secondary: var(--background-secondary, #191c22);
-    --csvzall-background-hover: var(--background-modifier-hover, #252a33);
-    --csvzall-border: var(--background-modifier-border, #343a46);
-    --csvzall-text-normal: var(--text-normal, #e6e9ef);
-    --csvzall-text-muted: var(--text-muted, #a6adbb);
-    --csvzall-accent: var(--interactive-accent, #9b8cff);
-  }
-}
-
-.app-shell {
-  height: 100%;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  background: var(--csvzall-background-primary);
-}
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  min-height: 48px;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--csvzall-border);
-  background: var(--csvzall-background-primary);
-}
-
-.file-meta {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-}
-
-.topbar h1 {
-  margin: 0;
-  overflow: hidden;
-  color: var(--csvzall-text-normal);
-  font-size: 0.95rem;
-  font-weight: 600;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.summary, .footer {
-  color: var(--csvzall-text-muted);
-  font-size: 0.78rem;
-}
-
-.search {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  flex: 0 1 20rem;
-  color: var(--csvzall-text-muted);
-  font-size: 0.78rem;
-}
-
-.search input {
-  width: 100%;
-  height: 28px;
-  padding: 0 0.55rem;
-  border: 1px solid var(--csvzall-border);
-  border-radius: var(--radius-s, 4px);
-  background: var(--csvzall-background-primary);
-  color: var(--csvzall-text-normal);
-  font: inherit;
-}
-
-.search input:focus {
-  border-color: var(--csvzall-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--csvzall-accent) 18%, transparent);
-  outline: none;
-}
-
-.edit-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.edit-toolbar button {
-  height: 28px;
-  padding: 0 0.6rem;
-  border: 1px solid var(--csvzall-border);
-  border-radius: var(--radius-s, 4px);
-  background: var(--csvzall-background-secondary);
-  color: var(--csvzall-text-normal);
-  font: inherit;
-}
-
-.edit-toolbar button:disabled {
-  opacity: 0.55;
-}
-
-.grid-wrap {
-  min-height: 0;
-  padding: 0;
-}
-
-#grid {
-  height: 100%;
-  width: 100%;
-  min-height: 12rem;
-  border: 0;
-  overflow: hidden;
-}
-
-.ag-theme-alpine,
-.ag-theme-alpine-auto-dark {
-  --ag-font-family: var(--csvzall-font-family);
-  --ag-font-size: 13px;
-  --ag-background-color: var(--csvzall-background-primary);
-  --ag-foreground-color: var(--csvzall-text-normal);
-  --ag-data-color: var(--csvzall-text-normal);
-  --ag-header-foreground-color: var(--csvzall-text-normal);
-  --ag-secondary-foreground-color: var(--csvzall-text-muted);
-  --ag-header-background-color: var(--csvzall-background-secondary);
-  --ag-odd-row-background-color: var(--csvzall-background-primary);
-  --ag-row-hover-color: var(--csvzall-background-hover);
-  --ag-selected-row-background-color: color-mix(in srgb, var(--csvzall-accent) 14%, transparent);
-  --ag-border-color: var(--csvzall-border);
-  --ag-row-border-color: var(--csvzall-border);
-  --ag-header-column-separator-color: var(--csvzall-border);
-  --ag-input-border-color: var(--csvzall-border);
-  --ag-input-focus-border-color: var(--csvzall-accent);
-  --ag-control-panel-background-color: var(--csvzall-background-secondary);
-  --ag-menu-background-color: var(--csvzall-background-primary);
-  --ag-modal-overlay-background-color: color-mix(in srgb, var(--csvzall-background-primary) 70%, transparent);
-}
-
-.ag-theme-alpine .ag-root-wrapper,
-.ag-theme-alpine .ag-header,
-.ag-theme-alpine .ag-row,
-.ag-theme-alpine .ag-center-cols-viewport,
-.ag-theme-alpine .ag-center-cols-container,
-.ag-theme-alpine-auto-dark .ag-root-wrapper,
-.ag-theme-alpine-auto-dark .ag-header,
-.ag-theme-alpine-auto-dark .ag-row,
-.ag-theme-alpine-auto-dark .ag-center-cols-viewport,
-.ag-theme-alpine-auto-dark .ag-center-cols-container {
-  background-color: var(--ag-background-color);
-  color: var(--ag-foreground-color);
-  font-family: var(--ag-font-family);
-}
-
-.ag-theme-alpine .ag-header,
-.ag-theme-alpine-auto-dark .ag-header {
-  background-color: var(--ag-header-background-color);
-}
-
-.footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  min-height: 30px;
-  padding: 0.4rem 0.75rem;
-  border-top: 1px solid var(--csvzall-border);
-  background: var(--csvzall-background-secondary);
-}
-
-@media (max-width: 820px) {
-  .topbar, .file-meta, .footer {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .summary {
-    display: block;
-  }
-
-  .search {
-    flex-basis: auto;
-  }
-}
-)";
-
-constexpr std::string_view kViewerJs = R"(async function csvzallViewBootstrap() {
-  const statusNode = document.getElementById('status');
-  const summaryNode = document.getElementById('summary');
-  const fileNode = document.getElementById('file-name');
-  const modeNode = document.getElementById('mode-label');
-  const quickFilterNode = document.getElementById('quick-filter');
-  const token = new URLSearchParams(window.location.search).get('token');
-
-  if (!token) {
-    statusNode.textContent = 'Missing session token.';
-    summaryNode.textContent = 'Open the viewer from the csvzall command output.';
-    return;
-  }
-
-  const headers = { 'X-Session-Token': token };
-
-  async function fetchJson(path, params = {}) {
-    const url = new URL(path, window.location.origin);
-    for (const [key, value] of Object.entries(params)) {
-      url.searchParams.set(key, String(value));
-    }
-    const response = await fetch(url, { headers });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    return response.json();
-  }
-
-  async function postJson(path, body = {}) {
-    const response = await fetch(new URL(path, window.location.origin), {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(text.trim() || `HTTP ${response.status}`);
-    }
-    return text ? JSON.parse(text) : {};
-  }
-
-  function setDatasource(api, datasource) {
-    if (api.setGridOption) {
-      api.setGridOption('datasource', datasource);
-      return;
-    }
-    api.setDatasource(datasource);
-  }
-
-  function setQuickFilter(api, value) {
-    if (api.setGridOption) {
-      api.setGridOption('quickFilterText', value);
-      return;
-    }
-    api.setQuickFilter(value);
-  }
-
-  function rowsToObjects(columns, rows) {
-    return rows.map((values, index) => {
-      const row = { _csvzallRowId: index };
-      columns.forEach((column, index) => {
-        row[column] = values[index] ?? '';
-      });
-      return row;
-    });
-  }
-
-  function renumberRows(rows) {
-    rows.forEach((row, index) => {
-      row._csvzallRowId = index;
-    });
-  }
-
-  try {
-    const schema = await fetchJson('/api/schema');
-    fileNode.textContent = schema.file;
-    summaryNode.textContent = `${schema.totalRows.toLocaleString()} rows across ${schema.columns.length.toLocaleString()} columns.`;
-    const materialized = schema.mode === 'materialized';
-    const editable = schema.editable === true;
-    const editToolbar = document.getElementById('edit-toolbar');
-    const insertButton = document.getElementById('insert-row');
-    const deleteButton = document.getElementById('delete-row');
-    const saveButton = document.getElementById('save');
-    modeNode.textContent = materialized ? 'Client-side sort/filter' : 'Server-paged rows';
-    quickFilterNode.hidden = !materialized;
-    quickFilterNode.disabled = !materialized;
-    editToolbar.hidden = !editable;
-
-    const columnDefs = schema.columns.map((column) => ({
-      headerName: column,
-      field: column,
-      sortable: materialized,
-      filter: materialized,
-      editable,
-      resizable: true,
-      minWidth: 140,
-      flex: 1,
-    }));
-
-    const gridOptions = {
-      columnDefs,
-      defaultColDef: {
-        sortable: materialized,
-        filter: materialized,
-        editable,
-        resizable: true,
-      },
-      animateRows: false,
-      suppressColumnVirtualisation: false,
-      rowSelection: 'single',
-    };
-
-    if (!materialized) {
-      gridOptions.rowModelType = 'infinite';
-      gridOptions.cacheBlockSize = 500;
-      gridOptions.maxBlocksInCache = 8;
-      gridOptions.blockLoadDebounceMillis = 40;
-    }
-
-    const gridElement = document.getElementById('grid');
-    const api = agGrid.createGrid
-      ? agGrid.createGrid(gridElement, gridOptions)
-      : (() => {
-          new agGrid.Grid(gridElement, gridOptions);
-          return gridOptions.api;
-        })();
-
-    if (materialized) {
-      statusNode.textContent = `Loading ${schema.totalRows.toLocaleString()} rows for client-side sort/filter…`;
-      let dirty = false;
-      const allRows = schema.totalRows === 0
-        ? []
-        : rowsToObjects(schema.columns, (await fetchJson('/api/rows', { offset: 0, limit: schema.totalRows })).rows);
-      const setDirty = (value) => {
-        dirty = value;
-        saveButton.disabled = !dirty;
-        statusNode.textContent = dirty
-          ? 'Unsaved changes.'
-          : `Loaded ${allRows.length.toLocaleString()} rows for ${editable ? 'editing' : 'client-side sort/filter'}.`;
-      };
-      if (api.setGridOption) {
-        api.setGridOption('rowData', allRows);
-      } else {
-        api.setRowData(allRows);
-      }
-      quickFilterNode.addEventListener('input', () => setQuickFilter(api, quickFilterNode.value));
-      if (editable) {
-        const refreshRows = () => {
-          if (api.setGridOption) {
-            api.setGridOption('rowData', allRows);
-          } else {
-            api.setRowData(allRows);
-          }
-        };
-        const selectedSourceRow = () => {
-          const selected = api.getSelectedRows ? api.getSelectedRows() : [];
-          return selected.length > 0 ? selected[0]._csvzallRowId : allRows.length;
-        };
-        gridOptions.onCellValueChanged = async (event) => {
-          if (!event.colDef.field || event.colDef.field === '_csvzallRowId') {
-            return;
-          }
-          try {
-            await postJson('/api/edit-cell', {
-              row: event.data._csvzallRowId,
-              column: event.colDef.field,
-              value: event.newValue ?? '',
-            });
-            setDirty(true);
-          } catch (error) {
-            event.node.setDataValue(event.colDef.field, event.oldValue ?? '');
-            statusNode.textContent = error instanceof Error ? error.message : 'Edit failed';
-          }
-        };
-        if (api.setGridOption) {
-          api.setGridOption('onCellValueChanged', gridOptions.onCellValueChanged);
-        }
-        deleteButton.addEventListener('click', async () => {
-          const row = selectedSourceRow();
-          if (row >= allRows.length) {
-            statusNode.textContent = 'Select a row to delete.';
-            return;
-          }
-          try {
-            await postJson('/api/delete-row', { row });
-            allRows.splice(row, 1);
-            renumberRows(allRows);
-            refreshRows();
-            setDirty(true);
-          } catch (error) {
-            statusNode.textContent = error instanceof Error ? error.message : 'Delete failed';
-          }
-        });
-        insertButton.addEventListener('click', async () => {
-          const row = selectedSourceRow();
-          const values = schema.columns.map(() => '');
-          try {
-            await postJson('/api/insert-row', { row, values });
-            const inserted = { _csvzallRowId: row };
-            schema.columns.forEach((column) => {
-              inserted[column] = '';
-            });
-            allRows.splice(row, 0, inserted);
-            renumberRows(allRows);
-            refreshRows();
-            setDirty(true);
-          } catch (error) {
-            statusNode.textContent = error instanceof Error ? error.message : 'Insert failed';
-          }
-        });
-        saveButton.addEventListener('click', async () => {
-          try {
-            saveButton.disabled = true;
-            statusNode.textContent = 'Saving…';
-            await postJson('/api/save');
-            setDirty(false);
-            statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows.`;
-          } catch (error) {
-            saveButton.disabled = !dirty;
-            statusNode.textContent = error instanceof Error ? error.message : 'Save failed';
-          }
-        });
-      }
-      setDirty(false);
-    } else {
-      setDatasource(api, {
-        async getRows(params) {
-          const offset = params.startRow;
-          const limit = Math.max(params.endRow - params.startRow, 1);
-          statusNode.textContent = `Loading rows ${offset + 1}-${Math.min(params.endRow, schema.totalRows)} of ${schema.totalRows}…`;
-          try {
-            const page = await fetchJson('/api/rows', { offset, limit });
-            const rowData = rowsToObjects(schema.columns, page.rows);
-            const loadedThrough = page.offset + page.rows.length;
-            const lastRow = loadedThrough >= page.totalRows ? page.totalRows : undefined;
-            params.successCallback(rowData, lastRow);
-            statusNode.textContent = `Loaded rows ${page.offset + 1}-${loadedThrough} of ${page.totalRows}.`;
-          } catch (error) {
-            params.failCallback();
-            statusNode.textContent = error instanceof Error ? error.message : 'Row load failed';
-          }
-        },
-      });
-      statusNode.textContent = `Ready: ${schema.totalRows.toLocaleString()} rows indexed.`;
-    }
-
-    if (api.sizeColumnsToFit) {
-      api.sizeColumnsToFit();
-    }
-  } catch (error) {
-    summaryNode.textContent = 'The viewer could not load table data.';
-    statusNode.textContent = error instanceof Error ? error.message : 'Unknown error';
-  }
-}
-
-csvzallViewBootstrap();
-)";
 
 csv::CSVFormat MakeViewFormat(const RunOptions& options) {
   csv::CSVFormat format;
@@ -694,37 +189,6 @@ bool OpenBrowserUrl(const std::string& url) {
 #endif
 }
 
-std::string ReadFileText(const std::filesystem::path& path) {
-  std::ifstream input(path, std::ios::binary);
-  if (!input) {
-    throw std::runtime_error("unable to open asset file: " + path.string());
-  }
-
-  std::ostringstream buffer;
-  buffer << input.rdbuf();
-  return buffer.str();
-}
-
-std::filesystem::path ResolveVendorAssetRoot() {
-  std::vector<std::filesystem::path> candidates;
-  try {
-    candidates.push_back(util::executable_path().parent_path() / "assets" / "viewer" / "vendor");
-  } catch (const std::exception&) {
-  }
-  candidates.emplace_back(std::filesystem::path(CSVZALL_SOURCE_DIR) / "vendor" / "ag-grid");
-
-  for (const auto& candidate : candidates) {
-    if (std::filesystem::exists(candidate / "ag-grid-community.min.js") &&
-        std::filesystem::exists(candidate / "ag-grid.css") &&
-        std::filesystem::exists(candidate / "ag-theme-alpine.css")) {
-      return candidate;
-    }
-  }
-
-  throw std::runtime_error(
-      "viewer assets were not found next to the executable or in the source tree");
-}
-
 bool ParseUint64Param(const httplib::Request& request,
                       std::string_view name,
                       std::uint64_t default_value,
@@ -750,6 +214,108 @@ bool ParseUint64Param(const httplib::Request& request,
 void BadRequest(httplib::Response& response, std::string_view message) {
   response.status = 400;
   response.set_content(std::string(message) + "\n", "text/plain; charset=utf-8");
+}
+
+bool ServeEmbeddedViewerAsset(std::string_view path, httplib::Response& response) {
+  const auto* asset = FindEmbeddedViewerAsset(path);
+  if (!asset) {
+    return false;
+  }
+  response.set_content(
+      EmbeddedViewerAssetText(*asset),
+      std::string(asset->content_type));
+  return true;
+}
+
+std::string ReadDevViewerAsset(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) {
+    throw std::runtime_error("unable to open viewer asset: " + path.string());
+  }
+
+  std::ostringstream buffer;
+  buffer << input.rdbuf();
+  return buffer.str();
+}
+
+bool HasDevViewerAssets(const std::filesystem::path& dir) {
+  return std::filesystem::exists(dir / "index.html") &&
+      std::filesystem::exists(dir / "viewer.css") &&
+      std::filesystem::exists(dir / "viewer.js");
+}
+
+std::filesystem::path ResolveDevViewerAssetDir(const std::string& value) {
+  if (value.empty()) {
+    return {};
+  }
+
+  std::vector<std::filesystem::path> candidates;
+  const std::filesystem::path requested(value);
+  candidates.push_back(requested);
+  if (requested.is_relative()) {
+    candidates.emplace_back(std::filesystem::path(CSVZALL_SOURCE_DIR) / requested);
+  }
+
+  for (const auto& candidate : candidates) {
+    if (HasDevViewerAssets(candidate)) {
+      std::error_code ec;
+      const auto canonical = std::filesystem::weakly_canonical(candidate, ec);
+      return ec ? candidate : canonical;
+    }
+  }
+
+  std::ostringstream message;
+  message << "viewer asset directory must contain index.html, viewer.css, and viewer.js: "
+          << value;
+  if (requested.is_relative()) {
+    message << " (also tried "
+            << (std::filesystem::path(CSVZALL_SOURCE_DIR) / requested).string()
+            << ")";
+  }
+  throw std::runtime_error(message.str());
+}
+
+std::optional<std::filesystem::path> DevViewerAssetPath(
+    const std::filesystem::path& asset_dir,
+    std::string_view route) {
+  if (asset_dir.empty()) {
+    return std::nullopt;
+  }
+  if (route == "/") {
+    return asset_dir / "index.html";
+  }
+  if (route == "/assets/viewer.css") {
+    return asset_dir / "viewer.css";
+  }
+  if (route == "/assets/viewer.js") {
+    return asset_dir / "viewer.js";
+  }
+  return std::nullopt;
+}
+
+std::string_view ViewerAssetContentType(std::string_view route) {
+  if (route == "/" || route == "/index.html") {
+    return "text/html";
+  }
+  if (route.ends_with(".css")) {
+    return "text/css";
+  }
+  if (route.ends_with(".js")) {
+    return "application/javascript";
+  }
+  return "application/octet-stream";
+}
+
+bool ServeViewerAsset(const std::filesystem::path& dev_asset_dir,
+                      std::string_view path,
+                      httplib::Response& response) {
+  if (const auto dev_path = DevViewerAssetPath(dev_asset_dir, path)) {
+    response.set_content(
+        ReadDevViewerAsset(*dev_path),
+        std::string(ViewerAssetContentType(path)));
+    return true;
+  }
+  return ServeEmbeddedViewerAsset(path, response);
 }
 
 void SkipJsonWs(std::string_view text, std::size_t& pos) {
@@ -960,21 +526,17 @@ CsvMaterializedFile OpenMaterializedFile(const std::string& input_path,
   materialized.source_mtime = GetFileMtime(input_path);
 
   auto format = MakeViewFormat(options);
+  materialized.format = format;
   csv::CSVReader reader(input_path, format);
   materialized.frame = std::make_shared<csv::DataFrame<>>(reader);
-  materialized.headers = materialized.frame->columns();
-  if (materialized.headers.empty()) {
+  if (materialized.frame->columns().empty()) {
     throw std::runtime_error("input appears to have no header row");
   }
 
-  for (const auto& row : *materialized.frame) {
-    materialized.rows.emplace_back(std::vector<std::string>(row));
-  }
-
-  stats.rows_processed = static_cast<std::uint64_t>(materialized.rows.size());
+  stats.rows_processed = static_cast<std::uint64_t>(materialized.frame->n_rows());
   stats.bytes_processed = file_size;
   if (logger.verbose) {
-    logger.verbose("view: materialized " + std::to_string(materialized.rows.size()) +
+    logger.verbose("view: materialized " + std::to_string(materialized.frame->n_rows()) +
                    " row(s) from " + input_path);
   }
   return materialized;
@@ -1138,14 +700,14 @@ const std::string& CsvViewData::file_name() const {
 
 const std::vector<std::string>& CsvViewData::headers() const {
   if (const auto* materialized = std::get_if<CsvMaterializedFile>(&data_)) {
-    return materialized->headers;
+    return materialized->frame->columns();
   }
   return std::get<CsvIndexedFile>(data_).headers();
 }
 
 std::uint64_t CsvViewData::row_count() const {
   if (const auto* materialized = std::get_if<CsvMaterializedFile>(&data_)) {
-    return static_cast<std::uint64_t>(materialized->rows.size());
+    return static_cast<std::uint64_t>(materialized->frame->n_rows());
   }
   return std::get<CsvIndexedFile>(data_).row_count();
 }
@@ -1158,9 +720,13 @@ std::vector<std::vector<std::string>> CsvViewData::read_rows(
       return {};
     }
     const auto count = std::min<std::uint64_t>(limit, row_count() - offset);
-    const auto begin = materialized->rows.begin() + static_cast<std::ptrdiff_t>(offset);
-    const auto end = begin + static_cast<std::ptrdiff_t>(count);
-    return {begin, end};
+    std::vector<std::vector<std::string>> rows;
+    rows.reserve(static_cast<std::size_t>(count));
+    for (std::uint64_t i = 0; i < count; ++i) {
+      rows.emplace_back(std::vector<std::string>(
+          materialized->frame->at(static_cast<std::size_t>(offset + i))));
+    }
+    return rows;
   }
   return std::get<CsvIndexedFile>(data_).read_rows(offset, limit);
 }
@@ -1172,15 +738,13 @@ void CsvViewData::edit_cell(const std::uint64_t row,
   if (!materialized) {
     throw std::runtime_error("editing requires materialized view mode");
   }
-  const auto col = std::find(materialized->headers.begin(), materialized->headers.end(), column);
-  if (col == materialized->headers.end()) {
+  if (!materialized->frame->has_column(column)) {
     throw std::runtime_error("unknown column: " + column);
   }
-  if (row >= materialized->rows.size()) {
+  if (row >= materialized->frame->n_rows()) {
     throw std::out_of_range("row index out of bounds");
   }
-  materialized->rows[static_cast<std::size_t>(row)][
-      static_cast<std::size_t>(std::distance(materialized->headers.begin(), col))] = value;
+  materialized->frame->at(static_cast<std::size_t>(row))[column] = value;
 }
 
 void CsvViewData::delete_row(const std::uint64_t row) {
@@ -1188,10 +752,12 @@ void CsvViewData::delete_row(const std::uint64_t row) {
   if (!materialized) {
     throw std::runtime_error("editing requires materialized view mode");
   }
-  if (row >= materialized->rows.size()) {
+  if (row >= materialized->frame->n_rows()) {
     throw std::out_of_range("row index out of bounds");
   }
-  materialized->rows.erase(materialized->rows.begin() + static_cast<std::ptrdiff_t>(row));
+  if (!materialized->frame->at(static_cast<std::size_t>(row)).erase()) {
+    throw std::runtime_error("failed to delete row");
+  }
 }
 
 void CsvViewData::insert_row(const std::uint64_t row, const std::vector<std::string>& values) {
@@ -1199,14 +765,60 @@ void CsvViewData::insert_row(const std::uint64_t row, const std::vector<std::str
   if (!materialized) {
     throw std::runtime_error("editing requires materialized view mode");
   }
-  if (values.size() != materialized->headers.size()) {
+  if (values.size() != materialized->frame->n_cols()) {
     throw std::runtime_error("inserted row must match header shape");
   }
-  if (row > materialized->rows.size()) {
+  if (row > materialized->frame->n_rows()) {
     throw std::out_of_range("row index out of bounds");
   }
-  materialized->rows.insert(
-      materialized->rows.begin() + static_cast<std::ptrdiff_t>(row), values);
+  materialized->frame->insert_row(static_cast<std::size_t>(row), values);
+}
+
+void CsvViewData::insert_column(const std::uint64_t column,
+                                const std::string& name,
+                                const std::string& value) {
+  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
+  if (!materialized) {
+    throw std::runtime_error("editing requires materialized view mode");
+  }
+  if (column > materialized->frame->n_cols()) {
+    throw std::out_of_range("column index out of bounds");
+  }
+  materialized->frame->insert_column(static_cast<std::size_t>(column), name, value);
+}
+
+void CsvViewData::delete_column(const std::string& column) {
+  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
+  if (!materialized) {
+    throw std::runtime_error("editing requires materialized view mode");
+  }
+  if (materialized->frame->n_cols() <= 1) {
+    throw std::runtime_error("cannot delete the last column");
+  }
+  if (!materialized->frame->has_column(column)) {
+    throw std::runtime_error("unknown column: " + column);
+  }
+  if (!materialized->frame->column_view(column).erase()) {
+    throw std::runtime_error("failed to delete column: " + column);
+  }
+}
+
+void CsvViewData::reset() {
+  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
+  if (!materialized) {
+    throw std::runtime_error("reset requires materialized view mode");
+  }
+
+  const auto file_size = GetFileSize(materialized->input_path);
+  csv::CSVReader reader(materialized->input_path, materialized->format);
+  auto frame = std::make_shared<csv::DataFrame<>>(reader);
+  if (frame->columns().empty()) {
+    throw std::runtime_error("input appears to have no header row");
+  }
+
+  materialized->frame = std::move(frame);
+  materialized->source_size = file_size;
+  materialized->source_mtime = GetFileMtime(materialized->input_path);
 }
 
 void CsvViewData::save() {
@@ -1230,9 +842,9 @@ void CsvViewData::save() {
         throw std::runtime_error("unable to open temporary save file: " + temp.string());
       }
       auto writer = csv::make_csv_writer(output).set_auto_flush(false);
-      writer << materialized->headers;
-      for (const auto& row : materialized->rows) {
-        writer << row;
+      writer << materialized->frame->columns();
+      for (const auto& row : *materialized->frame) {
+        writer << std::vector<std::string>(row);
       }
       writer.flush();
       output.close();
@@ -1274,10 +886,7 @@ struct ViewServer::Impl {
   bool serve_once = false;
   bool editable = false;
   std::string token;
-  std::filesystem::path vendor_asset_root;
-  std::string ag_grid_js;
-  std::string ag_grid_css;
-  std::string ag_theme_css;
+  std::filesystem::path viewer_asset_dir;
 
   bool HasValidToken(const httplib::Request& request) const {
     const auto header = request.get_header_value("X-Session-Token");
@@ -1321,11 +930,12 @@ ViewServer::~ViewServer() {
 }
 
 int ViewServer::Start(const ViewServerOptions& options) {
+  impl_->serve_once = options.serve_once;
+  impl_->editable = options.editable;
+  impl_->stop_requested = false;
+  impl_->token = options.session_token.empty() ? GenerateSessionToken() : options.session_token;
   try {
-    impl_->vendor_asset_root = ResolveVendorAssetRoot();
-    impl_->ag_grid_js = ReadFileText(impl_->vendor_asset_root / "ag-grid-community.min.js");
-    impl_->ag_grid_css = ReadFileText(impl_->vendor_asset_root / "ag-grid.css");
-    impl_->ag_theme_css = ReadFileText(impl_->vendor_asset_root / "ag-theme-alpine.css");
+    impl_->viewer_asset_dir = ResolveDevViewerAssetDir(options.viewer_asset_dir);
   } catch (const std::exception& ex) {
     if (impl_->logger.error) {
       impl_->logger.error(std::string("view: ") + ex.what());
@@ -1333,41 +943,77 @@ int ViewServer::Start(const ViewServerOptions& options) {
     return 1;
   }
 
-  impl_->serve_once = options.serve_once;
-  impl_->editable = options.editable;
-  impl_->stop_requested = false;
-  impl_->token = options.session_token.empty() ? GenerateSessionToken() : options.session_token;
-
   impl_->server.Get("/", [this](const httplib::Request& request, httplib::Response& response) {
     if (!impl_->HasValidToken(request)) {
       impl_->RejectUnauthorized(response);
       return;
     }
-    response.set_content(std::string(kViewerHtml), "text/html; charset=utf-8");
+    try {
+      if (!ServeViewerAsset(impl_->viewer_asset_dir, "/", response)) {
+        response.status = 500;
+        response.set_content("viewer asset missing\n", "text/plain; charset=utf-8");
+      }
+    } catch (const std::exception& ex) {
+      response.status = 500;
+      response.set_content(std::string(ex.what()) + "\n", "text/plain; charset=utf-8");
+    }
     impl_->MaybeStopAfterRequest();
   });
 
   impl_->server.Get("/assets/viewer.css",
                     [this](const httplib::Request&, httplib::Response& response) {
-                      response.set_content(std::string(kViewerCss), "text/css; charset=utf-8");
+                      try {
+                        if (!ServeViewerAsset(impl_->viewer_asset_dir, "/assets/viewer.css", response)) {
+                          response.status = 404;
+                        }
+                      } catch (const std::exception& ex) {
+                        response.status = 500;
+                        response.set_content(std::string(ex.what()) + "\n",
+                                             "text/plain; charset=utf-8");
+                      }
                     });
   impl_->server.Get("/assets/viewer.js",
                     [this](const httplib::Request&, httplib::Response& response) {
-                      response.set_content(std::string(kViewerJs),
-                                           "application/javascript; charset=utf-8");
+                      try {
+                        if (!ServeViewerAsset(impl_->viewer_asset_dir, "/assets/viewer.js", response)) {
+                          response.status = 404;
+                        }
+                      } catch (const std::exception& ex) {
+                        response.status = 500;
+                        response.set_content(std::string(ex.what()) + "\n",
+                                             "text/plain; charset=utf-8");
+                      }
                     });
   impl_->server.Get("/assets/ag-grid-community.min.js",
                     [this](const httplib::Request&, httplib::Response& response) {
-                      response.set_content(impl_->ag_grid_js,
-                                           "application/javascript; charset=utf-8");
+                      if (!ServeEmbeddedViewerAsset("/assets/ag-grid-community.min.js", response)) {
+                        response.status = 404;
+                      }
                     });
   impl_->server.Get("/assets/ag-grid.css",
                     [this](const httplib::Request&, httplib::Response& response) {
-                      response.set_content(impl_->ag_grid_css, "text/css; charset=utf-8");
+                      if (!ServeEmbeddedViewerAsset("/assets/ag-grid.css", response)) {
+                        response.status = 404;
+                      }
                     });
   impl_->server.Get("/assets/ag-theme-alpine.css",
                     [this](const httplib::Request&, httplib::Response& response) {
-                      response.set_content(impl_->ag_theme_css, "text/css; charset=utf-8");
+                      if (!ServeEmbeddedViewerAsset("/assets/ag-theme-alpine.css", response)) {
+                        response.status = 404;
+                      }
+                    });
+  impl_->server.Get(R"(/assets/popright/([A-Za-z0-9._-]+\.js))",
+                    [](const httplib::Request& request, httplib::Response& response) {
+                      const auto route = std::string("/assets/popright/") + request.matches[1].str();
+                      if (!ServeEmbeddedViewerAsset(route, response)) {
+                        response.status = 404;
+                      }
+                    });
+  impl_->server.Get("/assets/popright/styles.css",
+                    [](const httplib::Request&, httplib::Response& response) {
+                      if (!ServeEmbeddedViewerAsset("/assets/popright/styles.css", response)) {
+                        response.status = 404;
+                      }
                     });
 
   impl_->server.Get("/api/schema",
@@ -1469,6 +1115,62 @@ int ViewServer::Start(const ViewServerOptions& options) {
                          response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
+                       }
+                     });
+
+  impl_->server.Post("/api/insert-column",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data.insert_column(
+                             JsonUintField(request.body, "column"),
+                             JsonStringField(request.body, "name"),
+                             JsonStringField(request.body, "value"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     });
+
+  impl_->server.Post("/api/delete-column",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data.delete_column(JsonStringField(request.body, "column"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     });
+
+  impl_->server.Post("/api/reset",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data.reset();
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         response.status = 409;
+                         response.set_content(std::string(ex.what()) + "\n",
+                                              "text/plain; charset=utf-8");
                        }
                      });
 
@@ -1586,7 +1288,9 @@ int RunView(const std::string& input_path,
   }
 
   ViewServer server(*data, logger);
-  if (const auto rc = server.Start({requested_port, serve_once, options.view_edit, {}}); rc != 0) {
+  if (const auto rc = server.Start(
+          {requested_port, serve_once, options.view_edit, {}, options.view_asset_dir});
+      rc != 0) {
     return rc;
   }
 
@@ -1595,7 +1299,9 @@ int RunView(const std::string& input_path,
   output.flush();
 
   if (logger.info) {
-    logger.info("view: local-only read-only viewer on 127.0.0.1");
+    logger.info(options.view_edit
+                    ? "view: local-only editable viewer on 127.0.0.1"
+                    : "view: local-only read-only viewer on 127.0.0.1");
     logger.info("view: " + std::to_string(data->row_count()) + " row(s) loaded in " +
                 std::string(data->mode_name()) + " mode from " + input_path);
   }

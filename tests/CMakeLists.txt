@@ -9,6 +9,8 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(Catch2)
 
 add_executable(csvzall_tests
+  ${CSVZALL_VIEWER_ASSET_CPP}
+  ${CSVZALL_VIEWER_ASSET_HPP}
   test_filter.cpp
   test_derive.cpp
   test_head.cpp
@@ -84,6 +86,7 @@ csvzall_copy_runtime_dependencies(csvzall_tests)
 
 target_include_directories(csvzall_tests
   PRIVATE
+    "${CSVZALL_VIEWER_GENERATED_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 set_property(TARGET csvzall_tests PROPERTY CXX_STANDARD ${CSVZALL_CXX_STANDARD})
@@ -115,7 +118,6 @@ else()
 endif()
 
 add_test(NAME csvzall_tests COMMAND csvzall_tests)
-csvzall_copy_viewer_assets(csvzall_tests)
 
 add_test(
   NAME csvzall_cli_smoke
