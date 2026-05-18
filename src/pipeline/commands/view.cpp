@@ -1,5 +1,6 @@
 #include "view.hpp"
 
+#include "../common/chart_spec.hpp"
 #include "../common/gzip_stream.hpp"
 
 #include "commands.hpp"
@@ -16,6 +17,7 @@
 #include <limits>
 #include <optional>
 #include <random>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -475,6 +477,468 @@ std::vector<std::string> JsonStringArrayField(std::string_view body, std::string
       throw std::runtime_error("expected JSON array separator");
     }
   });
+}
+
+bool JsonBoolField(std::string_view body, std::string_view field) {
+  return ParseJsonField(body, field, [](std::string_view text, std::size_t& pos) {
+    SkipJsonWs(text, pos);
+    if (text.substr(pos, 4) == "true") {
+      pos += 4;
+      return true;
+    }
+    if (text.substr(pos, 5) == "false") {
+      pos += 5;
+      return false;
+    }
+    throw std::runtime_error("expected JSON boolean");
+  });
+}
+
+std::string JsonStringFieldOr(std::string_view body,
+                              std::string_view field,
+                              std::string fallback) {
+  try {
+    return JsonStringField(body, field);
+  } catch (const std::exception& ex) {
+    const std::string missing = "missing JSON field: " + std::string(field);
+    if (ex.what() == missing) {
+      return fallback;
+    }
+    throw;
+  }
+}
+
+bool JsonBoolFieldOr(std::string_view body, std::string_view field, bool fallback) {
+  try {
+    return JsonBoolField(body, field);
+  } catch (const std::exception& ex) {
+    const std::string missing = "missing JSON field: " + std::string(field);
+    if (ex.what() == missing) {
+      return fallback;
+    }
+    throw;
+  }
+}
+
+std::filesystem::path FindChartConfigPath(const std::filesystem::path& input_path) {
+  auto current = std::filesystem::absolute(input_path).parent_path();
+  while (!current.empty()) {
+    const auto candidate = current / ".csvzall" / "charts.json";
+    if (std::filesystem::exists(candidate)) {
+      return candidate;
+    }
+    const auto parent = current.parent_path();
+    if (parent == current) {
+      break;
+    }
+    current = parent;
+  }
+  return std::filesystem::absolute(input_path).parent_path() / ".csvzall" / "charts.json";
+}
+
+std::filesystem::path ChartConfigRoot(const std::filesystem::path& config_path) {
+  const auto parent = std::filesystem::absolute(config_path).parent_path();
+  if (parent.filename() == ".csvzall") {
+    return parent.parent_path();
+  }
+  return parent;
+}
+
+std::string RelativePathForConfig(const std::filesystem::path& root,
+                                  const std::filesystem::path& path) {
+  const auto absolute_path = std::filesystem::absolute(path).lexically_normal();
+  const auto absolute_root = std::filesystem::absolute(root).lexically_normal();
+  auto relative = absolute_path.lexically_relative(absolute_root);
+  const auto relative_text = relative.generic_string();
+  if (relative.empty() || relative_text.starts_with("..")) {
+    relative = absolute_path;
+  }
+  return relative.generic_string();
+}
+
+std::filesystem::path NormalizeAbsolutePath(const std::filesystem::path& path) {
+  std::error_code ec;
+  const auto canonical = std::filesystem::weakly_canonical(std::filesystem::absolute(path), ec);
+  return ec ? std::filesystem::absolute(path).lexically_normal() : canonical;
+}
+
+bool SamePath(const std::filesystem::path& lhs, const std::filesystem::path& rhs) {
+  return NormalizeAbsolutePath(lhs) == NormalizeAbsolutePath(rhs);
+}
+
+std::string SanitizeChartId(std::string value) {
+  std::string result;
+  bool last_dash = false;
+  for (const unsigned char ch : value) {
+    if (std::isalnum(ch) != 0) {
+      result.push_back(static_cast<char>(std::tolower(ch)));
+      last_dash = false;
+      continue;
+    }
+    if (!last_dash && !result.empty()) {
+      result.push_back('-');
+      last_dash = true;
+    }
+  }
+  while (!result.empty() && result.back() == '-') {
+    result.pop_back();
+  }
+  return result.empty() ? "heatmap" : result;
+}
+
+std::string BuildHeatmapChartJson(std::string_view id,
+                                  std::string_view input,
+                                  std::string_view output,
+                                  std::string_view date,
+                                  std::string_view value,
+                                  std::string_view label,
+                                  std::string_view start,
+                                  std::string_view end,
+                                  std::string_view lookback,
+                                  std::string_view title,
+                                  bool run_on_save);
+
+std::string ChartSpecJsonForConfig(const common::ChartSpec& spec,
+                                   const std::filesystem::path& root) {
+  if (!spec.output) {
+    throw std::runtime_error("chart output path is required: " + spec.id);
+  }
+  return BuildHeatmapChartJson(
+      spec.id,
+      RelativePathForConfig(root, spec.input),
+      RelativePathForConfig(root, *spec.output),
+      spec.heatmap.date_column,
+      spec.heatmap.value_column,
+      spec.heatmap.label_column,
+      spec.heatmap.start_date,
+      spec.heatmap.end_date,
+      spec.heatmap.lookback,
+      spec.heatmap.title,
+      spec.run_on_save);
+}
+
+std::string ChartSpecJsonForApi(const common::ChartSpec& spec,
+                                const std::filesystem::path& root) {
+  std::string json;
+  json += "{\"id\":";
+  AppendJsonString(json, spec.id);
+  json += ",\"type\":";
+  AppendJsonString(json, spec.type);
+  json += ",\"input\":";
+  AppendJsonString(json, RelativePathForConfig(root, spec.input));
+  json += ",\"output\":";
+  AppendJsonString(json, spec.output ? RelativePathForConfig(root, *spec.output) : "");
+  json += ",\"options\":{\"date\":";
+  AppendJsonString(json, spec.heatmap.date_column);
+  json += ",\"value\":";
+  AppendJsonString(json, spec.heatmap.value_column);
+  json += ",\"label\":";
+  AppendJsonString(json, spec.heatmap.label_column);
+  json += ",\"start\":";
+  AppendJsonString(json, spec.heatmap.start_date);
+  json += ",\"end\":";
+  AppendJsonString(json, spec.heatmap.end_date);
+  json += ",\"lookback\":";
+  AppendJsonString(json, spec.heatmap.lookback);
+  json += ",\"title\":";
+  AppendJsonString(json, spec.heatmap.title);
+  json += "},\"runOnSave\":";
+  json += spec.run_on_save ? "true" : "false";
+  json += "}";
+  return json;
+}
+
+std::string SerializeChartConfig(const std::vector<common::ChartSpec>& charts,
+                                 const std::filesystem::path& root) {
+  std::string json = "{\n  \"charts\": [";
+  for (std::size_t i = 0; i < charts.size(); ++i) {
+    json += i == 0 ? "\n    " : ",\n    ";
+    json += ChartSpecJsonForConfig(charts[i], root);
+  }
+  if (!charts.empty()) {
+    json += "\n  ";
+  }
+  json += "]\n}\n";
+  return json;
+}
+
+std::vector<common::ChartSpec> LoadChartConfigIfExists(const std::filesystem::path& config_path) {
+  if (!std::filesystem::exists(config_path)) {
+    return {};
+  }
+  return common::LoadChartConfig(config_path).charts;
+}
+
+std::string BuildHeatmapChartJson(std::string_view id,
+                                  std::string_view input,
+                                  std::string_view output,
+                                  std::string_view date,
+                                  std::string_view value,
+                                  std::string_view label,
+                                  std::string_view start,
+                                  std::string_view end,
+                                  std::string_view lookback,
+                                  std::string_view title,
+                                  bool run_on_save) {
+  std::string json;
+  json += "{\n      \"id\": ";
+  AppendJsonString(json, id);
+  json += ",\n      \"type\": \"heatmap\",\n      \"input\": ";
+  AppendJsonString(json, input);
+  json += ",\n      \"output\": ";
+  AppendJsonString(json, output);
+  json += ",\n      \"options\": {\n        \"date\": ";
+  AppendJsonString(json, date);
+  if (!value.empty()) {
+    json += ",\n        \"value\": ";
+    AppendJsonString(json, value);
+  }
+  if (!label.empty()) {
+    json += ",\n        \"label\": ";
+    AppendJsonString(json, label);
+  }
+  if (!lookback.empty()) {
+    json += ",\n        \"lookback\": ";
+    AppendJsonString(json, lookback);
+    if (!end.empty()) {
+      json += ",\n        \"end\": ";
+      AppendJsonString(json, end);
+    }
+  } else {
+    json += ",\n        \"start\": ";
+    AppendJsonString(json, start);
+    json += ",\n        \"end\": ";
+    AppendJsonString(json, end);
+  }
+  if (!title.empty()) {
+    json += ",\n        \"title\": ";
+    AppendJsonString(json, title);
+  }
+  json += "\n      },\n      \"runOnSave\": ";
+  json += run_on_save ? "true" : "false";
+  json += "\n    }";
+  return json;
+}
+
+void WriteTextFile(const std::filesystem::path& path, std::string_view text) {
+  const auto parent = path.parent_path();
+  if (!parent.empty()) {
+    std::filesystem::create_directories(parent);
+  }
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  if (!output.is_open()) {
+    throw std::runtime_error("unable to open chart config for writing: " + path.string());
+  }
+  output << text;
+  output.flush();
+  if (!output.good()) {
+    throw std::runtime_error("failed to write chart config: " + path.string());
+  }
+}
+
+std::filesystem::path ResolveChartOutputPath(const std::filesystem::path& root,
+                                             const std::string& output) {
+  const std::filesystem::path output_path(output);
+  return output_path.is_absolute() ? output_path : root / output_path;
+}
+
+void RenderSavedHeatmapChart(const CsvViewData& data,
+                             const std::filesystem::path& root,
+                             const std::string& id,
+                             const std::string& output,
+                             bool run_on_save,
+                             common::HeatmapSpec heatmap,
+                             const LoggerCallbacks& logger) {
+#ifdef CSVZALL_HAVE_SVGPLOT
+  auto spec = common::MakeHeatmapChartSpec(
+      id,
+      std::filesystem::absolute(data.input_path()),
+      ResolveChartOutputPath(root, output),
+      run_on_save,
+      std::move(heatmap));
+  RunOptions options;
+  options.input_path = spec.input.string();
+  RunStats stats;
+  std::string render_error;
+  LoggerCallbacks chart_logger = logger;
+  chart_logger.error = [&logger, &render_error](const std::string& message) {
+    render_error = message;
+    if (logger.error) {
+      logger.error(message);
+    }
+  };
+  const auto rc = RunChart(spec, options, chart_logger, stats);
+  if (rc != 0) {
+    auto message = "chart config saved, but chart rendering failed: " + id;
+    if (!render_error.empty()) {
+      message += ": " + render_error;
+    }
+    throw std::runtime_error(message);
+  }
+#else
+  (void)data;
+  (void)root;
+  (void)id;
+  (void)output;
+  (void)run_on_save;
+  (void)heatmap;
+  (void)logger;
+  throw std::runtime_error("chart config saved, but heatmap rendering is disabled in this build");
+#endif
+}
+
+std::string BuildChartConfigListJson(const CsvViewData& data) {
+  const auto config_path = FindChartConfigPath(data.input_path());
+  const auto root = ChartConfigRoot(config_path);
+  const auto charts = LoadChartConfigIfExists(config_path);
+  std::string result = "{\"ok\":true,\"configPath\":";
+  AppendJsonString(result, config_path.string());
+  result += ",\"charts\":[";
+  bool first = true;
+  std::set<std::string> seen_ids;
+  for (const auto& chart : charts) {
+    if (!SamePath(chart.input, data.input_path())) {
+      continue;
+    }
+    if (!seen_ids.insert(chart.id).second) {
+      continue;
+    }
+    if (!first) {
+      result += ",";
+    }
+    first = false;
+    result += ChartSpecJsonForApi(chart, root);
+  }
+  result += "]}";
+  return result;
+}
+
+common::ChartSpec FindCurrentCsvChart(const CsvViewData& data, const std::string& id) {
+  const auto config_path = FindChartConfigPath(data.input_path());
+  const auto charts = LoadChartConfigIfExists(config_path);
+  for (const auto& chart : charts) {
+    if (chart.id == id && SamePath(chart.input, data.input_path())) {
+      return chart;
+    }
+  }
+  throw std::runtime_error("chart not found for current CSV: " + id);
+}
+
+std::string GenerateCurrentCsvChart(const CsvViewData& data,
+                                    std::string_view body,
+                                    const LoggerCallbacks& logger) {
+  const auto id = JsonStringField(body, "id");
+  const auto config_path = FindChartConfigPath(data.input_path());
+  const auto root = ChartConfigRoot(config_path);
+  const auto chart = FindCurrentCsvChart(data, id);
+  if (!chart.output) {
+    throw std::runtime_error("chart output path is required: " + chart.id);
+  }
+  RenderSavedHeatmapChart(
+      data,
+      root,
+      chart.id,
+      RelativePathForConfig(root, *chart.output),
+      chart.run_on_save,
+      chart.heatmap,
+      logger);
+
+  std::string result = "{\"ok\":true,\"id\":";
+  AppendJsonString(result, chart.id);
+  result += ",\"output\":";
+  AppendJsonString(result, RelativePathForConfig(root, *chart.output));
+  result += ",\"generated\":true}";
+  return result;
+}
+
+std::string AppendHeatmapChartConfig(const CsvViewData& data,
+                                     std::string_view body,
+                                     const LoggerCallbacks& logger) {
+  const auto config_path = FindChartConfigPath(data.input_path());
+  const auto root = ChartConfigRoot(config_path);
+  const auto input_path = RelativePathForConfig(root, data.input_path());
+  const auto id = SanitizeChartId(JsonStringField(body, "id"));
+  const auto output = JsonStringField(body, "output");
+  const auto date = JsonStringField(body, "date");
+  const auto value = JsonStringFieldOr(body, "value", "");
+  const auto label = JsonStringFieldOr(body, "label", "");
+  const auto start = JsonStringFieldOr(body, "start", "");
+  const auto end = JsonStringFieldOr(body, "end", "");
+  const auto lookback = JsonStringFieldOr(body, "lookback", "");
+  const auto title = JsonStringFieldOr(body, "title", "");
+  const auto run_on_save = JsonBoolFieldOr(body, "runOnSave", true);
+
+  if (output.empty()) {
+    throw std::runtime_error("output path is required");
+  }
+  if (date.empty()) {
+    throw std::runtime_error("date column is required");
+  }
+  if (lookback.empty() && (start.empty() || end.empty())) {
+    throw std::runtime_error("start and end dates are required unless lookback is set");
+  }
+  if (!lookback.empty() && !start.empty()) {
+    throw std::runtime_error("lookback cannot be combined with start");
+  }
+  if (std::find(data.headers().begin(), data.headers().end(), date) == data.headers().end()) {
+    throw std::runtime_error("date column not found: " + date);
+  }
+  if (!value.empty() &&
+      std::find(data.headers().begin(), data.headers().end(), value) == data.headers().end()) {
+    throw std::runtime_error("value column not found: " + value);
+  }
+  if (!label.empty() &&
+      std::find(data.headers().begin(), data.headers().end(), label) == data.headers().end()) {
+    throw std::runtime_error("label column not found: " + label);
+  }
+
+  common::HeatmapSpec heatmap;
+  heatmap.date_column = date;
+  heatmap.value_column = value;
+  heatmap.label_column = label;
+  heatmap.start_date = start;
+  heatmap.end_date = end;
+  heatmap.lookback = lookback;
+  heatmap.title = title;
+
+  auto charts = LoadChartConfigIfExists(config_path);
+  auto spec = common::MakeHeatmapChartSpec(
+      id,
+      ResolveChartOutputPath(root, input_path),
+      ResolveChartOutputPath(root, output),
+      run_on_save,
+      heatmap);
+
+  bool updated_existing = false;
+  std::vector<common::ChartSpec> updated_charts;
+  updated_charts.reserve(charts.size() + 1);
+  for (auto& chart : charts) {
+    if (chart.id == id) {
+      if (!updated_existing) {
+        updated_charts.push_back(spec);
+        updated_existing = true;
+      }
+      continue;
+    }
+    updated_charts.push_back(std::move(chart));
+  }
+  if (!updated_existing) {
+    updated_charts.push_back(spec);
+  }
+  WriteTextFile(config_path, SerializeChartConfig(updated_charts, root));
+  RenderSavedHeatmapChart(data, root, id, output, run_on_save, std::move(heatmap), logger);
+
+  std::string result = "{\"ok\":true,\"configPath\":";
+  AppendJsonString(result, config_path.string());
+  result += ",\"id\":";
+  AppendJsonString(result, id);
+  result += ",\"output\":";
+  AppendJsonString(result, output);
+  result += ",\"action\":";
+  AppendJsonString(result, updated_existing ? "updated" : "created");
+  result += ",\"generated\":true";
+  result += "}";
+  return result;
 }
 
 void ValidatePlainLocalViewInput(const std::string& input_path, const RunOptions& options) {
@@ -1188,8 +1652,52 @@ int ViewServer::Start(const ViewServerOptions& options) {
                          response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
                        } catch (const std::exception& ex) {
                          response.status = 409;
-                         response.set_content(std::string(ex.what()) + "\n",
+                        response.set_content(std::string(ex.what()) + "\n",
                                               "text/plain; charset=utf-8");
+                      }
+                     });
+
+  impl_->server.Post("/api/chart-config/heatmap",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       try {
+                         response.set_content(AppendHeatmapChartConfig(
+                                                  impl_->data, request.body, impl_->logger),
+                                              "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     });
+
+  impl_->server.Get("/api/chart-config",
+                    [this](const httplib::Request& request, httplib::Response& response) {
+                      if (!impl_->HasValidToken(request)) {
+                        impl_->RejectUnauthorized(response);
+                        return;
+                      }
+                      try {
+                        response.set_content(BuildChartConfigListJson(impl_->data),
+                                             "application/json; charset=utf-8");
+                      } catch (const std::exception& ex) {
+                        BadRequest(response, ex.what());
+                      }
+                    });
+
+  impl_->server.Post("/api/chart-config/generate",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       try {
+                         response.set_content(GenerateCurrentCsvChart(
+                                                  impl_->data, request.body, impl_->logger),
+                                              "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
                        }
                      });
 

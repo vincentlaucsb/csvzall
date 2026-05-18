@@ -13,12 +13,15 @@
     <header class="topbar">
       <div class="file-meta">
         <h1 id="file-name">Loading…</h1>
-        <span id="summary" class="summary">Preparing read-only table view.</span>
+        <span id="summary" class="summary" aria-hidden="true"></span>
       </div>
       <label class="search">
         <span id="mode-label">Loading rows</span>
         <input id="quick-filter" type="search" placeholder="Filter loaded table">
       </label>
+      <div class="chart-toolbar">
+        <button id="add-chart" type="button" hidden>Add chart</button>
+      </div>
       <div id="edit-toolbar" class="edit-toolbar" hidden>
         <button id="insert-row" type="button">Insert row</button>
         <button id="delete-row" type="button">Delete row</button>
@@ -32,8 +35,8 @@
       <div id="grid" class="ag-theme-alpine-auto-dark"></div>
     </main>
     <footer class="footer">
-      <span>Local-only session.</span>
       <span id="status">Connecting…</span>
+      <span id="record-count"></span>
     </footer>
   </div>
   <dialog id="insert-column-dialog" class="csvzall-dialog">
@@ -47,6 +50,92 @@
       <div class="dialog-actions">
         <button id="cancel-insert-column" type="button">Cancel</button>
         <button type="submit">Insert</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="heatmap-chart-dialog" class="csvzall-dialog chart-dialog">
+    <form id="heatmap-chart-form" class="dialog-form">
+      <div class="chart-dialog-layout">
+        <aside class="chart-list-pane">
+          <div class="chart-list-header">
+            <h2>Charts</h2>
+            <button id="new-chart" type="button">New</button>
+          </div>
+          <div id="chart-list" class="chart-list" role="listbox" aria-label="Charts for this CSV"></div>
+        </aside>
+        <section class="chart-form-pane">
+          <h2>Heatmap</h2>
+          <label>
+            <span>Chart id</span>
+            <input id="chart-id" type="text" autocomplete="off" required>
+          </label>
+          <label>
+            <span>Title</span>
+            <input id="chart-title" type="text" autocomplete="off">
+          </label>
+          <div class="dialog-grid">
+            <label>
+              <span>Date column</span>
+              <select id="chart-date-column" required></select>
+            </label>
+            <label>
+              <span>Value column</span>
+              <select id="chart-value-column"></select>
+            </label>
+            <label>
+              <span>Label column</span>
+              <select id="chart-label-column"></select>
+            </label>
+          </div>
+          <fieldset class="chart-range">
+            <legend>Range</legend>
+            <label class="toggle-row">
+              <input id="chart-range-fixed" type="radio" name="chart-range-mode" value="fixed" checked>
+              <span>Fixed dates</span>
+            </label>
+            <label class="toggle-row">
+              <input id="chart-range-rolling" type="radio" name="chart-range-mode" value="rolling">
+              <span>Rolling</span>
+            </label>
+            <div id="chart-fixed-range" class="dialog-grid">
+              <label>
+                <span>Start</span>
+                <input id="chart-start" type="date">
+              </label>
+              <label>
+                <span>End</span>
+                <input id="chart-end" type="date">
+              </label>
+            </div>
+            <div id="chart-rolling-range" class="dialog-grid" hidden>
+              <label>
+                <span>Look back</span>
+                <input id="chart-lookback-count" type="number" min="1" step="1" value="1">
+              </label>
+              <label>
+                <span>Unit</span>
+                <select id="chart-lookback-unit">
+                  <option value="y">Years</option>
+                  <option value="d">Days</option>
+                </select>
+              </label>
+            </div>
+          </fieldset>
+          <label>
+            <span>Output path</span>
+            <input id="chart-output" type="text" autocomplete="off" required>
+          </label>
+          <label class="toggle-row">
+            <input id="chart-run-on-save" type="checkbox" checked>
+            <span>Run on save</span>
+          </label>
+        </section>
+      </div>
+      <p id="chart-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancel-chart" type="button">Cancel</button>
+        <button id="generate-chart" type="button">Create chart</button>
+        <button type="submit">Save chart</button>
       </div>
     </form>
   </dialog>

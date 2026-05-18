@@ -16,6 +16,11 @@ namespace csvzall::pipeline::postgres {
 struct ConnectionConfig;
 }
 
+namespace csvzall::pipeline::common {
+struct ChartSpec;
+struct HeatmapSpec;
+}
+
 namespace csvzall::pipeline::commands {
 
 // ---------------------------------------------------------------------------
@@ -150,6 +155,21 @@ int RunHeatmap(const std::string& date_column,
                const RunOptions& options,
                const LoggerCallbacks& logger,
                RunStats& stats);
+int RunHeatmap(const common::HeatmapSpec& spec,
+               std::istream& input,
+               std::ostream& output,
+               const RunOptions& options,
+               const LoggerCallbacks& logger,
+               RunStats& stats);
+int RunChart(const common::ChartSpec& spec,
+             const RunOptions& options,
+             const LoggerCallbacks& logger,
+             RunStats& stats);
+int RunCharts(const std::string& config_path,
+              const std::string& chart_id,
+              const RunOptions& options,
+              const LoggerCallbacks& logger,
+              RunStats& stats);
 #endif
 
 // Export a CSV to a SQLite database file.

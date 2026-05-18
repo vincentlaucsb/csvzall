@@ -554,6 +554,7 @@ set(CSVZALL_APP_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/credentials.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/util.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/transform_pipeline.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/chart_spec.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/column_lookup.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/gzip_stream.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/json_path.cpp
@@ -576,6 +577,7 @@ set(CSVZALL_APP_SOURCES
 
 if(CSVZALL_HAVE_SVGPLOT)
   list(APPEND CSVZALL_APP_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/charts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/heatmap.cpp)
 endif()
 

@@ -26,6 +26,7 @@ add_executable(csvzall_tests
   ../src/credentials.cpp
   ../src/util.cpp
   ../src/transform_pipeline.cpp
+  ../src/pipeline/common/chart_spec.cpp
   ../src/pipeline/common/column_lookup.cpp
   ../src/pipeline/common/gzip_stream.cpp
   ../src/pipeline/common/json_path.cpp
@@ -50,6 +51,7 @@ add_executable(csvzall_tests
 if(CSVZALL_HAVE_SVGPLOT)
   target_sources(csvzall_tests PRIVATE
     test_heatmap.cpp
+    ../src/pipeline/commands/charts.cpp
     ../src/pipeline/commands/heatmap.cpp)
 endif()
 

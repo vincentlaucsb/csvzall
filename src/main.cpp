@@ -3,6 +3,7 @@
 #include <indicators/progress_spinner.hpp>
 #include "credentials.hpp"
 #include "head.hpp"
+#include "pipeline/common/chart_spec.hpp"
 #include "pipeline/common/markdown_calendar.hpp"
 #include "transform_pipeline.hpp"
 #include "util.hpp"
@@ -16,6 +17,7 @@
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -392,7 +394,7 @@ int main(int argc, char** argv) {
   program.add_epilog(R"(Intent groups:
   ETL/data: head, filter, derive, summarize, timeseries, sql, json, append, merge
   Inspect/view: view
-  Rendering/report: calendar, heatmap
+  Rendering/report: calendar, heatmap, charts
 
 SQL notes:
   sql query supports SQLite plus csvzall functions: REGEXP and regexp_like(value, pattern)
@@ -403,6 +405,7 @@ Workflow examples:
   csvzall sql query --csv store.csv --format markdown --sql "SELECT substr(date,1,7) AS month, COUNT(*) AS days FROM data GROUP BY month"
   csvzall view store.csv
   csvzall heatmap store.csv --date date --start 2026-01-01 --end 2026-12-31 --title "Activity"
+  csvzall charts run --config .csvzall/charts.json
 )");
 
   argparse::ArgumentParser derive_cmd("derive");
@@ -689,20 +692,26 @@ Examples:
   A numeric value column is optional. If omitted, each row contributes 1.
   A label column is optional. Labels are included in SVG cell tooltips.
   Duplicate dates are aggregated by summing values or row counts.
-  Rows outside --start/--end are ignored by the chart renderer.
+  Rows outside --start/--end or --lookback are ignored by the chart renderer.
 
 Examples:
   csvzall heatmap gym-attendance.csv --start 2025-05-15 --end 2026-05-15 --date date --title "Gym Attendance" > gym.svg
+  csvzall heatmap gym-attendance.csv --lookback 1y --date date --output gym.svg
+  csvzall heatmap gym-attendance.csv --lookback 365d --date date --output gym.svg
+  csvzall heatmap gym-attendance.csv --start 2025-05-15 --end 2026-05-15 --date date --output gym.svg
   csvzall heatmap daily-counts.csv --start 2026-01-01 --end 2026-12-31 --date day --value count --label note > heatmap.svg
 )");
   AddCsvInputArguments(heatmap_cmd);
   AddExactArgument(heatmap_cmd);
   heatmap_cmd.add_argument("--start")
-      .help("Inclusive start date, YYYY-MM-DD")
-      .required();
+      .help("Inclusive start date, YYYY-MM-DD. Use with --end, or omit when using --lookback.")
+      .default_value(std::string{});
   heatmap_cmd.add_argument("--end")
-      .help("Inclusive end date, YYYY-MM-DD")
-      .required();
+      .help("Inclusive end date, YYYY-MM-DD. With --lookback, defaults to today's local date.")
+      .default_value(std::string{});
+  heatmap_cmd.add_argument("--lookback")
+      .help("Rolling range ending at --end or today, such as 365d or 1y. Cannot be combined with --start.")
+      .default_value(std::string{});
   heatmap_cmd.add_argument("--date")
       .help("Date column name (default: date)")
       .default_value(std::string{"date"});
@@ -715,6 +724,49 @@ Examples:
   heatmap_cmd.add_argument("--title")
       .help("Optional SVG title")
       .default_value(std::string{});
+  heatmap_cmd.add_argument("--output")
+      .help("Optional SVG output file path. If omitted, SVG is written to stdout.")
+      .default_value(std::string{});
+
+  argparse::ArgumentParser charts_cmd("charts");
+  charts_cmd.add_description(
+      "Run configured CSV-to-chart rendering from .csvzall/charts.json.");
+  charts_cmd.add_epilog(R"(charts run contract:
+  Loads JSON chart objects from .csvzall/charts.json by default:
+  {"charts":[{"id":"gym","type":"heatmap","input":"gym.csv","output":"gym.svg","options":{"date":"date","lookback":"1y"}}]}
+  Use --config <path> to choose another chart config.
+  Relative input and output paths resolve against the config root.
+  Configured charts require explicit output paths and overwrite existing outputs.
+  Missing inputs, unknown chart types, invalid options, missing columns, and
+  write failures produce stderr diagnostics and a non-zero exit.
+
+Examples:
+  csvzall charts run
+  csvzall charts run gym-attendance-heatmap
+  csvzall charts run --config .csvzall/charts.json
+
+Related:
+  Use heatmap for direct one-off SVG rendering to stdout or --output.
+)");
+  charts_cmd.add_argument("mode")
+      .help("Charts mode: run")
+      .default_value(std::string{"run"})
+      .nargs(argparse::nargs_pattern::optional);
+  charts_cmd.add_argument("id")
+      .help("Optional chart id to run")
+      .default_value(std::string{})
+      .nargs(argparse::nargs_pattern::optional);
+  charts_cmd.add_argument("--config")
+      .help("Chart config path (default: .csvzall/charts.json from current directory)")
+      .default_value(std::string{});
+  charts_cmd.add_argument("--verbose")
+      .help("Print diagnostic logs to stderr")
+      .default_value(false)
+      .implicit_value(true);
+  charts_cmd.add_argument("--quiet")
+      .help("Suppress informational logs")
+      .default_value(false)
+      .implicit_value(true);
 #endif
 
   argparse::ArgumentParser json_cmd("json");
@@ -787,6 +839,7 @@ Pipeline example:
   program.add_subparser(calendar_cmd);
 #ifdef CSVZALL_HAVE_SVGPLOT
   program.add_subparser(heatmap_cmd);
+  program.add_subparser(charts_cmd);
 #endif
   program.add_subparser(json_cmd);
 
@@ -937,6 +990,7 @@ Examples:
       !program.is_subcommand_used("calendar") &&
 #ifdef CSVZALL_HAVE_SVGPLOT
       !program.is_subcommand_used("heatmap") &&
+      !program.is_subcommand_used("charts") &&
 #endif
       !program.is_subcommand_used("json") &&
       !program.is_subcommand_used("sql") &&
@@ -1228,16 +1282,71 @@ Examples:
       return 1;
     }
 
+    csvzall::pipeline::common::HeatmapSpec heatmap_spec;
+    heatmap_spec.date_column = heatmap_cmd.get<std::string>("--date");
+    heatmap_spec.value_column = heatmap_cmd.get<std::string>("--value");
+    heatmap_spec.label_column = heatmap_cmd.get<std::string>("--label");
+    heatmap_spec.start_date = heatmap_cmd.get<std::string>("--start");
+    heatmap_spec.end_date = heatmap_cmd.get<std::string>("--end");
+    heatmap_spec.lookback = heatmap_cmd.get<std::string>("--lookback");
+    heatmap_spec.title = heatmap_cmd.get<std::string>("--title");
+
+    std::unique_ptr<std::ofstream> output_file;
+    std::ostream* output = &std::cout;
+    const auto output_name = heatmap_cmd.get<std::string>("--output");
+    if (!output_name.empty()) {
+      const std::filesystem::path output_path(output_name);
+      const auto parent = output_path.parent_path();
+      if (!parent.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+          logger.Error("heatmap: unable to create output directory: " +
+                       parent.string() + ": " + ec.message());
+          return 1;
+        }
+      }
+      output_file = std::make_unique<std::ofstream>(output_path, std::ios::binary | std::ios::trunc);
+      if (!output_file->is_open()) {
+        logger.Error("heatmap: unable to open output file: " + output_name);
+        return 1;
+      }
+      output = output_file.get();
+    }
+
     csvzall::pipeline::RunStats ps;
     const auto rc = csvzall::pipeline::RunHeatmap(
-        heatmap_cmd.get<std::string>("--date"),
-        heatmap_cmd.get<std::string>("--value"),
-        heatmap_cmd.get<std::string>("--label"),
-        heatmap_cmd.get<std::string>("--start"),
-        heatmap_cmd.get<std::string>("--end"),
-        heatmap_cmd.get<std::string>("--title"),
-        *input, std::cout, BuildTransformOptions(heatmap_cmd, input, input_name),
+        heatmap_spec,
+        *input, *output, BuildTransformOptions(heatmap_cmd, input, input_name),
         BuildCallbacks(logger), ps);
+    stats = FinishStats(ps, start);
+    MaybePrintVerboseStats(stats, logger);
+    if (rc == 0 && output_file) {
+      output_file->flush();
+      if (!output_file->good()) {
+        logger.Error("heatmap: failed to write output file: " + output_name);
+        return 1;
+      }
+    }
+    return rc;
+  }
+
+  if (program.is_subcommand_used("charts")) {
+    Logger logger(charts_cmd.get<bool>("--verbose"), charts_cmd.get<bool>("--quiet"));
+    const auto mode = charts_cmd.get<std::string>("mode");
+    if (mode != "run") {
+      logger.Error("charts: mode must be 'run'.");
+      return 1;
+    }
+
+    csvzall::pipeline::RunOptions options;
+    csvzall::pipeline::RunStats ps;
+    const auto rc = csvzall::pipeline::RunCharts(
+        charts_cmd.get<std::string>("--config"),
+        charts_cmd.get<std::string>("id"),
+        options,
+        BuildCallbacks(logger),
+        ps);
     stats = FinishStats(ps, start);
     MaybePrintVerboseStats(stats, logger);
     return rc;

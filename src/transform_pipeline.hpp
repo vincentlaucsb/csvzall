@@ -7,6 +7,10 @@
 #include <string>
 #include <vector>
 
+namespace csvzall::pipeline::common {
+struct HeatmapSpec;
+}
+
 #ifdef CSVZALL_HAVE_POSTGRESQL
 #include "pipeline/postgres/postgres_connection.hpp"
 #endif
@@ -87,6 +91,17 @@ int RunHeatmap(const std::string& date_column,
                const RunOptions& options,
                const LoggerCallbacks& logger,
                RunStats& stats);
+int RunHeatmap(const common::HeatmapSpec& spec,
+               std::istream& input,
+               std::ostream& output,
+               const RunOptions& options,
+               const LoggerCallbacks& logger,
+               RunStats& stats);
+int RunCharts(const std::string& config_path,
+              const std::string& chart_id,
+              const RunOptions& options,
+              const LoggerCallbacks& logger,
+              RunStats& stats);
 #endif
 
 int RunSqlExport(const std::string& input_path,

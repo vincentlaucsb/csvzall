@@ -104,6 +104,23 @@ int RunHeatmap(const std::string& date_column,
   return commands::RunHeatmap(date_column, value_column, label_column, start_date, end_date,
                               title, input, output, options, logger, stats);
 }
+
+int RunHeatmap(const common::HeatmapSpec& spec,
+               std::istream& input,
+               std::ostream& output,
+               const RunOptions& options,
+               const LoggerCallbacks& logger,
+               RunStats& stats) {
+  return commands::RunHeatmap(spec, input, output, options, logger, stats);
+}
+
+int RunCharts(const std::string& config_path,
+              const std::string& chart_id,
+              const RunOptions& options,
+              const LoggerCallbacks& logger,
+              RunStats& stats) {
+  return commands::RunCharts(config_path, chart_id, options, logger, stats);
+}
 #endif
 
 int RunSqlExport(const std::string& input_path,

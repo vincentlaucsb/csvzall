@@ -120,6 +120,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
   const { createContextMenu } = dependencies;
   const statusNode = document.getElementById('status');
   const summaryNode = document.getElementById('summary');
+  const recordCountNode = document.getElementById('record-count');
   const fileNode = document.getElementById('file-name');
   const modeNode = document.getElementById('mode-label');
   const quickFilterNode = document.getElementById('quick-filter');
@@ -190,13 +191,56 @@ async function csvzallViewBootstrap(dependencies = {}) {
     });
   }
 
+  function slugify(value) {
+    const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return slug || 'chart';
+  }
+
+  function stripCsvExtension(value) {
+    return value.replace(/\.[^.]+$/, '');
+  }
+
+  function populateColumnSelect(select, columns, { optional = false, preferred = '' } = {}) {
+    select.textContent = '';
+    if (optional) {
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = 'None';
+      select.append(empty);
+    }
+    columns.forEach((column) => {
+      const option = document.createElement('option');
+      option.value = column;
+      option.textContent = column;
+      select.append(option);
+    });
+    if (preferred && columns.includes(preferred)) {
+      select.value = preferred;
+    } else if (!optional && columns.length > 0) {
+      select.value = columns[0];
+    }
+  }
+
+  function guessColumn(columns, patterns) {
+    const lowered = columns.map((column) => column.toLowerCase());
+    for (const pattern of patterns) {
+      const index = lowered.findIndex((column) => column === pattern || column.includes(pattern));
+      if (index >= 0) {
+        return columns[index];
+      }
+    }
+    return '';
+  }
+
   try {
     const schema = await fetchJson('/api/schema');
     fileNode.textContent = schema.file;
-    summaryNode.textContent = `${schema.totalRows.toLocaleString()} rows across ${schema.columns.length.toLocaleString()} columns.`;
+    summaryNode.textContent = '';
+    recordCountNode.textContent = `${schema.totalRows.toLocaleString()} rows, ${schema.columns.length.toLocaleString()} columns`;
     const materialized = schema.mode === 'materialized';
     const editable = schema.editable === true;
     const editToolbar = document.getElementById('edit-toolbar');
+    const addChartButton = document.getElementById('add-chart');
     const insertButton = document.getElementById('insert-row');
     const deleteButton = document.getElementById('delete-row');
     const insertColumnButton = document.getElementById('insert-column');
@@ -208,10 +252,251 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const insertColumnName = document.getElementById('insert-column-name');
     const insertColumnError = document.getElementById('insert-column-error');
     const cancelInsertColumn = document.getElementById('cancel-insert-column');
-    modeNode.textContent = materialized ? 'Client-side sort/filter' : 'Server-paged rows';
+    const chartDialog = document.getElementById('heatmap-chart-dialog');
+    const chartForm = document.getElementById('heatmap-chart-form');
+    const chartList = document.getElementById('chart-list');
+    const newChartButton = document.getElementById('new-chart');
+    const generateChartButton = document.getElementById('generate-chart');
+    const chartId = document.getElementById('chart-id');
+    const chartTitle = document.getElementById('chart-title');
+    const chartDateColumn = document.getElementById('chart-date-column');
+    const chartValueColumn = document.getElementById('chart-value-column');
+    const chartLabelColumn = document.getElementById('chart-label-column');
+    const chartRangeFixed = document.getElementById('chart-range-fixed');
+    const chartRangeRolling = document.getElementById('chart-range-rolling');
+    const chartFixedRange = document.getElementById('chart-fixed-range');
+    const chartRollingRange = document.getElementById('chart-rolling-range');
+    const chartStart = document.getElementById('chart-start');
+    const chartEnd = document.getElementById('chart-end');
+    const chartLookbackCount = document.getElementById('chart-lookback-count');
+    const chartLookbackUnit = document.getElementById('chart-lookback-unit');
+    const chartOutput = document.getElementById('chart-output');
+    const chartRunOnSave = document.getElementById('chart-run-on-save');
+    const chartError = document.getElementById('chart-error');
+    const cancelChart = document.getElementById('cancel-chart');
+    modeNode.textContent = materialized ? 'Client-side' : 'Paged';
     quickFilterNode.hidden = !materialized;
     quickFilterNode.disabled = !materialized;
     editToolbar.hidden = !editable;
+    addChartButton.hidden = false;
+
+    const baseName = stripCsvExtension(schema.file);
+    const baseSlug = slugify(baseName);
+    const guessedDateColumn = guessColumn(schema.columns, ['date', 'day', 'attendance_date']);
+    const guessedValueColumn = guessColumn(schema.columns, ['count', 'value', 'total']);
+    const guessedLabelColumn = guessColumn(schema.columns, ['content', 'label', 'note', 'description']);
+    let currentCharts = [];
+    let selectedChartId = '';
+    populateColumnSelect(chartDateColumn, schema.columns, { preferred: guessedDateColumn });
+    populateColumnSelect(chartValueColumn, schema.columns, { optional: true, preferred: guessedValueColumn });
+    populateColumnSelect(chartLabelColumn, schema.columns, { optional: true, preferred: guessedLabelColumn });
+
+    const showChartError = (message) => {
+      chartError.textContent = message;
+      chartError.hidden = false;
+    };
+    const clearChartError = () => {
+      chartError.textContent = '';
+      chartError.hidden = true;
+    };
+
+    const defaultChartValues = () => ({
+      id: `${baseSlug}-heatmap`,
+      title: baseName,
+      date: guessedDateColumn,
+      value: guessedValueColumn,
+      label: guessedLabelColumn,
+      start: '',
+      end: '',
+      lookback: '1y',
+      output: `charts/${baseSlug}_heatmap.svg`,
+      runOnSave: true,
+    });
+
+    const parseLookback = (lookback) => {
+      const match = String(lookback || '').trim().match(/^(\d+)\s*(d|day|days|y|year|years)?$/i);
+      if (!match) {
+        return { count: '1', unit: 'y' };
+      }
+      const unit = (match[2] || 'd').toLowerCase().startsWith('y') ? 'y' : 'd';
+      return { count: match[1], unit };
+    };
+
+    const currentLookback = () => `${Math.max(1, Number.parseInt(chartLookbackCount.value, 10) || 1)}${chartLookbackUnit.value}`;
+
+    const setRangeMode = (mode) => {
+      const rolling = mode === 'rolling';
+      chartRangeFixed.checked = !rolling;
+      chartRangeRolling.checked = rolling;
+      chartFixedRange.hidden = rolling;
+      chartRollingRange.hidden = !rolling;
+      chartStart.required = !rolling;
+      chartEnd.required = !rolling;
+      chartLookbackCount.required = rolling;
+    };
+
+    const applyChartValues = (values) => {
+      chartId.value = values.id ?? '';
+      chartTitle.value = values.title ?? '';
+      chartDateColumn.value = values.date ?? '';
+      chartValueColumn.value = values.value ?? '';
+      chartLabelColumn.value = values.label ?? '';
+      chartStart.value = values.start ?? '';
+      chartEnd.value = values.end ?? '';
+      const lookback = values.lookback ?? '';
+      const parsedLookback = parseLookback(lookback);
+      chartLookbackCount.value = parsedLookback.count;
+      chartLookbackUnit.value = parsedLookback.unit;
+      setRangeMode(lookback ? 'rolling' : 'fixed');
+      chartOutput.value = values.output ?? '';
+      chartRunOnSave.checked = values.runOnSave !== false;
+      selectedChartId = chartId.value;
+      generateChartButton.disabled = !currentCharts.some((chart) => chart.id === selectedChartId);
+    };
+
+    const valuesFromChart = (chart) => ({
+      id: chart.id,
+      title: chart.options?.title ?? '',
+      date: chart.options?.date ?? '',
+      value: chart.options?.value ?? '',
+      label: chart.options?.label ?? '',
+      start: chart.options?.start ?? '',
+      end: chart.options?.end ?? '',
+      lookback: chart.options?.lookback ?? '',
+      output: chart.output ?? '',
+      runOnSave: chart.runOnSave === true,
+    });
+
+    const renderChartList = () => {
+      chartList.replaceChildren();
+      if (currentCharts.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'chart-list-empty';
+        empty.textContent = 'No charts yet.';
+        chartList.append(empty);
+        return;
+      }
+      currentCharts.forEach((chart) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'chart-list-item';
+        button.setAttribute('role', 'option');
+        button.setAttribute('aria-selected', String(chart.id === selectedChartId));
+        const title = document.createElement('strong');
+        title.textContent = chart.options?.title || chart.id;
+        const detail = document.createElement('span');
+        detail.textContent = chart.output || 'No output path';
+        button.append(title, detail);
+        button.addEventListener('click', () => {
+          selectedChartId = chart.id;
+          applyChartValues(valuesFromChart(chart));
+          clearChartError();
+          renderChartList();
+        });
+        chartList.append(button);
+      });
+    };
+
+    const loadChartList = async () => {
+      const result = await fetchJson('/api/chart-config');
+      currentCharts = Array.isArray(result.charts) ? result.charts : [];
+      if (!currentCharts.some((chart) => chart.id === selectedChartId)) {
+        selectedChartId = currentCharts[0]?.id ?? '';
+      }
+      if (selectedChartId) {
+        const selected = currentCharts.find((chart) => chart.id === selectedChartId);
+        if (selected) {
+          applyChartValues(valuesFromChart(selected));
+        }
+      } else {
+        applyChartValues(defaultChartValues());
+      }
+      renderChartList();
+    };
+
+    const useNewChartDefaults = () => {
+      chartId.value = `${baseSlug}-heatmap`;
+      chartTitle.value = baseName;
+      chartStart.value = '';
+      chartEnd.value = '';
+      chartLookbackCount.value = '1';
+      chartLookbackUnit.value = 'y';
+      setRangeMode('rolling');
+      chartOutput.value = `charts/${baseSlug}_heatmap.svg`;
+      chartRunOnSave.checked = true;
+      chartDateColumn.value = guessedDateColumn;
+      chartValueColumn.value = guessedValueColumn;
+      chartLabelColumn.value = guessedLabelColumn;
+      selectedChartId = '';
+      generateChartButton.disabled = true;
+      clearChartError();
+      renderChartList();
+      chartId.focus();
+    };
+
+    addChartButton.addEventListener('click', async () => {
+      clearChartError();
+      try {
+        await loadChartList();
+      } catch (error) {
+        currentCharts = [];
+        applyChartValues(defaultChartValues());
+        renderChartList();
+        showChartError(error instanceof Error ? error.message : 'Chart config load failed');
+      }
+      chartDialog.showModal();
+      chartDateColumn.focus();
+    });
+    newChartButton.addEventListener('click', useNewChartDefaults);
+    chartRangeFixed.addEventListener('change', () => setRangeMode('fixed'));
+    chartRangeRolling.addEventListener('change', () => setRangeMode('rolling'));
+    cancelChart.addEventListener('click', () => {
+      chartDialog.close('cancel');
+    });
+    generateChartButton.addEventListener('click', async () => {
+      const id = chartId.value.trim();
+      if (!id) {
+        showChartError('Select or save a chart first.');
+        return;
+      }
+      try {
+        const result = await postJson('/api/chart-config/generate', { id });
+        statusNode.textContent = `Generated chart ${result.id}.`;
+        clearChartError();
+      } catch (error) {
+        showChartError(error instanceof Error ? error.message : 'Chart generation failed');
+      }
+    });
+    chartForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payload = {
+        id: chartId.value.trim(),
+        title: chartTitle.value.trim(),
+        date: chartDateColumn.value,
+        value: chartValueColumn.value,
+        label: chartLabelColumn.value,
+        start: chartRangeRolling.checked ? '' : chartStart.value,
+        end: chartRangeRolling.checked ? '' : chartEnd.value,
+        lookback: chartRangeRolling.checked ? currentLookback() : '',
+        output: chartOutput.value.trim(),
+        runOnSave: chartRunOnSave.checked,
+      };
+      const rangeComplete = payload.lookback || (payload.start && payload.end);
+      if (!payload.id || !payload.date || !rangeComplete || !payload.output) {
+        showChartError('Complete the required fields.');
+        return;
+      }
+      try {
+        const result = await postJson('/api/chart-config/heatmap', payload);
+        selectedChartId = result.id;
+        await loadChartList();
+        statusNode.textContent = result.generated
+          ? `Saved and generated chart ${result.id}.`
+          : `Saved chart ${result.id}.`;
+      } catch (error) {
+        showChartError(error instanceof Error ? error.message : 'Chart save failed');
+      }
+    });
 
     const makeColumnDefs = () => schema.columns.map((column) => ({
       headerName: column,

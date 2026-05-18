@@ -57,6 +57,21 @@ std::filesystem::path WriteTempViewerAssets(const std::string& name) {
   return dir;
 }
 
+std::filesystem::path TempDir(const std::string& name) {
+  const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+  auto path = std::filesystem::temp_directory_path() / (name + "_" + std::to_string(suffix));
+  std::filesystem::create_directories(path);
+  return path;
+}
+
+std::string ReadTextFile(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  REQUIRE(input.is_open());
+  std::ostringstream buffer;
+  buffer << input.rdbuf();
+  return buffer.str();
+}
+
 }  // namespace
 
 TEST_CASE("view: loads CSV rows with shared parser behavior") {
@@ -243,11 +258,14 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer);
   REQUIRE(viewer->status == 200);
   REQUIRE(viewer->body.find("csvzall view") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"add-chart\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"heatmap-chart-dialog\"") != std::string::npos);
 
   const auto viewer_js = client.Get("/assets/viewer.js");
   REQUIRE(viewer_js);
   REQUIRE(viewer_js->status == 200);
   REQUIRE(viewer_js->body.find("csvzallViewBootstrap") != std::string::npos);
+  REQUIRE(viewer_js->body.find("/api/chart-config/heatmap") != std::string::npos);
 
   const auto ag_grid_css = client.Get("/assets/ag-grid.css");
   REQUIRE(ag_grid_css);
@@ -309,6 +327,197 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   server.Stop();
   std::filesystem::remove(path);
 }
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+TEST_CASE("view: Add chart endpoint creates heatmap config and missing SVG output without editing CSV") {
+#else
+TEST_CASE("view: Add chart endpoint creates heatmap config without editing CSV") {
+#endif
+  const auto dir = TempDir("csvzall_view_chart_config");
+  const auto path = dir / "gym.csv";
+  {
+    std::ofstream output(path, std::ios::binary);
+    output << "date,count,note\n2026-01-01,1,Gym\n";
+  }
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_mode = pipeline::ViewModeSelection::Paged;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, false, "test-token"}) == 0);
+
+  httplib::Client client("127.0.0.1", server.bound_port());
+  client.set_connection_timeout(2, 0);
+  client.set_read_timeout(2, 0);
+  client.set_write_timeout(2, 0);
+
+  const auto unauthorized = client.Post(
+      "/api/chart-config/heatmap",
+      R"({"id":"gym-heatmap","date":"date","value":"count","label":"note","start":"2026-01-01","end":"2026-12-31","output":"charts/gym.svg","runOnSave":true})",
+      "application/json");
+  REQUIRE(unauthorized);
+  REQUIRE(unauthorized->status == 403);
+
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+  const auto response = client.Post(
+      "/api/chart-config/heatmap",
+      headers,
+      R"({"id":"gym-heatmap","date":"date","value":"count","label":"note","start":"2026-01-01","end":"2026-12-31","title":"Gym","output":"charts/gym.svg","runOnSave":true})",
+      "application/json");
+  REQUIRE(response);
+#ifdef CSVZALL_HAVE_SVGPLOT
+  REQUIRE(response->status == 200);
+  REQUIRE(response->body.find("\"ok\":true") != std::string::npos);
+  REQUIRE(response->body.find("\"generated\":true") != std::string::npos);
+#else
+  REQUIRE(response->status == 400);
+  REQUIRE(response->body.find("heatmap rendering is disabled") != std::string::npos);
+#endif
+
+  const auto config_text = ReadTextFile(dir / ".csvzall" / "charts.json");
+  CHECK(config_text.find("\"id\": \"gym-heatmap\"") != std::string::npos);
+  CHECK(config_text.find("\"type\": \"heatmap\"") != std::string::npos);
+  CHECK(config_text.find("\"input\": \"gym.csv\"") != std::string::npos);
+  CHECK(config_text.find("\"output\": \"charts/gym.svg\"") != std::string::npos);
+  CHECK(config_text.find("\"date\": \"date\"") != std::string::npos);
+  CHECK(config_text.find("\"value\": \"count\"") != std::string::npos);
+  CHECK(config_text.find("\"label\": \"note\"") != std::string::npos);
+  CHECK(config_text.find("\"runOnSave\": true") != std::string::npos);
+  CHECK(ReadTextFile(path).find("2026-01-01,1,Gym") != std::string::npos);
+#ifdef CSVZALL_HAVE_SVGPLOT
+  const auto chart_output = dir / "charts" / "gym.svg";
+  CHECK(std::filesystem::exists(chart_output));
+  const auto svg = ReadTextFile(chart_output);
+  CHECK(svg.find("<svg") != std::string::npos);
+  CHECK(svg.find("Gym") != std::string::npos);
+#endif
+
+  std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("view: Add chart endpoint lists and upserts current CSV charts") {
+  const auto dir = TempDir("csvzall_view_chart_config_existing");
+  std::filesystem::create_directories(dir / ".csvzall");
+  std::filesystem::create_directories(dir / "data");
+  {
+    std::ofstream config(dir / ".csvzall" / "charts.json", std::ios::binary);
+    config
+        << "{\n"
+        << "  \"charts\": [\n"
+        << "    {\"id\":\"existing\",\"type\":\"heatmap\",\"input\":\"old.csv\",\"output\":\"old.svg\",\"options\":{\"date\":\"date\",\"start\":\"2026-01-01\",\"end\":\"2026-01-31\"}},\n"
+        << "    {\"id\":\"gym-heatmap\",\"type\":\"heatmap\",\"input\":\"data/gym.csv\",\"output\":\"charts/old.svg\",\"options\":{\"date\":\"date\",\"value\":\"count\",\"start\":\"2026-01-01\",\"end\":\"2026-01-31\"}},\n"
+        << "    {\"id\":\"gym-heatmap\",\"type\":\"heatmap\",\"input\":\"data/gym.csv\",\"output\":\"charts/duplicate.svg\",\"options\":{\"date\":\"date\",\"value\":\"count\",\"start\":\"2026-02-01\",\"end\":\"2026-02-28\"}}\n"
+        << "  ]\n"
+        << "}\n";
+  }
+  const auto path = dir / "data" / "gym.csv";
+  {
+    std::ofstream output(path, std::ios::binary);
+    output << "date,count\n2026-01-01,1\n";
+  }
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_mode = pipeline::ViewModeSelection::Paged;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, false, "test-token"}) == 0);
+
+  httplib::Client client("127.0.0.1", server.bound_port());
+  client.set_connection_timeout(2, 0);
+  client.set_read_timeout(2, 0);
+  client.set_write_timeout(2, 0);
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto list_before = client.Get("/api/chart-config", headers);
+  REQUIRE(list_before);
+  REQUIRE(list_before->status == 200);
+  CHECK(list_before->body.find("\"id\":\"gym-heatmap\"") != std::string::npos);
+  const auto listed_chart = list_before->body.find("\"id\":\"gym-heatmap\"");
+  CHECK(list_before->body.find("\"id\":\"gym-heatmap\"", listed_chart + 1) == std::string::npos);
+  CHECK(list_before->body.find("\"id\":\"existing\"") == std::string::npos);
+
+  const auto response = client.Post(
+      "/api/chart-config/heatmap",
+      headers,
+      R"({"id":"gym-heatmap","date":"date","value":"count","lookback":"365d","end":"2026-12-31","output":"charts/gym.svg","runOnSave":false})",
+      "application/json");
+  REQUIRE(response);
+#ifdef CSVZALL_HAVE_SVGPLOT
+  REQUIRE(response->status == 200);
+  CHECK(response->body.find("\"action\":\"updated\"") != std::string::npos);
+#else
+  REQUIRE(response->status == 400);
+#endif
+
+  const auto config_text = ReadTextFile(dir / ".csvzall" / "charts.json");
+  CHECK(config_text.find("\"id\": \"existing\"") != std::string::npos);
+  CHECK(config_text.find("\"id\": \"gym-heatmap\"") != std::string::npos);
+  CHECK(config_text.find("\"input\": \"data/gym.csv\"") != std::string::npos);
+  CHECK(config_text.find("\"output\": \"charts/gym.svg\"") != std::string::npos);
+  CHECK(config_text.find("\"lookback\": \"365d\"") != std::string::npos);
+  CHECK(config_text.find("\"runOnSave\": false") != std::string::npos);
+  CHECK(config_text.find("duplicate.svg") == std::string::npos);
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+  const auto generate = client.Post(
+      "/api/chart-config/generate",
+      headers,
+      R"({"id":"gym-heatmap"})",
+      "application/json");
+  REQUIRE(generate);
+  REQUIRE(generate->status == 200);
+  CHECK(generate->body.find("\"generated\":true") != std::string::npos);
+  CHECK(std::filesystem::exists(dir / "charts" / "gym.svg"));
+#endif
+
+  std::filesystem::remove_all(dir);
+}
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+TEST_CASE("view: Add chart endpoint returns heatmap render diagnostics") {
+  const auto dir = TempDir("csvzall_view_chart_config_diagnostics");
+  const auto path = dir / "gym.csv";
+  {
+    std::ofstream output(path, std::ios::binary);
+    output << "date,content\n2026-01-01,Gym\n";
+  }
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_mode = pipeline::ViewModeSelection::Paged;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, false, "test-token"}) == 0);
+
+  httplib::Client client("127.0.0.1", server.bound_port());
+  client.set_connection_timeout(2, 0);
+  client.set_read_timeout(2, 0);
+  client.set_write_timeout(2, 0);
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto response = client.Post(
+      "/api/chart-config/heatmap",
+      headers,
+      R"({"id":"bad-value","date":"date","value":"content","lookback":"365d","end":"2026-01-01","output":"charts/bad.svg","runOnSave":true})",
+      "application/json");
+  REQUIRE(response);
+  REQUIRE(response->status == 400);
+  CHECK(response->body.find("non-numeric heatmap value in column: content") != std::string::npos);
+
+  std::filesystem::remove_all(dir);
+}
+#endif
 
 TEST_CASE("view: developer asset directory overrides first-party embedded viewer assets") {
   const auto csv = tests::MakeTestCsv(
