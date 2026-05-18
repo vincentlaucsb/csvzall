@@ -116,10 +116,11 @@ int RunHeatmap(const common::HeatmapSpec& spec,
 
 int RunCharts(const std::string& config_path,
               const std::string& chart_id,
+              bool validate_only,
               const RunOptions& options,
               const LoggerCallbacks& logger,
               RunStats& stats) {
-  return commands::RunCharts(config_path, chart_id, options, logger, stats);
+  return commands::RunCharts(config_path, chart_id, validate_only, options, logger, stats);
 }
 #endif
 

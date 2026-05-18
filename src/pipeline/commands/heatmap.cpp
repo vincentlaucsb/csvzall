@@ -193,7 +193,9 @@ protected:
             long double parsed = 0.0;
             if (!field.try_get(parsed) || !std::isfinite(static_cast<double>(parsed))) {
               throw std::runtime_error("non-numeric heatmap value in column: " +
-                                       spec_.value_column);
+                                       spec_.value_column +
+                                       ". Choose no value/weight column for row-count heatmaps "
+                                       "unless you need numeric weights such as minutes, volume, or count.");
             }
             value = static_cast<double>(parsed);
           }
@@ -323,6 +325,39 @@ int RunChart(const common::ChartSpec& spec,
     return 1;
   }
   return rc;
+}
+
+int ValidateChart(const common::ChartSpec& spec,
+                  const RunOptions& options,
+                  const LoggerCallbacks& logger,
+                  RunStats& stats) {
+  if (spec.type != "heatmap") {
+    if (logger.error) {
+      logger.error("charts: unknown chart type '" + spec.type + "'");
+    }
+    return 1;
+  }
+  if (!spec.output) {
+    if (logger.error) {
+      logger.error("charts: chart '" + spec.id + "' requires an output path");
+    }
+    return 1;
+  }
+
+  std::ifstream input(spec.input, std::ios::binary);
+  if (!input.is_open()) {
+    if (logger.error) {
+      logger.error("charts: missing input file for chart '" + spec.id +
+                   "': " + spec.input.string());
+    }
+    return 1;
+  }
+
+  RunOptions chart_options = options;
+  chart_options.input_is_stdin = false;
+  chart_options.input_path = spec.input.string();
+  std::ostringstream output;
+  return RunHeatmap(spec.heatmap, input, output, chart_options, logger, stats);
 }
 
 }  // namespace csvzall::pipeline::commands

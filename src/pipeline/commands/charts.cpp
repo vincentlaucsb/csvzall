@@ -9,6 +9,7 @@ namespace csvzall::pipeline::commands {
 
 int RunCharts(const std::string& config_path,
               const std::string& chart_id,
+              bool validate_only,
               const RunOptions& options,
               const LoggerCallbacks& logger,
               RunStats& stats) {
@@ -23,7 +24,9 @@ int RunCharts(const std::string& config_path,
         continue;
       }
       matched = true;
-      const auto rc = RunChart(chart, options, logger, stats);
+      const auto rc = validate_only
+          ? ValidateChart(chart, options, logger, stats)
+          : RunChart(chart, options, logger, stats);
       if (rc != 0) {
         return rc;
       }
@@ -36,6 +39,11 @@ int RunCharts(const std::string& config_path,
                          : "charts: chart id not found: " + chart_id);
       }
       return 1;
+    }
+    if (validate_only && logger.info) {
+      logger.info(chart_id.empty()
+                      ? "charts: config is valid"
+                      : "charts: chart config is valid: " + chart_id);
     }
     return 0;
   } catch (const std::exception& ex) {

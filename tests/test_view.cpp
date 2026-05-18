@@ -260,12 +260,15 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer->body.find("csvzall view") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"add-chart\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"heatmap-chart-dialog\"") != std::string::npos);
+  REQUIRE(viewer->body.find("Weight column") != std::string::npos);
 
   const auto viewer_js = client.Get("/assets/viewer.js");
   REQUIRE(viewer_js);
   REQUIRE(viewer_js->status == 200);
   REQUIRE(viewer_js->body.find("csvzallViewBootstrap") != std::string::npos);
   REQUIRE(viewer_js->body.find("/api/chart-config/heatmap") != std::string::npos);
+  REQUIRE(viewer_js->body.find("await loadChartList();\n        clearChartError();") !=
+          std::string::npos);
 
   const auto ag_grid_css = client.Get("/assets/ag-grid.css");
   REQUIRE(ag_grid_css);
@@ -514,6 +517,7 @@ TEST_CASE("view: Add chart endpoint returns heatmap render diagnostics") {
   REQUIRE(response);
   REQUIRE(response->status == 400);
   CHECK(response->body.find("non-numeric heatmap value in column: content") != std::string::npos);
+  CHECK(response->body.find("Choose no value/weight column") != std::string::npos);
 
   std::filesystem::remove_all(dir);
 }

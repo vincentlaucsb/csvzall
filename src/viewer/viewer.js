@@ -490,6 +490,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
         const result = await postJson('/api/chart-config/heatmap', payload);
         selectedChartId = result.id;
         await loadChartList();
+        clearChartError();
         statusNode.textContent = result.generated
           ? `Saved and generated chart ${result.id}.`
           : `Saved chart ${result.id}.`;

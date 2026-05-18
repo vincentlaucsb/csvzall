@@ -165,8 +165,13 @@ int RunChart(const common::ChartSpec& spec,
              const RunOptions& options,
              const LoggerCallbacks& logger,
              RunStats& stats);
+int ValidateChart(const common::ChartSpec& spec,
+                  const RunOptions& options,
+                  const LoggerCallbacks& logger,
+                  RunStats& stats);
 int RunCharts(const std::string& config_path,
               const std::string& chart_id,
+              bool validate_only,
               const RunOptions& options,
               const LoggerCallbacks& logger,
               RunStats& stats);

@@ -716,7 +716,7 @@ Examples:
       .help("Date column name (default: date)")
       .default_value(std::string{"date"});
   heatmap_cmd.add_argument("--value")
-      .help("Optional numeric value column. If omitted, rows are counted per date.")
+      .help("Optional numeric weight column for intensity/duration/counts. Omit it for attendance-style row counting.")
       .default_value(std::string{});
   heatmap_cmd.add_argument("--label")
       .help("Optional label column to include in SVG tooltips")
@@ -739,11 +739,14 @@ Examples:
   Configured charts require explicit output paths and overwrite existing outputs.
   Missing inputs, unknown chart types, invalid options, missing columns, and
   write failures produce stderr diagnostics and a non-zero exit.
+  --validate loads the config and checks inputs, columns, dates, and numeric
+  values without writing outputs. It is useful for LLM-generated configs.
 
 Examples:
   csvzall charts run
   csvzall charts run gym-attendance-heatmap
   csvzall charts run --config .csvzall/charts.json
+  csvzall charts run --validate --config .csvzall/charts.json
 
 Related:
   Use heatmap for direct one-off SVG rendering to stdout or --output.
@@ -759,6 +762,10 @@ Related:
   charts_cmd.add_argument("--config")
       .help("Chart config path (default: .csvzall/charts.json from current directory)")
       .default_value(std::string{});
+  charts_cmd.add_argument("--validate")
+      .help("Validate matching chart configs without writing output files")
+      .default_value(false)
+      .implicit_value(true);
   charts_cmd.add_argument("--verbose")
       .help("Print diagnostic logs to stderr")
       .default_value(false)
@@ -1344,6 +1351,7 @@ Examples:
     const auto rc = csvzall::pipeline::RunCharts(
         charts_cmd.get<std::string>("--config"),
         charts_cmd.get<std::string>("id"),
+        charts_cmd.get<bool>("--validate"),
         options,
         BuildCallbacks(logger),
         ps);

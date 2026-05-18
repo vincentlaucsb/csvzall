@@ -225,7 +225,7 @@ TEST_CASE("charts run loads default config and writes configured heatmap output"
 
   csvzall::pipeline::RunOptions options;
   csvzall::pipeline::RunStats stats;
-  const auto rc = csvzall::pipeline::RunCharts("", "", options, SilentLogger(), stats);
+  const auto rc = csvzall::pipeline::RunCharts("", "", false, options, SilentLogger(), stats);
 
   CHECK(rc == 0);
   CHECK(stats.rows_processed == 2);
@@ -247,7 +247,7 @@ TEST_CASE("charts run explicit config overwrites output and can select one chart
   csvzall::pipeline::RunOptions options;
   csvzall::pipeline::RunStats stats;
   const auto rc = csvzall::pipeline::RunCharts((root / "config.json").string(),
-                                               "first", options, SilentLogger(), stats);
+                                               "first", false, options, SilentLogger(), stats);
 
   CHECK(rc == 0);
   CHECK(ReadText(root / "stale.svg").find("<svg") != std::string::npos);
@@ -265,7 +265,7 @@ TEST_CASE("charts run renders multiple configured outputs") {
   csvzall::pipeline::RunOptions options;
   csvzall::pipeline::RunStats stats;
   const auto rc = csvzall::pipeline::RunCharts((root / "config.json").string(),
-                                               "", options, SilentLogger(), stats);
+                                               "", false, options, SilentLogger(), stats);
 
   CHECK(rc == 0);
   CHECK(ReadText(root / "first.svg").find("<svg") != std::string::npos);
@@ -281,7 +281,7 @@ TEST_CASE("charts run missing default config fails clearly") {
 
   csvzall::pipeline::RunOptions options;
   csvzall::pipeline::RunStats stats;
-  CHECK(csvzall::pipeline::RunCharts("", "", options, logger, stats) == 1);
+  CHECK(csvzall::pipeline::RunCharts("", "", false, options, logger, stats) == 1);
   CHECK(error.find("config file not found") != std::string::npos);
   CHECK(error.find(".csvzall") != std::string::npos);
 }
@@ -299,13 +299,28 @@ TEST_CASE("charts run reports missing input and missing date columns clearly") {
   csvzall::pipeline::RunOptions options;
   csvzall::pipeline::RunStats stats;
   CHECK(csvzall::pipeline::RunCharts((root / "config.json").string(),
-                                     "missing-input", options, logger, stats) == 1);
+                                     "missing-input", false, options, logger, stats) == 1);
   CHECK(error.find("missing input file") != std::string::npos);
 
   error.clear();
   CHECK(csvzall::pipeline::RunCharts((root / "config.json").string(),
-                                     "missing-column", options, logger, stats) == 1);
+                                     "missing-column", false, options, logger, stats) == 1);
   CHECK(error.find("date column not found") != std::string::npos);
+}
+
+TEST_CASE("charts validate checks config without writing outputs") {
+  const auto root = TempDir("csvzall_charts_validate");
+  WriteText(root / "data.csv",
+            "date,count\n"
+            "2026-01-01,1\n");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"valid","type":"heatmap","input":"data.csv","output":"valid.svg","options":{"date":"date","value":"count","start":"2026-01-01","end":"2026-01-07"}}]})");
+
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  CHECK(csvzall::pipeline::RunCharts((root / "config.json").string(),
+                                     "valid", true, options, SilentLogger(), stats) == 0);
+  CHECK_FALSE(std::filesystem::exists(root / "valid.svg"));
 }
 
 TEST_CASE("charts config rejects unknown chart types and options") {
