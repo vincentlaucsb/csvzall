@@ -782,7 +782,7 @@ void RenderSavedChart(common::ChartSpec spec,
 #else
   (void)spec;
   (void)logger;
-  throw std::runtime_error("chart config saved, but SVG rendering is disabled in this build");
+  throw std::runtime_error("chart config saved, but heatmap rendering is disabled in this build");
 #endif
 }
 
@@ -808,7 +808,6 @@ void ValidateChartBeforeSave(const common::ChartSpec& spec,
 #else
   (void)spec;
   (void)logger;
-  throw std::runtime_error("SVG rendering is disabled in this build");
 #endif
 }
 
