@@ -734,6 +734,7 @@ Examples:
   charts_cmd.add_epilog(R"(charts run contract:
   Loads JSON chart objects from .csvzall/charts.json by default:
   {"charts":[{"id":"gym","type":"heatmap","input":"gym.csv","output":"gym.svg","options":{"date":"date","lookback":"1y"}}]}
+  Supported chart types: heatmap, bar, line.
   Use --config <path> to choose another chart config.
   Relative input and output paths resolve against the config root.
   Configured charts require explicit output paths and overwrite existing outputs.
@@ -861,6 +862,9 @@ Pipeline example:
   --sql <query> is required for query mode.
   --format csv|markdown controls query output; default is csv.
   CSV input is loaded into a SQLite table named by --table, default data.
+  CSV-backed tables infer SQLite affinity before load: numeric-only columns use
+  NUMERIC; text-like columns and very large integer IDs use TEXT for exact
+  lexical projection.
 
 Useful SQL features:
   WHERE, GROUP BY, COUNT, COUNT(DISTINCT ...), ORDER BY, substr, CASE,

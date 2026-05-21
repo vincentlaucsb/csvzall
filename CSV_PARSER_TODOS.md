@@ -11,6 +11,10 @@ for csv-parser follow-ups, not a committed roadmap.
   of the pattern rather than the final abstraction. Pipelines often need richer
   per-column state: null counts, text/numeric conflict counts, sample limits,
   domain-specific coercion, database-specific type collapsing, and diagnostics.
+- csvzall's SQLite loader needs to preserve 30+ digit identifier text, so its
+  inference policy treats any `CSV_BIGINT` observation as a reason to load the
+  whole column as `TEXT`. A future `csv_data_types()` note or helper variant
+  could make this "lossless identifier" policy easier to discover.
 - `csv::chunk_parallel_apply()` is the more important building block for those
   advanced cases. It gives callers bounded chunking and per-column parallelism
   while leaving the inference policy under application control.

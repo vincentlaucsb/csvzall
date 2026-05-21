@@ -31,8 +31,13 @@ protected:
     }
 
     sqlite::SqliteDb sdb = sqlite::OpenSqliteDb(options());
+    const auto column_affinities = sqlite::InferColumnAffinities(reader(), headers());
+    if (reset_reader() != 0) {
+      return 1;
+    }
 
-    if (!sqlite::LoadCsvIntoTable(reader(), headers(), sdb.db(), "t", options(), logger())) {
+    if (!sqlite::LoadCsvIntoTable(
+            reader(), headers(), sdb.db(), "t", column_affinities, options(), logger())) {
       return 1;
     }
 

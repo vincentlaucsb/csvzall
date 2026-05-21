@@ -51,9 +51,11 @@ message(STATUS "FetchContent cache: ${FETCHCONTENT_BASE_DIR}")
 # csv-parser location strategy:
 # 1) User-provided -DCSV_PARSER_ROOT=...
 # 2) Sibling checkout at ../csv-parser when CSVZALL_PREFER_SIBLING_CSV_PARSER=ON
-# 3) FetchContent for normal users and CI
-# 4) In-repo submodule at external/csv-parser
+# 3) In-repo submodule at external/csv-parser
+# 4) FetchContent fallback for source archives or checkouts without submodules
 set(CSV_PARSER_ROOT "" CACHE PATH "Path to csv-parser checkout (must contain include/ and single_include/)")
+set(CSVZALL_CSV_PARSER_GIT_TAG "f5d24ab4a38ba0b74cbc7057f21543014d2ec472"
+    CACHE STRING "csv-parser revision used by FetchContent fallback")
 
 set(CSVZALL_IN_REPO_CSV_PARSER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/csv-parser")
 set(CSVZALL_SIBLING_CSV_PARSER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../csv-parser")
@@ -105,13 +107,17 @@ if(NOT CSVZALL_LOCAL_CSV_PARSER_ROOT STREQUAL "")
   set(CSVZALL_CSV_PARSER_SOURCE_DIR "${CSVZALL_LOCAL_CSV_PARSER_ROOT}")
   csvzall_validate_csv_parser("${CSVZALL_CSV_PARSER_SOURCE_DIR}")
   add_subdirectory("${CSVZALL_CSV_PARSER_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/csv-parser-local-build" EXCLUDE_FROM_ALL)
+elseif(EXISTS "${CSVZALL_IN_REPO_CSV_PARSER_ROOT}/include" AND EXISTS "${CSVZALL_IN_REPO_CSV_PARSER_ROOT}/single_include")
+  message(STATUS "Using csv-parser from: ${CSVZALL_IN_REPO_CSV_PARSER_ROOT}")
+  set(CSVZALL_CSV_PARSER_SOURCE_DIR "${CSVZALL_IN_REPO_CSV_PARSER_ROOT}")
+  csvzall_validate_csv_parser("${CSVZALL_CSV_PARSER_SOURCE_DIR}")
+  add_subdirectory("${CSVZALL_CSV_PARSER_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/csv-parser-local-build" EXCLUDE_FROM_ALL)
 elseif(CSVZALL_FETCH_CSV_PARSER)
   message(STATUS "Fetching csv-parser with FetchContent")
   FetchContent_Declare(
     csv_parser
     GIT_REPOSITORY https://github.com/vincentlaucsb/csv-parser.git
-    GIT_TAG master
-    GIT_SHALLOW TRUE
+    GIT_TAG ${CSVZALL_CSV_PARSER_GIT_TAG}
     UPDATE_DISCONNECTED TRUE
   )
   FetchContent_MakeAvailable(csv_parser)
@@ -119,11 +125,6 @@ elseif(CSVZALL_FETCH_CSV_PARSER)
   if(CSVZALL_CSV_PARSER_SOURCE_DIR)
     csvzall_validate_csv_parser("${CSVZALL_CSV_PARSER_SOURCE_DIR}")
   endif()
-elseif(EXISTS "${CSVZALL_IN_REPO_CSV_PARSER_ROOT}")
-  message(STATUS "Using csv-parser from: ${CSVZALL_IN_REPO_CSV_PARSER_ROOT}")
-  set(CSVZALL_CSV_PARSER_SOURCE_DIR "${CSVZALL_IN_REPO_CSV_PARSER_ROOT}")
-  csvzall_validate_csv_parser("${CSVZALL_CSV_PARSER_SOURCE_DIR}")
-  add_subdirectory("${CSVZALL_CSV_PARSER_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/csv-parser-local-build" EXCLUDE_FROM_ALL)
 else()
   message(FATAL_ERROR
     "csv-parser not found.\n"
@@ -236,7 +237,9 @@ set(SVG_ROOT "" CACHE PATH "Path to vincentlaucsb/svg checkout (must contain src
 set(CSVZALL_HAVE_SVGPLOT OFF)
 set(CSVZALL_SVGPLOT_TARGET "")
 set(CSVZALL_SIBLING_SVGPLOT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../svgplot")
+set(CSVZALL_SIBLING_SVG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../svg")
 get_filename_component(CSVZALL_SIBLING_SVGPLOT_ROOT "${CSVZALL_SIBLING_SVGPLOT_ROOT}" ABSOLUTE)
+get_filename_component(CSVZALL_SIBLING_SVG_ROOT "${CSVZALL_SIBLING_SVG_ROOT}" ABSOLUTE)
 
 if(CSVZALL_ENABLE_SVGPLOT)
   set(CSVZALL_LOCAL_SVGPLOT_ROOT "")
@@ -251,6 +254,8 @@ if(CSVZALL_ENABLE_SVGPLOT)
     set(CSVZALL_LOCAL_SVG_ROOT "")
     if(NOT SVG_ROOT STREQUAL "")
       get_filename_component(CSVZALL_LOCAL_SVG_ROOT "${SVG_ROOT}" ABSOLUTE)
+    elseif(EXISTS "${CSVZALL_SIBLING_SVG_ROOT}/src/svg.hpp")
+      set(CSVZALL_LOCAL_SVG_ROOT "${CSVZALL_SIBLING_SVG_ROOT}")
     else()
       set(_csvzall_svg_candidates
         "${CSVZALL_LOCAL_SVGPLOT_ROOT}/out/build/x64-Release/_deps/svg-src"

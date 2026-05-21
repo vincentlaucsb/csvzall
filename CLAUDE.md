@@ -22,7 +22,8 @@ This file mirrors [AGENTS.md](AGENTS.md).
 ## SQLite conventions
 
 - Use [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) with its bundled internal SQLite.
-- All columns loaded as `NUMERIC` affinity; SQLite stores each cell as INTEGER, REAL, or TEXT based on content — no per-column inference needed. Numeric comparisons in WHERE work correctly.
+- CSV input is scanned with csv-parser scalar type inference before SQLite load.
+- Columns containing only integer/real values load as `NUMERIC`; columns containing text, booleans, timestamps, or `CSV_BIGINT` values load as `TEXT` to preserve exact lexical identifiers. Numeric comparisons in WHERE work correctly for inferred numeric columns.
 - All column names quoted with `"` in generated SQL.
 - Memory strategy: in-memory below threshold, temp-file database above it.
 - Default threshold: 256 MB (`RunOptions::sqlite_threshold_mb`). Not yet exposed as a CLI flag.

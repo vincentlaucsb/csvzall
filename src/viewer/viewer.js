@@ -257,11 +257,17 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const chartList = document.getElementById('chart-list');
     const newChartButton = document.getElementById('new-chart');
     const generateChartButton = document.getElementById('generate-chart');
+    const chartFormTitle = document.getElementById('chart-form-title');
+    const chartType = document.getElementById('chart-type');
     const chartId = document.getElementById('chart-id');
     const chartTitle = document.getElementById('chart-title');
+    const chartPrimaryColumnLabel = document.getElementById('chart-primary-column-label');
+    const chartValueColumnLabel = document.getElementById('chart-value-column-label');
+    const chartLabelColumnLabel = document.getElementById('chart-label-column-label');
     const chartDateColumn = document.getElementById('chart-date-column');
     const chartValueColumn = document.getElementById('chart-value-column');
     const chartLabelColumn = document.getElementById('chart-label-column');
+    const chartRangeSection = document.getElementById('chart-range-section');
     const chartRangeFixed = document.getElementById('chart-range-fixed');
     const chartRangeRolling = document.getElementById('chart-range-rolling');
     const chartFixedRange = document.getElementById('chart-fixed-range');
@@ -300,8 +306,15 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartError.hidden = true;
     };
 
-    const defaultChartValues = () => ({
-      id: `${baseSlug}-heatmap`,
+    const chartTypeTitle = (type) => {
+      if (type === 'bar') return 'Bar';
+      if (type === 'line') return 'Line';
+      return 'Heatmap';
+    };
+
+    const defaultChartValues = (type = chartType.value || 'heatmap') => ({
+      type,
+      id: `${baseSlug}-${type}`,
       title: baseName,
       date: guessedDateColumn,
       value: guessedValueColumn,
@@ -309,7 +322,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
       start: '',
       end: '',
       lookback: '1y',
-      output: `charts/${baseSlug}_heatmap.svg`,
+      output: `charts/${baseSlug}_${type}.svg`,
       runOnSave: true,
     });
 
@@ -335,7 +348,32 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartLookbackCount.required = rolling;
     };
 
+    const setChartType = (type) => {
+      chartType.value = type;
+      chartFormTitle.textContent = chartTypeTitle(type);
+      chartRangeSection.hidden = type !== 'heatmap';
+      chartLabelColumn.closest('label').hidden = type === 'bar';
+      chartValueColumnLabel.textContent = type === 'heatmap' ? 'Weight column' : 'Value column';
+      chartValueColumn.querySelector('option[value=""]')?.toggleAttribute('disabled', type !== 'heatmap');
+      if (type === 'heatmap') {
+        chartPrimaryColumnLabel.textContent = 'Date column';
+        chartLabelColumnLabel.textContent = 'Label column';
+        chartValueColumn.required = false;
+      } else if (type === 'bar') {
+        chartPrimaryColumnLabel.textContent = 'Label column';
+        chartLabelColumnLabel.textContent = 'Unused';
+        chartValueColumn.required = true;
+        if (!chartValueColumn.value) chartValueColumn.value = guessedValueColumn || schema.columns[0] || '';
+      } else {
+        chartPrimaryColumnLabel.textContent = 'X column';
+        chartLabelColumnLabel.textContent = 'Series column';
+        chartValueColumn.required = true;
+        if (!chartValueColumn.value) chartValueColumn.value = guessedValueColumn || schema.columns[0] || '';
+      }
+    };
+
     const applyChartValues = (values) => {
+      setChartType(values.type ?? 'heatmap');
       chartId.value = values.id ?? '';
       chartTitle.value = values.title ?? '';
       chartDateColumn.value = values.date ?? '';
@@ -354,25 +392,29 @@ async function csvzallViewBootstrap(dependencies = {}) {
       generateChartButton.disabled = !currentCharts.some((chart) => chart.id === selectedChartId);
     };
 
-    const valuesFromChart = (chart) => ({
-      id: chart.id,
-      title: chart.options?.title ?? '',
-      date: chart.options?.date ?? '',
-      value: chart.options?.value ?? '',
-      label: chart.options?.label ?? '',
-      start: chart.options?.start ?? '',
-      end: chart.options?.end ?? '',
-      lookback: chart.options?.lookback ?? '',
-      output: chart.output ?? '',
-      runOnSave: chart.runOnSave === true,
-    });
+    const valuesFromChart = (chart) => {
+      const type = chart.type || 'heatmap';
+      return {
+        type,
+        id: chart.id,
+        title: chart.options?.title ?? '',
+        date: chart.options?.date ?? chart.options?.label ?? chart.options?.x ?? '',
+        value: chart.options?.value ?? chart.options?.y ?? '',
+        label: chart.options?.label ?? chart.options?.series ?? '',
+        start: chart.options?.start ?? '',
+        end: chart.options?.end ?? '',
+        lookback: chart.options?.lookback ?? '',
+        output: chart.output ?? '',
+        runOnSave: chart.runOnSave === true,
+      };
+    };
 
     const renderChartList = () => {
       chartList.replaceChildren();
       if (currentCharts.length === 0) {
         const empty = document.createElement('p');
         empty.className = 'chart-list-empty';
-        empty.textContent = 'No charts yet.';
+        empty.textContent = 'No charts yet. Choose a chart type and save one.';
         chartList.append(empty);
         return;
       }
@@ -385,7 +427,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
         const title = document.createElement('strong');
         title.textContent = chart.options?.title || chart.id;
         const detail = document.createElement('span');
-        detail.textContent = chart.output || 'No output path';
+        detail.textContent = `${chart.type || 'chart'} · ${chart.output || 'No output path'}`;
         button.append(title, detail);
         button.addEventListener('click', () => {
           selectedChartId = chart.id;
@@ -409,24 +451,13 @@ async function csvzallViewBootstrap(dependencies = {}) {
           applyChartValues(valuesFromChart(selected));
         }
       } else {
-        applyChartValues(defaultChartValues());
+        applyChartValues(defaultChartValues('heatmap'));
       }
       renderChartList();
     };
 
     const useNewChartDefaults = () => {
-      chartId.value = `${baseSlug}-heatmap`;
-      chartTitle.value = baseName;
-      chartStart.value = '';
-      chartEnd.value = '';
-      chartLookbackCount.value = '1';
-      chartLookbackUnit.value = 'y';
-      setRangeMode('rolling');
-      chartOutput.value = `charts/${baseSlug}_heatmap.svg`;
-      chartRunOnSave.checked = true;
-      chartDateColumn.value = guessedDateColumn;
-      chartValueColumn.value = guessedValueColumn;
-      chartLabelColumn.value = guessedLabelColumn;
+      applyChartValues(defaultChartValues(chartType.value || 'heatmap'));
       selectedChartId = '';
       generateChartButton.disabled = true;
       clearChartError();
@@ -448,6 +479,13 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartDateColumn.focus();
     });
     newChartButton.addEventListener('click', useNewChartDefaults);
+    chartType.addEventListener('change', () => {
+      applyChartValues(defaultChartValues(chartType.value));
+      selectedChartId = '';
+      generateChartButton.disabled = true;
+      clearChartError();
+      renderChartList();
+    });
     chartRangeFixed.addEventListener('change', () => setRangeMode('fixed'));
     chartRangeRolling.addEventListener('change', () => setRangeMode('rolling'));
     cancelChart.addEventListener('click', () => {
@@ -470,22 +508,23 @@ async function csvzallViewBootstrap(dependencies = {}) {
     chartForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const payload = {
+        type: chartType.value,
         id: chartId.value.trim(),
         title: chartTitle.value.trim(),
-        date: chartDateColumn.value,
-        value: chartValueColumn.value,
-        label: chartLabelColumn.value,
+        date: chartType.value === 'heatmap' ? chartDateColumn.value : '',
+        value: chartType.value !== 'line' ? chartValueColumn.value : '',
+        label: chartType.value === 'heatmap'
+          ? chartLabelColumn.value
+          : (chartType.value === 'bar' ? chartDateColumn.value : ''),
+        x: chartType.value === 'line' ? chartDateColumn.value : '',
+        y: chartType.value === 'line' ? chartValueColumn.value : '',
+        series: chartType.value === 'line' ? chartLabelColumn.value : '',
         start: chartRangeRolling.checked ? '' : chartStart.value,
         end: chartRangeRolling.checked ? '' : chartEnd.value,
-        lookback: chartRangeRolling.checked ? currentLookback() : '',
+        lookback: chartType.value === 'heatmap' && chartRangeRolling.checked ? currentLookback() : '',
         output: chartOutput.value.trim(),
         runOnSave: chartRunOnSave.checked,
       };
-      const rangeComplete = payload.lookback || (payload.start && payload.end);
-      if (!payload.id || !payload.date || !rangeComplete || !payload.output) {
-        showChartError('Complete the required fields.');
-        return;
-      }
       try {
         const result = await postJson('/api/chart-config/heatmap', payload);
         selectedChartId = result.id;

@@ -583,38 +583,77 @@ std::string SanitizeChartId(std::string value) {
   while (!result.empty() && result.back() == '-') {
     result.pop_back();
   }
-  return result.empty() ? "heatmap" : result;
+  return result;
 }
 
-std::string BuildHeatmapChartJson(std::string_view id,
-                                  std::string_view input,
-                                  std::string_view output,
-                                  std::string_view date,
-                                  std::string_view value,
-                                  std::string_view label,
-                                  std::string_view start,
-                                  std::string_view end,
-                                  std::string_view lookback,
-                                  std::string_view title,
-                                  bool run_on_save);
+void AppendJsonOption(std::string& json,
+                      const char* key,
+                      std::string_view value,
+                      bool& first_option) {
+  if (!first_option) {
+    json += ",";
+  }
+  first_option = false;
+  json += "\n        \"";
+  json += key;
+  json += "\": ";
+  AppendJsonString(json, value);
+}
 
 std::string ChartSpecJsonForConfig(const common::ChartSpec& spec,
                                    const std::filesystem::path& root) {
   if (!spec.output) {
     throw std::runtime_error("chart output path is required: " + spec.id);
   }
-  return BuildHeatmapChartJson(
-      spec.id,
-      RelativePathForConfig(root, spec.input),
-      RelativePathForConfig(root, *spec.output),
-      spec.heatmap.date_column,
-      spec.heatmap.value_column,
-      spec.heatmap.label_column,
-      spec.heatmap.start_date,
-      spec.heatmap.end_date,
-      spec.heatmap.lookback,
-      spec.heatmap.title,
-      spec.run_on_save);
+  std::string json;
+  json += "{\n      \"id\": ";
+  AppendJsonString(json, spec.id);
+  json += ",\n      \"type\": ";
+  AppendJsonString(json, spec.type);
+  json += ",\n      \"input\": ";
+  AppendJsonString(json, RelativePathForConfig(root, spec.input));
+  json += ",\n      \"output\": ";
+  AppendJsonString(json, RelativePathForConfig(root, *spec.output));
+  json += ",\n      \"options\": {";
+  bool first_option = true;
+  if (spec.type == "heatmap") {
+    AppendJsonOption(json, "date", spec.heatmap.date_column, first_option);
+    if (!spec.heatmap.value_column.empty()) {
+      AppendJsonOption(json, "value", spec.heatmap.value_column, first_option);
+    }
+    if (!spec.heatmap.label_column.empty()) {
+      AppendJsonOption(json, "label", spec.heatmap.label_column, first_option);
+    }
+    if (!spec.heatmap.lookback.empty()) {
+      AppendJsonOption(json, "lookback", spec.heatmap.lookback, first_option);
+      if (!spec.heatmap.end_date.empty()) {
+        AppendJsonOption(json, "end", spec.heatmap.end_date, first_option);
+      }
+    } else {
+      AppendJsonOption(json, "start", spec.heatmap.start_date, first_option);
+      AppendJsonOption(json, "end", spec.heatmap.end_date, first_option);
+    }
+    if (!spec.heatmap.title.empty()) {
+      AppendJsonOption(json, "title", spec.heatmap.title, first_option);
+    }
+  } else if (spec.type == "bar") {
+    AppendJsonOption(json, "label", spec.bar.label_column, first_option);
+    AppendJsonOption(json, "value", spec.bar.value_column, first_option);
+    if (!spec.bar.title.empty()) AppendJsonOption(json, "title", spec.bar.title, first_option);
+    if (!spec.bar.x_label.empty()) AppendJsonOption(json, "xLabel", spec.bar.x_label, first_option);
+    if (!spec.bar.y_label.empty()) AppendJsonOption(json, "yLabel", spec.bar.y_label, first_option);
+  } else if (spec.type == "line") {
+    AppendJsonOption(json, "x", spec.line.x_column, first_option);
+    AppendJsonOption(json, "y", spec.line.y_column, first_option);
+    if (!spec.line.series_column.empty()) AppendJsonOption(json, "series", spec.line.series_column, first_option);
+    if (!spec.line.title.empty()) AppendJsonOption(json, "title", spec.line.title, first_option);
+    if (!spec.line.x_label.empty()) AppendJsonOption(json, "xLabel", spec.line.x_label, first_option);
+    if (!spec.line.y_label.empty()) AppendJsonOption(json, "yLabel", spec.line.y_label, first_option);
+  }
+  json += "\n      },\n      \"runOnSave\": ";
+  json += spec.run_on_save ? "true" : "false";
+  json += "\n    }";
+  return json;
 }
 
 std::string ChartSpecJsonForApi(const common::ChartSpec& spec,
@@ -628,20 +667,47 @@ std::string ChartSpecJsonForApi(const common::ChartSpec& spec,
   AppendJsonString(json, RelativePathForConfig(root, spec.input));
   json += ",\"output\":";
   AppendJsonString(json, spec.output ? RelativePathForConfig(root, *spec.output) : "");
-  json += ",\"options\":{\"date\":";
-  AppendJsonString(json, spec.heatmap.date_column);
-  json += ",\"value\":";
-  AppendJsonString(json, spec.heatmap.value_column);
-  json += ",\"label\":";
-  AppendJsonString(json, spec.heatmap.label_column);
-  json += ",\"start\":";
-  AppendJsonString(json, spec.heatmap.start_date);
-  json += ",\"end\":";
-  AppendJsonString(json, spec.heatmap.end_date);
-  json += ",\"lookback\":";
-  AppendJsonString(json, spec.heatmap.lookback);
-  json += ",\"title\":";
-  AppendJsonString(json, spec.heatmap.title);
+  json += ",\"options\":{";
+  if (spec.type == "heatmap") {
+    json += "\"date\":";
+    AppendJsonString(json, spec.heatmap.date_column);
+    json += ",\"value\":";
+    AppendJsonString(json, spec.heatmap.value_column);
+    json += ",\"label\":";
+    AppendJsonString(json, spec.heatmap.label_column);
+    json += ",\"start\":";
+    AppendJsonString(json, spec.heatmap.start_date);
+    json += ",\"end\":";
+    AppendJsonString(json, spec.heatmap.end_date);
+    json += ",\"lookback\":";
+    AppendJsonString(json, spec.heatmap.lookback);
+    json += ",\"title\":";
+    AppendJsonString(json, spec.heatmap.title);
+  } else if (spec.type == "bar") {
+    json += "\"label\":";
+    AppendJsonString(json, spec.bar.label_column);
+    json += ",\"value\":";
+    AppendJsonString(json, spec.bar.value_column);
+    json += ",\"title\":";
+    AppendJsonString(json, spec.bar.title);
+    json += ",\"xLabel\":";
+    AppendJsonString(json, spec.bar.x_label);
+    json += ",\"yLabel\":";
+    AppendJsonString(json, spec.bar.y_label);
+  } else if (spec.type == "line") {
+    json += "\"x\":";
+    AppendJsonString(json, spec.line.x_column);
+    json += ",\"y\":";
+    AppendJsonString(json, spec.line.y_column);
+    json += ",\"series\":";
+    AppendJsonString(json, spec.line.series_column);
+    json += ",\"title\":";
+    AppendJsonString(json, spec.line.title);
+    json += ",\"xLabel\":";
+    AppendJsonString(json, spec.line.x_label);
+    json += ",\"yLabel\":";
+    AppendJsonString(json, spec.line.y_label);
+  }
   json += "},\"runOnSave\":";
   json += spec.run_on_save ? "true" : "false";
   json += "}";
@@ -669,57 +735,6 @@ std::vector<common::ChartSpec> LoadChartConfigIfExists(const std::filesystem::pa
   return common::LoadChartConfig(config_path).charts;
 }
 
-std::string BuildHeatmapChartJson(std::string_view id,
-                                  std::string_view input,
-                                  std::string_view output,
-                                  std::string_view date,
-                                  std::string_view value,
-                                  std::string_view label,
-                                  std::string_view start,
-                                  std::string_view end,
-                                  std::string_view lookback,
-                                  std::string_view title,
-                                  bool run_on_save) {
-  std::string json;
-  json += "{\n      \"id\": ";
-  AppendJsonString(json, id);
-  json += ",\n      \"type\": \"heatmap\",\n      \"input\": ";
-  AppendJsonString(json, input);
-  json += ",\n      \"output\": ";
-  AppendJsonString(json, output);
-  json += ",\n      \"options\": {\n        \"date\": ";
-  AppendJsonString(json, date);
-  if (!value.empty()) {
-    json += ",\n        \"value\": ";
-    AppendJsonString(json, value);
-  }
-  if (!label.empty()) {
-    json += ",\n        \"label\": ";
-    AppendJsonString(json, label);
-  }
-  if (!lookback.empty()) {
-    json += ",\n        \"lookback\": ";
-    AppendJsonString(json, lookback);
-    if (!end.empty()) {
-      json += ",\n        \"end\": ";
-      AppendJsonString(json, end);
-    }
-  } else {
-    json += ",\n        \"start\": ";
-    AppendJsonString(json, start);
-    json += ",\n        \"end\": ";
-    AppendJsonString(json, end);
-  }
-  if (!title.empty()) {
-    json += ",\n        \"title\": ";
-    AppendJsonString(json, title);
-  }
-  json += "\n      },\n      \"runOnSave\": ";
-  json += run_on_save ? "true" : "false";
-  json += "\n    }";
-  return json;
-}
-
 void WriteTextFile(const std::filesystem::path& path, std::string_view text) {
   const auto parent = path.parent_path();
   if (!parent.empty()) {
@@ -742,20 +757,9 @@ std::filesystem::path ResolveChartOutputPath(const std::filesystem::path& root,
   return output_path.is_absolute() ? output_path : root / output_path;
 }
 
-void RenderSavedHeatmapChart(const CsvViewData& data,
-                             const std::filesystem::path& root,
-                             const std::string& id,
-                             const std::string& output,
-                             bool run_on_save,
-                             common::HeatmapSpec heatmap,
-                             const LoggerCallbacks& logger) {
+void RenderSavedChart(common::ChartSpec spec,
+                      const LoggerCallbacks& logger) {
 #ifdef CSVZALL_HAVE_SVGPLOT
-  auto spec = common::MakeHeatmapChartSpec(
-      id,
-      std::filesystem::absolute(data.input_path()),
-      ResolveChartOutputPath(root, output),
-      run_on_save,
-      std::move(heatmap));
   RunOptions options;
   options.input_path = spec.input.string();
   RunStats stats;
@@ -769,21 +773,42 @@ void RenderSavedHeatmapChart(const CsvViewData& data,
   };
   const auto rc = RunChart(spec, options, chart_logger, stats);
   if (rc != 0) {
-    auto message = "chart config saved, but chart rendering failed: " + id;
+    auto message = "chart config saved, but chart rendering failed: " + spec.id;
     if (!render_error.empty()) {
       message += ": " + render_error;
     }
     throw std::runtime_error(message);
   }
 #else
-  (void)data;
-  (void)root;
-  (void)id;
-  (void)output;
-  (void)run_on_save;
-  (void)heatmap;
+  (void)spec;
   (void)logger;
-  throw std::runtime_error("chart config saved, but heatmap rendering is disabled in this build");
+  throw std::runtime_error("chart config saved, but SVG rendering is disabled in this build");
+#endif
+}
+
+void ValidateChartBeforeSave(const common::ChartSpec& spec,
+                             const LoggerCallbacks& logger) {
+#ifdef CSVZALL_HAVE_SVGPLOT
+  RunOptions options;
+  options.input_path = spec.input.string();
+  RunStats stats;
+  std::string validation_error;
+  LoggerCallbacks chart_logger = logger;
+  chart_logger.error = [&logger, &validation_error](const std::string& message) {
+    validation_error = message;
+    if (logger.error) {
+      logger.error(message);
+    }
+  };
+  const auto rc = ValidateChart(spec, options, chart_logger, stats);
+  if (rc != 0) {
+    throw std::runtime_error(validation_error.empty() ? "chart validation failed"
+                                                     : validation_error);
+  }
+#else
+  (void)spec;
+  (void)logger;
+  throw std::runtime_error("SVG rendering is disabled in this build");
 #endif
 }
 
@@ -834,14 +859,8 @@ std::string GenerateCurrentCsvChart(const CsvViewData& data,
   if (!chart.output) {
     throw std::runtime_error("chart output path is required: " + chart.id);
   }
-  RenderSavedHeatmapChart(
-      data,
-      root,
-      chart.id,
-      RelativePathForConfig(root, *chart.output),
-      chart.run_on_save,
-      chart.heatmap,
-      logger);
+  (void)data;
+  RenderSavedChart(chart, logger);
 
   std::string result = "{\"ok\":true,\"id\":";
   AppendJsonString(result, chart.id);
@@ -857,57 +876,75 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
   const auto config_path = FindChartConfigPath(data.input_path());
   const auto root = ChartConfigRoot(config_path);
   const auto input_path = RelativePathForConfig(root, data.input_path());
-  const auto id = SanitizeChartId(JsonStringField(body, "id"));
-  const auto output = JsonStringField(body, "output");
-  const auto date = JsonStringField(body, "date");
-  const auto value = JsonStringFieldOr(body, "value", "");
-  const auto label = JsonStringFieldOr(body, "label", "");
-  const auto start = JsonStringFieldOr(body, "start", "");
-  const auto end = JsonStringFieldOr(body, "end", "");
-  const auto lookback = JsonStringFieldOr(body, "lookback", "");
+  const auto id = SanitizeChartId(JsonStringFieldOr(body, "id", ""));
+  const auto type = JsonStringFieldOr(body, "type", "heatmap");
+  const auto output = JsonStringFieldOr(body, "output", "");
   const auto title = JsonStringFieldOr(body, "title", "");
   const auto run_on_save = JsonBoolFieldOr(body, "runOnSave", true);
 
-  if (output.empty()) {
-    throw std::runtime_error("output path is required");
-  }
-  if (date.empty()) {
-    throw std::runtime_error("date column is required");
-  }
-  if (lookback.empty() && (start.empty() || end.empty())) {
-    throw std::runtime_error("start and end dates are required unless lookback is set");
-  }
-  if (!lookback.empty() && !start.empty()) {
-    throw std::runtime_error("lookback cannot be combined with start");
-  }
-  if (std::find(data.headers().begin(), data.headers().end(), date) == data.headers().end()) {
-    throw std::runtime_error("date column not found: " + date);
-  }
-  if (!value.empty() &&
-      std::find(data.headers().begin(), data.headers().end(), value) == data.headers().end()) {
-    throw std::runtime_error("value column not found: " + value);
-  }
-  if (!label.empty() &&
-      std::find(data.headers().begin(), data.headers().end(), label) == data.headers().end()) {
-    throw std::runtime_error("label column not found: " + label);
-  }
-
-  common::HeatmapSpec heatmap;
-  heatmap.date_column = date;
-  heatmap.value_column = value;
-  heatmap.label_column = label;
-  heatmap.start_date = start;
-  heatmap.end_date = end;
-  heatmap.lookback = lookback;
-  heatmap.title = title;
-
   auto charts = LoadChartConfigIfExists(config_path);
-  auto spec = common::MakeHeatmapChartSpec(
-      id,
-      ResolveChartOutputPath(root, input_path),
-      ResolveChartOutputPath(root, output),
-      run_on_save,
-      heatmap);
+  common::ChartSpec spec;
+  std::optional<std::filesystem::path> output_path;
+  if (!output.empty()) {
+    output_path = ResolveChartOutputPath(root, output);
+  }
+  if (type == "heatmap") {
+    const auto date = JsonStringFieldOr(body, "date", "");
+    const auto value = JsonStringFieldOr(body, "value", "");
+    const auto label = JsonStringFieldOr(body, "label", "");
+    const auto start = JsonStringFieldOr(body, "start", "");
+    const auto end = JsonStringFieldOr(body, "end", "");
+    const auto lookback = JsonStringFieldOr(body, "lookback", "");
+    common::HeatmapSpec heatmap;
+    heatmap.date_column = date;
+    heatmap.value_column = value;
+    heatmap.label_column = label;
+    heatmap.start_date = start;
+    heatmap.end_date = end;
+    heatmap.lookback = lookback;
+    heatmap.title = title;
+    spec = common::MakeHeatmapChartSpec(
+        id,
+        ResolveChartOutputPath(root, input_path),
+        output_path,
+        run_on_save,
+        heatmap);
+  } else if (type == "bar") {
+    const auto label = JsonStringFieldOr(body, "label", "");
+    const auto value = JsonStringFieldOr(body, "value", "");
+    common::BarSpec bar;
+    bar.label_column = label;
+    bar.value_column = value;
+    bar.title = title;
+    bar.x_label = JsonStringFieldOr(body, "xLabel", "");
+    bar.y_label = JsonStringFieldOr(body, "yLabel", "");
+    spec = common::MakeBarChartSpec(
+        id,
+        ResolveChartOutputPath(root, input_path),
+        output_path,
+        run_on_save,
+        bar);
+  } else if (type == "line") {
+    const auto x = JsonStringFieldOr(body, "x", "");
+    const auto y = JsonStringFieldOr(body, "y", "");
+    const auto series = JsonStringFieldOr(body, "series", "");
+    common::LineSpec line;
+    line.x_column = x;
+    line.y_column = y;
+    line.series_column = series;
+    line.title = title;
+    line.x_label = JsonStringFieldOr(body, "xLabel", "");
+    line.y_label = JsonStringFieldOr(body, "yLabel", "");
+    spec = common::MakeLineChartSpec(
+        id,
+        ResolveChartOutputPath(root, input_path),
+        output_path,
+        run_on_save,
+        line);
+  } else {
+    throw std::runtime_error("unknown chart type: " + type);
+  }
+  ValidateChartBeforeSave(spec, logger);
 
   bool updated_existing = false;
   std::vector<common::ChartSpec> updated_charts;
@@ -926,7 +963,7 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
     updated_charts.push_back(spec);
   }
   WriteTextFile(config_path, SerializeChartConfig(updated_charts, root));
-  RenderSavedHeatmapChart(data, root, id, output, run_on_save, std::move(heatmap), logger);
+  RenderSavedChart(spec, logger);
 
   std::string result = "{\"ok\":true,\"configPath\":";
   AppendJsonString(result, config_path.string());

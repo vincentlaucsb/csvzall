@@ -73,7 +73,7 @@ TEST_CASE("heatmap renders CSV date rows as an SVG calendar heatmap") {
   const auto svg = output.str();
   CHECK(svg.find("<svg") != std::string::npos);
   CHECK(svg.find("Gym Attendance") != std::string::npos);
-  CHECK(svg.find("class=\"heatmap-cell\"") != std::string::npos);
+  CHECK(svg.find("class=\"heatmap-cell") != std::string::npos);
   CHECK(svg.find("<title>2026-01-01: 3 - Gym; Lift</title>") != std::string::npos);
 }
 
@@ -272,6 +272,26 @@ TEST_CASE("charts run renders multiple configured outputs") {
   CHECK(ReadText(root / "second.svg").find("<svg") != std::string::npos);
 }
 
+TEST_CASE("charts run renders configured bar and line outputs") {
+  const auto root = TempDir("csvzall_charts_bar_line");
+  WriteText(root / "data.csv",
+            "week,volume,series,session\n"
+            "1,100,A,1\n"
+            "2,125,A,2\n"
+            "1,90,B,1\n");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"bar","type":"bar","input":"data.csv","output":"bar.svg","options":{"label":"week","value":"volume","title":"Volume"}},{"id":"line","type":"line","input":"data.csv","output":"line.svg","options":{"x":"session","y":"volume","series":"series","title":"Progress"}}]})");
+
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  const auto rc = csvzall::pipeline::RunCharts((root / "config.json").string(),
+                                               "", false, options, SilentLogger(), stats);
+
+  CHECK(rc == 0);
+  CHECK(ReadText(root / "bar.svg").find("class=\"bar") != std::string::npos);
+  CHECK(ReadText(root / "line.svg").find("class=\"line-series") != std::string::npos);
+}
+
 TEST_CASE("charts run missing default config fails clearly") {
   const auto root = TempDir("csvzall_charts_missing_default");
   CurrentPathGuard cwd(root);
@@ -321,6 +341,44 @@ TEST_CASE("charts validate checks config without writing outputs") {
   CHECK(csvzall::pipeline::RunCharts((root / "config.json").string(),
                                      "valid", true, options, SilentLogger(), stats) == 0);
   CHECK_FALSE(std::filesystem::exists(root / "valid.svg"));
+}
+
+TEST_CASE("charts validate catches non-numeric line values") {
+  const auto root = TempDir("csvzall_charts_validate_line");
+  WriteText(root / "data.csv",
+            "x,y\n"
+            "1,nope\n");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"bad-line","type":"line","input":"data.csv","output":"line.svg","options":{"x":"x","y":"y"}}]})");
+  std::string error;
+  csvzall::pipeline::LoggerCallbacks logger;
+  logger.error = [&error](const std::string& message) { error = message; };
+
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  CHECK(csvzall::pipeline::RunCharts((root / "config.json").string(),
+                                     "bad-line", true, options, logger, stats) == 1);
+  CHECK(error.find("non-numeric line y value") != std::string::npos);
+  CHECK_FALSE(std::filesystem::exists(root / "line.svg"));
+}
+
+TEST_CASE("charts validate reports missing chart fields clearly") {
+  const auto root = TempDir("csvzall_charts_validate_required_fields");
+  WriteText(root / "data.csv",
+            "label,value\n"
+            "A,1\n");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"bad-bar","type":"bar","input":"data.csv","output":"bar.svg","options":{"label":"","value":"value"}}]})");
+  std::string error;
+  csvzall::pipeline::LoggerCallbacks logger;
+  logger.error = [&error](const std::string& message) { error = message; };
+
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  CHECK(csvzall::pipeline::RunCharts((root / "config.json").string(),
+                                     "bad-bar", true, options, logger, stats) == 1);
+  CHECK(error.find("bar: label column is required") != std::string::npos);
+  CHECK_FALSE(std::filesystem::exists(root / "bar.svg"));
 }
 
 TEST_CASE("charts config rejects unknown chart types and options") {

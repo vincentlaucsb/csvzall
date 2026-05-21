@@ -260,13 +260,18 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer->body.find("csvzall view") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"add-chart\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"heatmap-chart-dialog\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"chart-type\"") != std::string::npos);
   REQUIRE(viewer->body.find("Weight column") != std::string::npos);
+  REQUIRE(viewer->body.find(">Bar</option>") != std::string::npos);
 
   const auto viewer_js = client.Get("/assets/viewer.js");
   REQUIRE(viewer_js);
   REQUIRE(viewer_js->status == 200);
   REQUIRE(viewer_js->body.find("csvzallViewBootstrap") != std::string::npos);
   REQUIRE(viewer_js->body.find("/api/chart-config/heatmap") != std::string::npos);
+  REQUIRE(viewer_js->body.find("chartType.value") != std::string::npos);
+  REQUIRE(viewer_js->body.find("missingChartFields") == std::string::npos);
+  REQUIRE(viewer_js->body.find("Complete the required fields") == std::string::npos);
   REQUIRE(viewer_js->body.find("await loadChartList();\n        clearChartError();") !=
           std::string::npos);
 
@@ -483,6 +488,89 @@ TEST_CASE("view: Add chart endpoint lists and upserts current CSV charts") {
 
   std::filesystem::remove_all(dir);
 }
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+TEST_CASE("view: Add chart endpoint creates bar chart configs") {
+  const auto dir = TempDir("csvzall_view_bar_chart_config");
+  const auto path = dir / "volume.csv";
+  {
+    std::ofstream output(path, std::ios::binary);
+    output << "week,volume\n1,100\n2,125\n";
+  }
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_mode = pipeline::ViewModeSelection::Paged;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, false, "test-token"}) == 0);
+
+  httplib::Client client("127.0.0.1", server.bound_port());
+  client.set_connection_timeout(2, 0);
+  client.set_read_timeout(2, 0);
+  client.set_write_timeout(2, 0);
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto response = client.Post(
+      "/api/chart-config/heatmap",
+      headers,
+      R"({"type":"bar","id":"volume-bar","label":"week","value":"volume","title":"Volume","output":"charts/volume.svg","runOnSave":true})",
+      "application/json");
+  REQUIRE(response);
+  REQUIRE(response->status == 200);
+
+  const auto config_text = ReadTextFile(dir / ".csvzall" / "charts.json");
+  CHECK(config_text.find("\"type\": \"bar\"") != std::string::npos);
+  CHECK(config_text.find("\"label\": \"week\"") != std::string::npos);
+  CHECK(config_text.find("\"value\": \"volume\"") != std::string::npos);
+  CHECK(ReadTextFile(dir / "charts" / "volume.svg").find("class=\"bar") != std::string::npos);
+
+  std::filesystem::remove_all(dir);
+}
+#endif
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+TEST_CASE("view: Add chart endpoint returns CLI validation errors before writing config") {
+  const auto dir = TempDir("csvzall_view_chart_cli_validation");
+  const auto path = dir / "volume.csv";
+  {
+    std::ofstream output(path, std::ios::binary);
+    output << "week,volume\n1,100\n";
+  }
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_mode = pipeline::ViewModeSelection::Paged;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, false, "test-token"}) == 0);
+
+  httplib::Client client("127.0.0.1", server.bound_port());
+  client.set_connection_timeout(2, 0);
+  client.set_read_timeout(2, 0);
+  client.set_write_timeout(2, 0);
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto response = client.Post(
+      "/api/chart-config/heatmap",
+      headers,
+      R"({"type":"bar","id":"volume-bar","label":"","value":"volume","title":"Volume","output":"charts/volume.svg","runOnSave":true})",
+      "application/json");
+  REQUIRE(response);
+  REQUIRE(response->status == 400);
+  CHECK(response->body.find("bar: label column is required") != std::string::npos);
+  CHECK_FALSE(std::filesystem::exists(dir / ".csvzall" / "charts.json"));
+  CHECK_FALSE(std::filesystem::exists(dir / "charts" / "volume.svg"));
+
+  std::filesystem::remove_all(dir);
+}
+#endif
 
 #ifdef CSVZALL_HAVE_SVGPLOT
 TEST_CASE("view: Add chart endpoint returns heatmap render diagnostics") {

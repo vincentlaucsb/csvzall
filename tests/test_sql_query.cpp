@@ -48,6 +48,40 @@ TEST_CASE("SqlQueryCsv: runs SELECT and streams result CSV") {
   REQUIRE(rows[2] == std::vector<std::string>{"bob", "20"});
 }
 
+TEST_CASE("SqlQueryCsv: preserves big integer identifiers as text") {
+  const std::string id = "2131482199146031144677029033454318611";
+  auto csv = tests::MakeTestCsv(
+      {"id", "event_date", "content"},
+      {
+          {id, "2026-05-19", "completed task"},
+      });
+
+  std::istringstream input(csv);
+  std::ostringstream output;
+
+  pipeline::RunOptions options = tests::MakeTestOptions();
+  pipeline::LoggerCallbacks logger = tests::MakeNullLogger();
+  pipeline::RunStats stats;
+
+  const int rc = pipeline::RunSqlQueryCsv(
+      "SELECT id, event_date, content FROM data",
+      "data",
+      "csv",
+      input,
+      output,
+      options,
+      logger,
+      stats);
+
+  REQUIRE(rc == 0);
+  REQUIRE(stats.rows_processed == 1);
+
+  const auto rows = tests::ParseCsv(output.str());
+  REQUIRE(rows.size() == 2);
+  REQUIRE(rows[0] == std::vector<std::string>{"id", "event_date", "content"});
+  REQUIRE(rows[1] == std::vector<std::string>{id, "2026-05-19", "completed task"});
+}
+
 TEST_CASE("SqlQueryCsv: empty SQL returns error") {
   auto csv = tests::MakeTestCsv({"x"}, {{"1"}});
 

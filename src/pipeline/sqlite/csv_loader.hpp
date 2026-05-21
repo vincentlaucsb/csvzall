@@ -12,18 +12,32 @@ namespace SQLite { class Database; }
 
 namespace csvzall::pipeline::sqlite {
 
+enum class SqliteColumnAffinity {
+  Numeric,
+  Text,
+};
+
 // Returns a double-quoted SQL identifier with embedded '"' escaped by doubling.
 // E.g. my"col  →  "my""col"
 // Use this wherever column or table names appear in generated SQL.
 std::string QuoteIdentifier(const std::string& name);
 
+// Infer SQLite column affinities from the remaining rows in reader.
+//
+// Numeric columns stay NUMERIC so SQL comparisons and arithmetic keep working.
+// Columns with text, booleans, timestamps, or CSV_BIGINT values become TEXT so
+// projections preserve exact lexical cell values such as long identifier IDs.
+std::vector<SqliteColumnAffinity> InferColumnAffinities(
+    csv::CSVReader& reader,
+    const std::vector<std::string>& headers);
+
 // Load all rows from reader into a newly-created SQLite table.
 //
 // Schema conventions:
-//   - All columns use NUMERIC affinity. SQLite stores each cell value as
-//     INTEGER, REAL, or TEXT based on the cell content — no per-column
-//     inference needed.  "5" stays "5"; "5.5" stays "5.5"; "active" stays
-//     "active". Numeric WHERE comparisons work correctly.
+//   - Column affinity is supplied by the caller, normally from
+//     InferColumnAffinities() followed by a reader reset. NUMERIC columns let
+//     SQLite compare numeric values naturally; TEXT columns preserve exact CSV
+//     cells for identifiers and mixed/non-numeric data.
 //   - Column names are double-quoted in generated DDL; embedded " are escaped
 //     by doubling ("my""col").
 //
@@ -39,6 +53,7 @@ bool LoadCsvIntoTable(csv::CSVReader& reader,
                       const std::vector<std::string>& headers,
                       SQLite::Database& db,
                       const std::string& table_name,
+                      const std::vector<SqliteColumnAffinity>& column_affinities,
                       const RunOptions& options,
                       const LoggerCallbacks& logger);
 

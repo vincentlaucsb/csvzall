@@ -17,6 +17,23 @@ struct HeatmapSpec {
   std::string title;
 };
 
+struct BarSpec {
+  std::string label_column;
+  std::string value_column;
+  std::string title;
+  std::string x_label;
+  std::string y_label;
+};
+
+struct LineSpec {
+  std::string x_column;
+  std::string y_column;
+  std::string series_column;
+  std::string title;
+  std::string x_label;
+  std::string y_label;
+};
+
 struct ChartSpec {
   std::string id;
   std::string type;
@@ -24,6 +41,8 @@ struct ChartSpec {
   std::optional<std::filesystem::path> output;
   bool run_on_save = false;
   HeatmapSpec heatmap;
+  BarSpec bar;
+  LineSpec line;
 };
 
 struct ChartConfig {
@@ -37,6 +56,16 @@ ChartSpec MakeHeatmapChartSpec(std::string id,
                                std::optional<std::filesystem::path> output,
                                bool run_on_save,
                                HeatmapSpec heatmap);
+ChartSpec MakeBarChartSpec(std::string id,
+                           std::filesystem::path input,
+                           std::optional<std::filesystem::path> output,
+                           bool run_on_save,
+                           BarSpec bar);
+ChartSpec MakeLineChartSpec(std::string id,
+                            std::filesystem::path input,
+                            std::optional<std::filesystem::path> output,
+                            bool run_on_save,
+                            LineSpec line);
 
 std::filesystem::path DefaultChartConfigPath();
 std::filesystem::path ResolveChartConfigRoot(const std::filesystem::path& config_path);

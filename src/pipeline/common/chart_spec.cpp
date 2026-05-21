@@ -137,6 +137,37 @@ HeatmapSpec ParseHeatmapOptions(simdjson::dom::object options,
   return spec;
 }
 
+BarSpec ParseBarOptions(simdjson::dom::object options,
+                        const std::string& context) {
+  static const std::set<std::string_view> kAllowed{
+      "label", "value", "title", "xLabel", "yLabel"};
+  RejectUnknownKeys(options, kAllowed, context + ".options");
+
+  BarSpec spec;
+  spec.label_column = RequireString(options, "label", context + ".options");
+  spec.value_column = RequireString(options, "value", context + ".options");
+  spec.title = OptionalString(options, "title", "", context + ".options");
+  spec.x_label = OptionalString(options, "xLabel", "", context + ".options");
+  spec.y_label = OptionalString(options, "yLabel", "", context + ".options");
+  return spec;
+}
+
+LineSpec ParseLineOptions(simdjson::dom::object options,
+                          const std::string& context) {
+  static const std::set<std::string_view> kAllowed{
+      "x", "y", "series", "title", "xLabel", "yLabel"};
+  RejectUnknownKeys(options, kAllowed, context + ".options");
+
+  LineSpec spec;
+  spec.x_column = RequireString(options, "x", context + ".options");
+  spec.y_column = RequireString(options, "y", context + ".options");
+  spec.series_column = OptionalString(options, "series", "", context + ".options");
+  spec.title = OptionalString(options, "title", "", context + ".options");
+  spec.x_label = OptionalString(options, "xLabel", "", context + ".options");
+  spec.y_label = OptionalString(options, "yLabel", "", context + ".options");
+  return spec;
+}
+
 std::filesystem::path ResolveConfigPath(const std::filesystem::path& config_path) {
   return std::filesystem::absolute(config_path).lexically_normal();
 }
@@ -163,6 +194,36 @@ ChartSpec MakeHeatmapChartSpec(std::string id,
   spec.output = std::move(output);
   spec.run_on_save = run_on_save;
   spec.heatmap = std::move(heatmap);
+  return spec;
+}
+
+ChartSpec MakeBarChartSpec(std::string id,
+                           std::filesystem::path input,
+                           std::optional<std::filesystem::path> output,
+                           bool run_on_save,
+                           BarSpec bar) {
+  ChartSpec spec;
+  spec.id = std::move(id);
+  spec.type = "bar";
+  spec.input = std::move(input);
+  spec.output = std::move(output);
+  spec.run_on_save = run_on_save;
+  spec.bar = std::move(bar);
+  return spec;
+}
+
+ChartSpec MakeLineChartSpec(std::string id,
+                            std::filesystem::path input,
+                            std::optional<std::filesystem::path> output,
+                            bool run_on_save,
+                            LineSpec line) {
+  ChartSpec spec;
+  spec.id = std::move(id);
+  spec.type = "line";
+  spec.input = std::move(input);
+  spec.output = std::move(output);
+  spec.run_on_save = run_on_save;
+  spec.line = std::move(line);
   return spec;
 }
 
@@ -230,7 +291,7 @@ ChartConfig LoadChartConfig(const std::filesystem::path& config_path) {
 
     const auto id = RequireString(chart_object, "id", context);
     const auto type = RequireString(chart_object, "type", context);
-    if (type != "heatmap") {
+    if (type != "heatmap" && type != "bar" && type != "line") {
       throw std::runtime_error(context + ": unknown chart type '" + type + "'");
     }
 
@@ -245,9 +306,17 @@ ChartConfig LoadChartConfig(const std::filesystem::path& config_path) {
 
     const auto options = RequireObject(RequireField(chart_object, "options", context),
                                        "options", context);
-    config.charts.push_back(MakeHeatmapChartSpec(
-        id, input, output, OptionalBool(chart_object, "runOnSave", false, context),
-        ParseHeatmapOptions(options, context)));
+    const auto run_on_save = OptionalBool(chart_object, "runOnSave", false, context);
+    if (type == "heatmap") {
+      config.charts.push_back(MakeHeatmapChartSpec(
+          id, input, output, run_on_save, ParseHeatmapOptions(options, context)));
+    } else if (type == "bar") {
+      config.charts.push_back(MakeBarChartSpec(
+          id, input, output, run_on_save, ParseBarOptions(options, context)));
+    } else {
+      config.charts.push_back(MakeLineChartSpec(
+          id, input, output, run_on_save, ParseLineOptions(options, context)));
+    }
   }
 
   return config;

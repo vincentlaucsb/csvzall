@@ -7,6 +7,7 @@
 #include <svgplot/svgplot.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cctype>
@@ -14,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -26,6 +28,10 @@ namespace csvzall::pipeline::commands {
 namespace {
 
 using Day = std::chrono::sys_days;
+
+static constexpr std::array<std::string_view, 8> kSeriesColors{
+    "#2563eb", "#059669", "#dc2626", "#7c3aed",
+    "#ea580c", "#0891b2", "#be123c", "#4b5563"};
 
 std::string Trim(std::string_view value) {
   const auto first = value.find_first_not_of(" \t\r\n");
@@ -138,6 +144,68 @@ std::pair<std::string, std::string> ResolveHeatmapDateRange(const common::Heatma
   return {FormatIsoDate(start), FormatIsoDate(end)};
 }
 
+double ParseNumericField(csv::CSVField field,
+                         const std::string& column,
+                         std::string_view chart_type) {
+  if (field.is_null() || field.get<std::string>().empty()) {
+    return 0.0;
+  }
+  long double parsed = 0.0;
+  if (!field.try_get(parsed) || !std::isfinite(static_cast<double>(parsed))) {
+    throw std::runtime_error("non-numeric " + std::string(chart_type) +
+                             " value in column: " + column);
+  }
+  return static_cast<double>(parsed);
+}
+
+bool EmitChartValidationError(const LoggerCallbacks& logger, std::string message) {
+  if (logger.error) {
+    logger.error(std::move(message));
+  }
+  return false;
+}
+
+bool ValidateChartSpecFields(const common::ChartSpec& spec,
+                             const LoggerCallbacks& logger) {
+  if (spec.id.empty()) {
+    return EmitChartValidationError(logger, "charts: chart id is required");
+  }
+  if (spec.type != "heatmap" && spec.type != "bar" && spec.type != "line") {
+    return EmitChartValidationError(logger, "charts: unknown chart type '" + spec.type + "'");
+  }
+  if (!spec.output) {
+    return EmitChartValidationError(
+        logger, "charts: chart '" + spec.id + "' requires an output path");
+  }
+  if (spec.type == "heatmap") {
+    if (spec.heatmap.date_column.empty()) {
+      return EmitChartValidationError(logger, "heatmap: date column is required");
+    }
+    try {
+      (void)ResolveHeatmapDateRange(spec.heatmap);
+    } catch (const std::exception& ex) {
+      return EmitChartValidationError(logger, std::string("heatmap: ") + ex.what());
+    }
+    return true;
+  }
+  if (spec.type == "bar") {
+    if (spec.bar.label_column.empty()) {
+      return EmitChartValidationError(logger, "bar: label column is required");
+    }
+    if (spec.bar.value_column.empty()) {
+      return EmitChartValidationError(logger, "bar: value column is required");
+    }
+    return true;
+  }
+  if (spec.line.x_column.empty()) {
+    return EmitChartValidationError(logger, "line: x column is required");
+  }
+  if (spec.line.y_column.empty()) {
+    return EmitChartValidationError(logger, "line: y column is required");
+  }
+  return true;
+}
+
 class HeatmapCommand : public CsvInputCommand {
 public:
   HeatmapCommand(common::HeatmapSpec spec,
@@ -231,6 +299,175 @@ private:
   std::ostream& output_;
 };
 
+class BarCommand : public CsvInputCommand {
+public:
+  BarCommand(common::BarSpec spec,
+             std::istream& input,
+             std::ostream& output,
+             const RunOptions& options,
+             const LoggerCallbacks& logger,
+             RunStats& stats)
+      : CsvInputCommand(input, options, logger, stats),
+        spec_(std::move(spec)),
+        output_(output) {}
+
+protected:
+  int run() override {
+    try {
+      const auto label_index =
+          common::FindColumnIndex(headers(), spec_.label_column, options().exact_column_matching);
+      if (!label_index) {
+        throw std::runtime_error("label column not found: " + spec_.label_column);
+      }
+      const auto value_index =
+          common::FindColumnIndex(headers(), spec_.value_column, options().exact_column_matching);
+      if (!value_index) {
+        throw std::runtime_error("value column not found: " + spec_.value_column);
+      }
+
+      std::vector<std::string> order;
+      std::map<std::string, double> totals;
+      for (auto& row : reader()) {
+        const auto label = row[*label_index].get<std::string>();
+        if (!totals.contains(label)) {
+          order.push_back(label);
+        }
+        totals[label] += ParseNumericField(row[*value_index], spec_.value_column, "bar");
+        ++stats().rows_processed;
+        common::AccumulateRowBytes(row, stats());
+      }
+
+      std::vector<svgplot::Bar> bars;
+      bars.reserve(order.size());
+      for (std::size_t i = 0; i < order.size(); ++i) {
+        bars.push_back({
+            order[i],
+            totals[order[i]],
+            std::string(kSeriesColors[i % kSeriesColors.size()])});
+      }
+
+      svgplot::ChartOptions chart_options;
+      chart_options.title = spec_.title;
+      chart_options.x_label = spec_.x_label;
+      chart_options.y_label = spec_.y_label;
+      output_ << svgplot::bar_chart(bars, chart_options).str() << '\n';
+      return 0;
+    } catch (const std::exception& ex) {
+      if (logger().error) {
+        logger().error(std::string("bar: ") + ex.what());
+      }
+      return 1;
+    }
+  }
+
+private:
+  common::BarSpec spec_;
+  std::ostream& output_;
+};
+
+class LineCommand : public CsvInputCommand {
+public:
+  LineCommand(common::LineSpec spec,
+              std::istream& input,
+              std::ostream& output,
+              const RunOptions& options,
+              const LoggerCallbacks& logger,
+              RunStats& stats)
+      : CsvInputCommand(input, options, logger, stats),
+        spec_(std::move(spec)),
+        output_(output) {}
+
+protected:
+  int run() override {
+    try {
+      const auto x_index =
+          common::FindColumnIndex(headers(), spec_.x_column, options().exact_column_matching);
+      if (!x_index) {
+        throw std::runtime_error("x column not found: " + spec_.x_column);
+      }
+      const auto y_index =
+          common::FindColumnIndex(headers(), spec_.y_column, options().exact_column_matching);
+      if (!y_index) {
+        throw std::runtime_error("y column not found: " + spec_.y_column);
+      }
+
+      std::optional<std::size_t> series_index;
+      if (!spec_.series_column.empty()) {
+        series_index =
+            common::FindColumnIndex(headers(), spec_.series_column, options().exact_column_matching);
+        if (!series_index) {
+          throw std::runtime_error("series column not found: " + spec_.series_column);
+        }
+      }
+
+      std::vector<std::string> order;
+      std::map<std::string, std::vector<svgplot::Point>> points_by_series;
+      for (auto& row : reader()) {
+        const auto series = series_index
+            ? row[*series_index].get<std::string>()
+            : std::string{"Series"};
+        if (!points_by_series.contains(series)) {
+          order.push_back(series);
+        }
+        points_by_series[series].push_back({
+            ParseNumericField(row[*x_index], spec_.x_column, "line x"),
+            ParseNumericField(row[*y_index], spec_.y_column, "line y")});
+        ++stats().rows_processed;
+        common::AccumulateRowBytes(row, stats());
+      }
+
+      std::vector<svgplot::Series> series;
+      series.reserve(order.size());
+      for (std::size_t i = 0; i < order.size(); ++i) {
+        auto& points = points_by_series[order[i]];
+        std::sort(points.begin(), points.end(), [](const auto& lhs, const auto& rhs) {
+          return lhs.x < rhs.x;
+        });
+        series.push_back({order[i], std::move(points), std::string(kSeriesColors[i % kSeriesColors.size()])});
+      }
+
+      svgplot::ChartOptions chart_options;
+      chart_options.title = spec_.title;
+      chart_options.x_label = spec_.x_label;
+      chart_options.y_label = spec_.y_label;
+      output_ << svgplot::line_chart(series, chart_options).str() << '\n';
+      return 0;
+    } catch (const std::exception& ex) {
+      if (logger().error) {
+        logger().error(std::string("line: ") + ex.what());
+      }
+      return 1;
+    }
+  }
+
+private:
+  common::LineSpec spec_;
+  std::ostream& output_;
+};
+
+int RenderChartToStream(const common::ChartSpec& spec,
+                        std::istream& input,
+                        std::ostream& output,
+                        const RunOptions& options,
+                        const LoggerCallbacks& logger,
+                        RunStats& stats) {
+  if (spec.type == "heatmap") {
+    return RunHeatmap(spec.heatmap, input, output, options, logger, stats);
+  }
+  if (spec.type == "bar") {
+    BarCommand cmd(spec.bar, input, output, options, logger, stats);
+    return cmd.execute();
+  }
+  if (spec.type == "line") {
+    LineCommand cmd(spec.line, input, output, options, logger, stats);
+    return cmd.execute();
+  }
+  if (logger.error) {
+    logger.error("charts: unknown chart type '" + spec.type + "'");
+  }
+  return 1;
+}
+
 }  // namespace
 
 int RunHeatmap(const std::string& date_column,
@@ -268,16 +505,7 @@ int RunChart(const common::ChartSpec& spec,
              const RunOptions& options,
              const LoggerCallbacks& logger,
              RunStats& stats) {
-  if (spec.type != "heatmap") {
-    if (logger.error) {
-      logger.error("charts: unknown chart type '" + spec.type + "'");
-    }
-    return 1;
-  }
-  if (!spec.output) {
-    if (logger.error) {
-      logger.error("charts: chart '" + spec.id + "' requires an output path");
-    }
+  if (!ValidateChartSpecFields(spec, logger)) {
     return 1;
   }
 
@@ -315,7 +543,7 @@ int RunChart(const common::ChartSpec& spec,
   RunOptions chart_options = options;
   chart_options.input_is_stdin = false;
   chart_options.input_path = spec.input.string();
-  const auto rc = RunHeatmap(spec.heatmap, input, output, chart_options, logger, stats);
+  const auto rc = RenderChartToStream(spec, input, output, chart_options, logger, stats);
   output.flush();
   if (rc == 0 && !output.good()) {
     if (logger.error) {
@@ -331,16 +559,7 @@ int ValidateChart(const common::ChartSpec& spec,
                   const RunOptions& options,
                   const LoggerCallbacks& logger,
                   RunStats& stats) {
-  if (spec.type != "heatmap") {
-    if (logger.error) {
-      logger.error("charts: unknown chart type '" + spec.type + "'");
-    }
-    return 1;
-  }
-  if (!spec.output) {
-    if (logger.error) {
-      logger.error("charts: chart '" + spec.id + "' requires an output path");
-    }
+  if (!ValidateChartSpecFields(spec, logger)) {
     return 1;
   }
 
@@ -357,7 +576,7 @@ int ValidateChart(const common::ChartSpec& spec,
   chart_options.input_is_stdin = false;
   chart_options.input_path = spec.input.string();
   std::ostringstream output;
-  return RunHeatmap(spec.heatmap, input, output, chart_options, logger, stats);
+  return RenderChartToStream(spec, input, output, chart_options, logger, stats);
 }
 
 }  // namespace csvzall::pipeline::commands

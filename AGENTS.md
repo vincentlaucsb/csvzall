@@ -22,7 +22,8 @@ This file is the canonical AI reference for this repository.
 ## SQLite conventions
 
 - Use [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) with its bundled internal SQLite.
-- All columns are loaded as `NUMERIC` affinity; SQLite stores each cell as INTEGER, REAL, or TEXT based on content — no per-column inference needed. Numeric comparisons in WHERE work correctly.
+- CSV input is scanned with csv-parser scalar type inference before SQLite load.
+- Columns that contain only integer/real values are loaded as `NUMERIC`; columns that contain text, booleans, timestamps, or `CSV_BIGINT` values are loaded as `TEXT` to preserve exact lexical identifiers. Numeric comparisons in WHERE work correctly for inferred numeric columns.
 - All column names are quoted with `"` in generated SQL.
 - Memory strategy: in-memory (`:memory:`) below threshold, temp-file database above it.
 - Default threshold: 256 MB (`RunOptions::sqlite_threshold_mb`). Not yet exposed as a CLI flag.

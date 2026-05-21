@@ -64,7 +64,15 @@
           <div id="chart-list" class="chart-list" role="listbox" aria-label="Charts for this CSV"></div>
         </aside>
         <section class="chart-form-pane">
-          <h2>Heatmap</h2>
+          <h2 id="chart-form-title">Heatmap</h2>
+          <label>
+            <span>Chart type</span>
+            <select id="chart-type">
+              <option value="heatmap">Heatmap</option>
+              <option value="bar">Bar</option>
+              <option value="line">Line</option>
+            </select>
+          </label>
           <label>
             <span>Chart id</span>
             <input id="chart-id" type="text" autocomplete="off" required>
@@ -75,19 +83,19 @@
           </label>
           <div class="dialog-grid">
             <label>
-              <span>Date column</span>
+              <span id="chart-primary-column-label">Date column</span>
               <select id="chart-date-column" required></select>
             </label>
             <label>
-              <span>Weight column</span>
+              <span id="chart-value-column-label">Weight column</span>
               <select id="chart-value-column"></select>
             </label>
             <label>
-              <span>Label column</span>
+              <span id="chart-label-column-label">Label column</span>
               <select id="chart-label-column"></select>
             </label>
           </div>
-          <fieldset class="chart-range">
+          <fieldset id="chart-range-section" class="chart-range">
             <legend>Range</legend>
             <label class="toggle-row">
               <input id="chart-range-fixed" type="radio" name="chart-range-mode" value="fixed" checked>
