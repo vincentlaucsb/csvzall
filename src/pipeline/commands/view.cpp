@@ -520,6 +520,20 @@ bool JsonBoolFieldOr(std::string_view body, std::string_view field, bool fallbac
   }
 }
 
+std::vector<std::string> JsonStringArrayFieldOr(std::string_view body,
+                                                std::string_view field,
+                                                std::vector<std::string> fallback) {
+  try {
+    return JsonStringArrayField(body, field);
+  } catch (const std::exception& ex) {
+    const std::string missing = "missing JSON field: " + std::string(field);
+    if (ex.what() == missing) {
+      return fallback;
+    }
+    throw;
+  }
+}
+
 std::filesystem::path FindChartConfigPath(const std::filesystem::path& input_path) {
   auto current = std::filesystem::absolute(input_path).parent_path();
   while (!current.empty()) {
@@ -600,6 +614,99 @@ void AppendJsonOption(std::string& json,
   AppendJsonString(json, value);
 }
 
+void AppendJsonValuesOption(std::string& json,
+                            const std::vector<common::ChartValueSpec>& values,
+                            bool& first_option) {
+  if (values.empty()) {
+    return;
+  }
+  if (!first_option) {
+    json += ",";
+  }
+  first_option = false;
+  json += "\n        \"values\": [";
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    if (i > 0) {
+      json += ", ";
+    }
+    json += "{\"column\": ";
+    AppendJsonString(json, values[i].column);
+    json += ", \"label\": ";
+    AppendJsonString(json, values[i].label.empty() ? values[i].column : values[i].label);
+    if (!values[i].color.empty()) {
+      json += ", \"color\": ";
+      AppendJsonString(json, values[i].color);
+    }
+    json += "}";
+  }
+  json += "]";
+}
+
+void AppendJsonValuesArray(std::string& json,
+                           const std::vector<common::ChartValueSpec>& values) {
+  json += "[";
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    if (i > 0) {
+      json += ",";
+    }
+    json += "{\"column\":";
+    AppendJsonString(json, values[i].column);
+    json += ",\"label\":";
+    AppendJsonString(json, values[i].label.empty() ? values[i].column : values[i].label);
+    json += ",\"color\":";
+    AppendJsonString(json, values[i].color);
+    json += "}";
+  }
+  json += "]";
+}
+
+void AppendJsonStringArray(std::string& json,
+                           const std::vector<std::string>& values) {
+  json += "[";
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    if (i > 0) {
+      json += ",";
+    }
+    AppendJsonString(json, values[i]);
+  }
+  json += "]";
+}
+
+void AppendJsonStringArrayOption(std::string& json,
+                                 const char* key,
+                                 const std::vector<std::string>& values,
+                                 bool& first_option) {
+  if (values.empty()) {
+    return;
+  }
+  if (!first_option) {
+    json += ",";
+  }
+  first_option = false;
+  json += "\n        \"";
+  json += key;
+  json += "\": [";
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    if (i > 0) {
+      json += ", ";
+    }
+    AppendJsonString(json, values[i]);
+  }
+  json += "]";
+}
+
+std::vector<common::ChartValueSpec> ChartValuesFromColumns(
+    const std::vector<std::string>& columns) {
+  std::vector<common::ChartValueSpec> values;
+  values.reserve(columns.size());
+  for (const auto& column : columns) {
+    if (!column.empty()) {
+      values.push_back({column, column, ""});
+    }
+  }
+  return values;
+}
+
 std::string ChartSpecJsonForConfig(const common::ChartSpec& spec,
                                    const std::filesystem::path& root) {
   if (!spec.output) {
@@ -618,7 +725,9 @@ std::string ChartSpecJsonForConfig(const common::ChartSpec& spec,
   bool first_option = true;
   if (spec.type == "heatmap") {
     AppendJsonOption(json, "date", spec.heatmap.date_column, first_option);
-    if (!spec.heatmap.value_column.empty()) {
+    if (!spec.heatmap.values.empty()) {
+      AppendJsonValuesOption(json, spec.heatmap.values, first_option);
+    } else if (!spec.heatmap.value_column.empty()) {
       AppendJsonOption(json, "value", spec.heatmap.value_column, first_option);
     }
     if (!spec.heatmap.label_column.empty()) {
@@ -636,19 +745,39 @@ std::string ChartSpecJsonForConfig(const common::ChartSpec& spec,
     if (!spec.heatmap.title.empty()) {
       AppendJsonOption(json, "title", spec.heatmap.title, first_option);
     }
+    if (!spec.heatmap.orientation.empty() &&
+        spec.heatmap.orientation != "months-horizontal") {
+      AppendJsonOption(json, "orientation", spec.heatmap.orientation, first_option);
+    }
   } else if (spec.type == "bar") {
     AppendJsonOption(json, "label", spec.bar.label_column, first_option);
-    AppendJsonOption(json, "value", spec.bar.value_column, first_option);
+    if (!spec.bar.values.empty()) {
+      AppendJsonValuesOption(json, spec.bar.values, first_option);
+    } else {
+      AppendJsonOption(json, "value", spec.bar.value_column, first_option);
+    }
     if (!spec.bar.title.empty()) AppendJsonOption(json, "title", spec.bar.title, first_option);
     if (!spec.bar.x_label.empty()) AppendJsonOption(json, "xLabel", spec.bar.x_label, first_option);
     if (!spec.bar.y_label.empty()) AppendJsonOption(json, "yLabel", spec.bar.y_label, first_option);
+    if (!spec.bar.presentation.empty() && spec.bar.presentation != "stacked") {
+      AppendJsonOption(json, "presentation", spec.bar.presentation, first_option);
+    }
   } else if (spec.type == "line") {
     AppendJsonOption(json, "x", spec.line.x_column, first_option);
-    AppendJsonOption(json, "y", spec.line.y_column, first_option);
+    if (!spec.line.values.empty()) {
+      AppendJsonValuesOption(json, spec.line.values, first_option);
+    } else {
+      AppendJsonOption(json, "y", spec.line.y_column, first_option);
+    }
     if (!spec.line.series_column.empty()) AppendJsonOption(json, "series", spec.line.series_column, first_option);
     if (!spec.line.title.empty()) AppendJsonOption(json, "title", spec.line.title, first_option);
     if (!spec.line.x_label.empty()) AppendJsonOption(json, "xLabel", spec.line.x_label, first_option);
     if (!spec.line.y_label.empty()) AppendJsonOption(json, "yLabel", spec.line.y_label, first_option);
+  } else if (spec.type == "markdown-table") {
+    if (!spec.markdown_table.sql.empty()) {
+      AppendJsonOption(json, "sql", spec.markdown_table.sql, first_option);
+    }
+    AppendJsonStringArrayOption(json, "columns", spec.markdown_table.columns, first_option);
   }
   json += "\n      },\n      \"runOnSave\": ";
   json += spec.run_on_save ? "true" : "false";
@@ -673,6 +802,8 @@ std::string ChartSpecJsonForApi(const common::ChartSpec& spec,
     AppendJsonString(json, spec.heatmap.date_column);
     json += ",\"value\":";
     AppendJsonString(json, spec.heatmap.value_column);
+    json += ",\"values\":";
+    AppendJsonValuesArray(json, spec.heatmap.values);
     json += ",\"label\":";
     AppendJsonString(json, spec.heatmap.label_column);
     json += ",\"start\":";
@@ -683,22 +814,30 @@ std::string ChartSpecJsonForApi(const common::ChartSpec& spec,
     AppendJsonString(json, spec.heatmap.lookback);
     json += ",\"title\":";
     AppendJsonString(json, spec.heatmap.title);
+    json += ",\"orientation\":";
+    AppendJsonString(json, spec.heatmap.orientation);
   } else if (spec.type == "bar") {
     json += "\"label\":";
     AppendJsonString(json, spec.bar.label_column);
     json += ",\"value\":";
     AppendJsonString(json, spec.bar.value_column);
+    json += ",\"values\":";
+    AppendJsonValuesArray(json, spec.bar.values);
     json += ",\"title\":";
     AppendJsonString(json, spec.bar.title);
     json += ",\"xLabel\":";
     AppendJsonString(json, spec.bar.x_label);
     json += ",\"yLabel\":";
     AppendJsonString(json, spec.bar.y_label);
+    json += ",\"presentation\":";
+    AppendJsonString(json, spec.bar.presentation);
   } else if (spec.type == "line") {
     json += "\"x\":";
     AppendJsonString(json, spec.line.x_column);
     json += ",\"y\":";
     AppendJsonString(json, spec.line.y_column);
+    json += ",\"values\":";
+    AppendJsonValuesArray(json, spec.line.values);
     json += ",\"series\":";
     AppendJsonString(json, spec.line.series_column);
     json += ",\"title\":";
@@ -707,6 +846,11 @@ std::string ChartSpecJsonForApi(const common::ChartSpec& spec,
     AppendJsonString(json, spec.line.x_label);
     json += ",\"yLabel\":";
     AppendJsonString(json, spec.line.y_label);
+  } else if (spec.type == "markdown-table") {
+    json += "\"sql\":";
+    AppendJsonString(json, spec.markdown_table.sql);
+    json += ",\"columns\":";
+    AppendJsonStringArray(json, spec.markdown_table.columns);
   }
   json += "},\"runOnSave\":";
   json += spec.run_on_save ? "true" : "false";
@@ -782,7 +926,7 @@ void RenderSavedChart(common::ChartSpec spec,
 #else
   (void)spec;
   (void)logger;
-  throw std::runtime_error("chart config saved, but heatmap rendering is disabled in this build");
+  throw std::runtime_error("chart config saved, but SVG chart rendering is disabled in this build");
 #endif
 }
 
@@ -869,6 +1013,36 @@ std::string GenerateCurrentCsvChart(const CsvViewData& data,
   return result;
 }
 
+std::size_t RenderRunOnSaveChartsForCurrentCsv(const CsvViewData& data,
+                                               const LoggerCallbacks& logger) {
+  const auto config_path = FindChartConfigPath(data.input_path());
+  const auto charts = LoadChartConfigIfExists(config_path);
+  std::size_t generated = 0;
+  for (const auto& chart : charts) {
+    if (!chart.run_on_save || !SamePath(chart.input, data.input_path())) {
+      continue;
+    }
+    if (chart.output && SamePath(*chart.output, data.input_path())) {
+      continue;
+    }
+    RenderSavedChart(chart, logger);
+    ++generated;
+  }
+  return generated;
+}
+
+std::string SaveResultJson(std::size_t charts_generated,
+                           std::string_view chart_error = {}) {
+  std::string result = "{\"ok\":true,\"chartsGenerated\":";
+  result += std::to_string(charts_generated);
+  if (!chart_error.empty()) {
+    result += ",\"chartError\":";
+    AppendJsonString(result, chart_error);
+  }
+  result += "}";
+  return result;
+}
+
 std::string AppendHeatmapChartConfig(const CsvViewData& data,
                                      std::string_view body,
                                      const LoggerCallbacks& logger) {
@@ -890,18 +1064,23 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
   if (type == "heatmap") {
     const auto date = JsonStringFieldOr(body, "date", "");
     const auto value = JsonStringFieldOr(body, "value", "");
+    const auto values = ChartValuesFromColumns(
+        JsonStringArrayFieldOr(body, "values", {}));
     const auto label = JsonStringFieldOr(body, "label", "");
     const auto start = JsonStringFieldOr(body, "start", "");
     const auto end = JsonStringFieldOr(body, "end", "");
     const auto lookback = JsonStringFieldOr(body, "lookback", "");
+    const auto orientation = JsonStringFieldOr(body, "orientation", "months-horizontal");
     common::HeatmapSpec heatmap;
     heatmap.date_column = date;
     heatmap.value_column = value;
+    heatmap.values = values;
     heatmap.label_column = label;
     heatmap.start_date = start;
     heatmap.end_date = end;
     heatmap.lookback = lookback;
     heatmap.title = title;
+    heatmap.orientation = orientation;
     spec = common::MakeHeatmapChartSpec(
         id,
         ResolveChartOutputPath(root, input_path),
@@ -911,12 +1090,16 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
   } else if (type == "bar") {
     const auto label = JsonStringFieldOr(body, "label", "");
     const auto value = JsonStringFieldOr(body, "value", "");
+    const auto values = ChartValuesFromColumns(
+        JsonStringArrayFieldOr(body, "values", {}));
     common::BarSpec bar;
     bar.label_column = label;
     bar.value_column = value;
+    bar.values = values;
     bar.title = title;
     bar.x_label = JsonStringFieldOr(body, "xLabel", "");
     bar.y_label = JsonStringFieldOr(body, "yLabel", "");
+    bar.presentation = JsonStringFieldOr(body, "presentation", "stacked");
     spec = common::MakeBarChartSpec(
         id,
         ResolveChartOutputPath(root, input_path),
@@ -926,10 +1109,13 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
   } else if (type == "line") {
     const auto x = JsonStringFieldOr(body, "x", "");
     const auto y = JsonStringFieldOr(body, "y", "");
+    const auto values = ChartValuesFromColumns(
+        JsonStringArrayFieldOr(body, "values", {}));
     const auto series = JsonStringFieldOr(body, "series", "");
     common::LineSpec line;
     line.x_column = x;
     line.y_column = y;
+    line.values = values;
     line.series_column = series;
     line.title = title;
     line.x_label = JsonStringFieldOr(body, "xLabel", "");
@@ -940,6 +1126,16 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
         output_path,
         run_on_save,
         line);
+  } else if (type == "markdown-table") {
+    common::MarkdownTableSpec markdown_table;
+    markdown_table.sql = JsonStringFieldOr(body, "sql", "");
+    markdown_table.columns = JsonStringArrayFieldOr(body, "columns", {});
+    spec = common::MakeMarkdownTableChartSpec(
+        id,
+        ResolveChartOutputPath(root, input_path),
+        output_path,
+        run_on_save,
+        markdown_table);
   } else {
     throw std::runtime_error("unknown chart type: " + type);
   }
@@ -1004,6 +1200,13 @@ std::filesystem::file_time_type GetFileMtime(const std::string& input_path) {
   return mtime;
 }
 
+void RequireNonEmptyCsvFile(const std::uint64_t file_size) {
+  if (file_size == 0) {
+    throw std::runtime_error(
+        "CSV file is empty. Add a header row first, for example: column");
+  }
+}
+
 std::uint64_t ThresholdBytes(std::size_t threshold_mb) {
   constexpr auto max = std::numeric_limits<std::uint64_t>::max();
   if (threshold_mb > max / kBytesPerMiB) {
@@ -1022,6 +1225,7 @@ CsvMaterializedFile OpenMaterializedFile(const std::string& input_path,
   materialized.input_path = input_path;
   materialized.file_name = std::filesystem::path(input_path).filename().string();
   const auto file_size = GetFileSize(input_path);
+  RequireNonEmptyCsvFile(file_size);
   materialized.source_size = file_size;
   materialized.source_mtime = GetFileMtime(input_path);
 
@@ -1055,6 +1259,7 @@ CsvIndexedFile CsvIndexedFile::Open(const std::string& input_path,
   indexed.file_name_ = std::filesystem::path(input_path).filename().string();
 
   indexed.file_size_ = GetFileSize(input_path);
+  RequireNonEmptyCsvFile(indexed.file_size_);
 
   auto format = MakeViewFormat(options);
   csv::CSVReader reader(input_path, format);
@@ -1685,12 +1890,24 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        }
                        try {
                          impl_->data.save();
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                         std::size_t charts_generated = 0;
+                         std::string chart_error;
+                         try {
+                           charts_generated = RenderRunOnSaveChartsForCurrentCsv(
+                               impl_->data, impl_->logger);
+                         } catch (const std::exception& ex) {
+                           chart_error = ex.what();
+                           if (impl_->logger.error) {
+                             impl_->logger.error(chart_error);
+                           }
+                         }
+                         response.set_content(SaveResultJson(charts_generated, chart_error),
+                                              "application/json; charset=utf-8");
                        } catch (const std::exception& ex) {
                          response.status = 409;
-                        response.set_content(std::string(ex.what()) + "\n",
+                         response.set_content(std::string(ex.what()) + "\n",
                                               "text/plain; charset=utf-8");
-                      }
+                       }
                      });
 
   impl_->server.Post("/api/chart-config/heatmap",

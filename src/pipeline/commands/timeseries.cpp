@@ -1,6 +1,7 @@
 #include "commands.hpp"
 
 #include "../common/column_lookup.hpp"
+#include "../common/markdown_table.hpp"
 #include "../common/row_utils.hpp"
 
 #include <csv.hpp>
@@ -54,46 +55,6 @@ double FinalValue(const AggRecord& rec, ReduceOp op) {
     return rec.value / static_cast<double>(rec.count);
   }
   return rec.value;
-}
-
-void WriteMarkdownTable(std::ostream& output,
-                        const std::vector<std::string>& headers,
-                        const std::vector<std::vector<std::string>>& rows) {
-  std::vector<std::size_t> widths(headers.size(), 0);
-  for (std::size_t i = 0; i < headers.size(); ++i) {
-    widths[i] = headers[i].size();
-  }
-  for (const auto& row : rows) {
-    for (std::size_t i = 0; i < row.size() && i < widths.size(); ++i) {
-      widths[i] = std::max(widths[i], row[i].size());
-    }
-  }
-
-  auto write_row = [&](const std::vector<std::string>& cells) {
-    output << '|';
-    for (std::size_t i = 0; i < cells.size(); ++i) {
-      output << ' ' << cells[i];
-      for (std::size_t p = cells[i].size(); p < widths[i]; ++p) output << ' ';
-      output << " |";
-    }
-    output << '\n';
-  };
-
-  auto write_sep = [&]() {
-    output << '|';
-    for (std::size_t i = 0; i < widths.size(); ++i) {
-      output << '-';
-      for (std::size_t p = 0; p < widths[i]; ++p) output << '-';
-      output << "-|";
-    }
-    output << '\n';
-  };
-
-  write_row(headers);
-  write_sep();
-  for (const auto& row : rows) {
-    write_row(row);
-  }
 }
 
 }  // namespace
@@ -184,7 +145,7 @@ protected:
     }
 
     if (format_ == "markdown") {
-      WriteMarkdownTable(output(), out_headers, out_rows);
+      common::WriteMarkdownTable(output(), out_headers, out_rows);
     } else {
       auto writer = csv::make_csv_writer(output()).set_auto_flush(false);
       writer << out_headers;

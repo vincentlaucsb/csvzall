@@ -564,6 +564,7 @@ set(CSVZALL_APP_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/gzip_stream.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/json_path.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/markdown_calendar.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/markdown_table.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/row_utils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/sqlite/sqlite_db.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/sqlite/csv_loader.cpp

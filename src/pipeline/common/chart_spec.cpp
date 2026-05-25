@@ -7,6 +7,7 @@
 #include <set>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 namespace csvzall::pipeline::common {
 namespace {
@@ -104,6 +105,91 @@ bool OptionalBool(simdjson::dom::object object,
 
 simdjson::dom::object RequireObject(simdjson::dom::element value,
                                     std::string_view key,
+                                    const std::string& context);
+
+ChartValueSpec ParseChartValue(simdjson::dom::element value,
+                               std::string_view key,
+                               const std::string& context) {
+  std::string_view column;
+  if (!value.get_string().get(column)) {
+    return ChartValueSpec{std::string(column), std::string(column), ""};
+  }
+
+  const auto object = RequireObject(value, key, context);
+  static const std::set<std::string_view> kAllowed{"column", "label", "color"};
+  RejectUnknownKeys(object, kAllowed, context);
+
+  ChartValueSpec spec;
+  spec.column = RequireString(object, "column", context);
+  spec.label = OptionalString(object, "label", spec.column, context);
+  spec.color = OptionalString(object, "color", "", context);
+  return spec;
+}
+
+std::vector<ChartValueSpec> OptionalValues(simdjson::dom::object object,
+                                           std::string_view key,
+                                           const std::string& context) {
+  const auto value = OptionalField(object, key, context);
+  if (!value) {
+    return {};
+  }
+
+  simdjson::dom::array array;
+  const auto error = value->get_array().get(array);
+  if (error) {
+    throw std::runtime_error(context + ": key '" + std::string(key) +
+                             "' must be an array");
+  }
+
+  std::vector<ChartValueSpec> values;
+  std::size_t index = 0;
+  for (simdjson::dom::element entry : array) {
+    auto spec = ParseChartValue(entry, key,
+                                context + "." + std::string(key) +
+                                    "[" + std::to_string(index) + "]");
+    if (spec.column.empty()) {
+      throw std::runtime_error(context + "." + std::string(key) +
+                               "[" + std::to_string(index) + "]: column is required");
+    }
+    values.push_back(std::move(spec));
+    ++index;
+  }
+  return values;
+}
+
+std::vector<std::string> OptionalStringArray(simdjson::dom::object object,
+                                             std::string_view key,
+                                             const std::string& context) {
+  const auto value = OptionalField(object, key, context);
+  if (!value) {
+    return {};
+  }
+
+  simdjson::dom::array array;
+  const auto error = value->get_array().get(array);
+  if (error) {
+    throw std::runtime_error(context + ": key '" + std::string(key) +
+                             "' must be an array");
+  }
+
+  std::vector<std::string> result;
+  std::size_t index = 0;
+  for (simdjson::dom::element entry : array) {
+    auto item = AsString(entry,
+                         std::string(key) + "[" + std::to_string(index) + "]",
+                         context);
+    if (item.empty()) {
+      throw std::runtime_error(context + "." + std::string(key) +
+                               "[" + std::to_string(index) + "]: value is required");
+    }
+    result.push_back(std::move(item));
+    ++index;
+  }
+  return result;
+}
+
+simdjson::dom::object RequireObject(simdjson::dom::element value,
+                                    std::string_view key,
                                     const std::string& context) {
   simdjson::dom::object result;
   const auto error = value.get_object().get(result);
@@ -117,16 +203,20 @@ simdjson::dom::object RequireObject(simdjson::dom::element value,
 HeatmapSpec ParseHeatmapOptions(simdjson::dom::object options,
                                 const std::string& context) {
   static const std::set<std::string_view> kAllowed{
-      "date", "value", "label", "start", "end", "lookback", "title"};
+      "date", "value", "values", "label", "start", "end", "lookback", "title",
+      "orientation"};
   RejectUnknownKeys(options, kAllowed, context + ".options");
 
   HeatmapSpec spec;
   spec.date_column = OptionalString(options, "date", "date", context + ".options");
   spec.value_column = OptionalString(options, "value", "", context + ".options");
+  spec.values = OptionalValues(options, "values", context + ".options");
   spec.label_column = OptionalString(options, "label", "", context + ".options");
   spec.lookback = OptionalString(options, "lookback", "", context + ".options");
   spec.start_date = OptionalString(options, "start", "", context + ".options");
   spec.end_date = OptionalString(options, "end", "", context + ".options");
+  spec.orientation = OptionalString(
+      options, "orientation", "months-horizontal", context + ".options");
   if (spec.lookback.empty() && (spec.start_date.empty() || spec.end_date.empty())) {
     throw std::runtime_error(context + ".options: provide start/end or lookback");
   }
@@ -140,31 +230,45 @@ HeatmapSpec ParseHeatmapOptions(simdjson::dom::object options,
 BarSpec ParseBarOptions(simdjson::dom::object options,
                         const std::string& context) {
   static const std::set<std::string_view> kAllowed{
-      "label", "value", "title", "xLabel", "yLabel"};
+      "label", "value", "values", "title", "xLabel", "yLabel", "presentation"};
   RejectUnknownKeys(options, kAllowed, context + ".options");
 
   BarSpec spec;
   spec.label_column = RequireString(options, "label", context + ".options");
-  spec.value_column = RequireString(options, "value", context + ".options");
+  spec.value_column = OptionalString(options, "value", "", context + ".options");
+  spec.values = OptionalValues(options, "values", context + ".options");
   spec.title = OptionalString(options, "title", "", context + ".options");
   spec.x_label = OptionalString(options, "xLabel", "", context + ".options");
   spec.y_label = OptionalString(options, "yLabel", "", context + ".options");
+  spec.presentation = OptionalString(options, "presentation", "stacked", context + ".options");
   return spec;
 }
 
 LineSpec ParseLineOptions(simdjson::dom::object options,
                           const std::string& context) {
   static const std::set<std::string_view> kAllowed{
-      "x", "y", "series", "title", "xLabel", "yLabel"};
+      "x", "y", "values", "series", "title", "xLabel", "yLabel"};
   RejectUnknownKeys(options, kAllowed, context + ".options");
 
   LineSpec spec;
   spec.x_column = RequireString(options, "x", context + ".options");
-  spec.y_column = RequireString(options, "y", context + ".options");
+  spec.y_column = OptionalString(options, "y", "", context + ".options");
+  spec.values = OptionalValues(options, "values", context + ".options");
   spec.series_column = OptionalString(options, "series", "", context + ".options");
   spec.title = OptionalString(options, "title", "", context + ".options");
   spec.x_label = OptionalString(options, "xLabel", "", context + ".options");
   spec.y_label = OptionalString(options, "yLabel", "", context + ".options");
+  return spec;
+}
+
+MarkdownTableSpec ParseMarkdownTableOptions(simdjson::dom::object options,
+                                            const std::string& context) {
+  static const std::set<std::string_view> kAllowed{"sql", "columns"};
+  RejectUnknownKeys(options, kAllowed, context + ".options");
+
+  MarkdownTableSpec spec;
+  spec.sql = OptionalString(options, "sql", "", context + ".options");
+  spec.columns = OptionalStringArray(options, "columns", context + ".options");
   return spec;
 }
 
@@ -224,6 +328,21 @@ ChartSpec MakeLineChartSpec(std::string id,
   spec.output = std::move(output);
   spec.run_on_save = run_on_save;
   spec.line = std::move(line);
+  return spec;
+}
+
+ChartSpec MakeMarkdownTableChartSpec(std::string id,
+                                     std::filesystem::path input,
+                                     std::optional<std::filesystem::path> output,
+                                     bool run_on_save,
+                                     MarkdownTableSpec markdown_table) {
+  ChartSpec spec;
+  spec.id = std::move(id);
+  spec.type = "markdown-table";
+  spec.input = std::move(input);
+  spec.output = std::move(output);
+  spec.run_on_save = run_on_save;
+  spec.markdown_table = std::move(markdown_table);
   return spec;
 }
 
@@ -291,7 +410,8 @@ ChartConfig LoadChartConfig(const std::filesystem::path& config_path) {
 
     const auto id = RequireString(chart_object, "id", context);
     const auto type = RequireString(chart_object, "type", context);
-    if (type != "heatmap" && type != "bar" && type != "line") {
+    if (type != "heatmap" && type != "bar" && type != "line" &&
+        type != "markdown-table") {
       throw std::runtime_error(context + ": unknown chart type '" + type + "'");
     }
 
@@ -313,9 +433,12 @@ ChartConfig LoadChartConfig(const std::filesystem::path& config_path) {
     } else if (type == "bar") {
       config.charts.push_back(MakeBarChartSpec(
           id, input, output, run_on_save, ParseBarOptions(options, context)));
-    } else {
+    } else if (type == "line") {
       config.charts.push_back(MakeLineChartSpec(
           id, input, output, run_on_save, ParseLineOptions(options, context)));
+    } else {
+      config.charts.push_back(MakeMarkdownTableChartSpec(
+          id, input, output, run_on_save, ParseMarkdownTableOptions(options, context)));
     }
   }
 

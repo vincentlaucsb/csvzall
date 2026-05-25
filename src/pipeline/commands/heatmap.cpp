@@ -3,6 +3,7 @@
 #include "../common/chart_spec.hpp"
 #include "../common/column_lookup.hpp"
 #include "../common/row_utils.hpp"
+#include "../sqlite/csv_loader.hpp"
 
 #include <svgplot/svgplot.hpp>
 
@@ -158,6 +159,79 @@ double ParseNumericField(csv::CSVField field,
   return static_cast<double>(parsed);
 }
 
+std::vector<common::ChartValueSpec> EffectiveValues(
+    const std::vector<common::ChartValueSpec>& values,
+    const std::string& legacy_column) {
+  if (!values.empty()) {
+    return values;
+  }
+  if (legacy_column.empty()) {
+    return {};
+  }
+  return {common::ChartValueSpec{legacy_column, legacy_column, ""}};
+}
+
+std::string ValueLabel(const common::ChartValueSpec& spec) {
+  return spec.label.empty() ? spec.column : spec.label;
+}
+
+std::string ValueColor(const common::ChartValueSpec& spec, std::size_t index) {
+  return spec.color.empty()
+      ? std::string(kSeriesColors[index % kSeriesColors.size()])
+      : spec.color;
+}
+
+std::string NormalizedOrientation(std::string_view raw) {
+  auto value = Trim(raw);
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::tolower(ch));
+  });
+  value.erase(
+      std::remove_if(value.begin(), value.end(), [](unsigned char ch) {
+        return ch == '_' || ch == ' ' || ch == '-';
+      }),
+      value.end());
+  return value;
+}
+
+svgplot::CalendarHeatmapOrientation ParseHeatmapOrientation(std::string_view raw) {
+  const auto value = NormalizedOrientation(raw);
+  if (value.empty() || value == "monthshorizontal" || value == "horizontal") {
+    return svgplot::CalendarHeatmapOrientation::MonthsHorizontal;
+  }
+  if (value == "monthsvertical" || value == "vertical") {
+    return svgplot::CalendarHeatmapOrientation::MonthsVertical;
+  }
+  throw std::runtime_error(
+      "orientation must be months-horizontal or months-vertical: " +
+      std::string(raw));
+}
+
+std::string NormalizedBarPresentation(std::string_view raw) {
+  auto value = Trim(raw);
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::tolower(ch));
+  });
+  value.erase(
+      std::remove_if(value.begin(), value.end(), [](unsigned char ch) {
+        return ch == '_' || ch == ' ' || ch == '-';
+      }),
+      value.end());
+  return value;
+}
+
+bool IsGroupedBarPresentation(std::string_view raw) {
+  const auto value = NormalizedBarPresentation(raw);
+  if (value.empty() || value == "stacked") {
+    return false;
+  }
+  if (value == "grouped") {
+    return true;
+  }
+  throw std::runtime_error(
+      "presentation must be stacked or grouped: " + std::string(raw));
+}
+
 bool EmitChartValidationError(const LoggerCallbacks& logger, std::string message) {
   if (logger.error) {
     logger.error(std::move(message));
@@ -170,7 +244,8 @@ bool ValidateChartSpecFields(const common::ChartSpec& spec,
   if (spec.id.empty()) {
     return EmitChartValidationError(logger, "charts: chart id is required");
   }
-  if (spec.type != "heatmap" && spec.type != "bar" && spec.type != "line") {
+  if (spec.type != "heatmap" && spec.type != "bar" && spec.type != "line" &&
+      spec.type != "markdown-table") {
     return EmitChartValidationError(logger, "charts: unknown chart type '" + spec.type + "'");
   }
   if (!spec.output) {
@@ -183,6 +258,7 @@ bool ValidateChartSpecFields(const common::ChartSpec& spec,
     }
     try {
       (void)ResolveHeatmapDateRange(spec.heatmap);
+      (void)ParseHeatmapOrientation(spec.heatmap.orientation);
     } catch (const std::exception& ex) {
       return EmitChartValidationError(logger, std::string("heatmap: ") + ex.what());
     }
@@ -192,18 +268,37 @@ bool ValidateChartSpecFields(const common::ChartSpec& spec,
     if (spec.bar.label_column.empty()) {
       return EmitChartValidationError(logger, "bar: label column is required");
     }
-    if (spec.bar.value_column.empty()) {
+    if (spec.bar.value_column.empty() && spec.bar.values.empty()) {
       return EmitChartValidationError(logger, "bar: value column is required");
+    }
+    try {
+      (void)IsGroupedBarPresentation(spec.bar.presentation);
+    } catch (const std::exception& ex) {
+      return EmitChartValidationError(logger, std::string("bar: ") + ex.what());
     }
     return true;
   }
-  if (spec.line.x_column.empty()) {
-    return EmitChartValidationError(logger, "line: x column is required");
+  if (spec.type == "line") {
+    if (spec.line.x_column.empty()) {
+      return EmitChartValidationError(logger, "line: x column is required");
+    }
+    if (spec.line.y_column.empty() && spec.line.values.empty()) {
+      return EmitChartValidationError(logger, "line: y column is required");
+    }
+    if (spec.line.values.size() > 1 && !spec.line.series_column.empty()) {
+      return EmitChartValidationError(
+          logger, "line: series column cannot be combined with multiple value columns");
+    }
+    return true;
   }
-  if (spec.line.y_column.empty()) {
-    return EmitChartValidationError(logger, "line: y column is required");
+  if (spec.type == "markdown-table") {
+    if (!spec.markdown_table.sql.empty() && !spec.markdown_table.columns.empty()) {
+      return EmitChartValidationError(
+          logger, "markdown-table: sql cannot be combined with columns");
+    }
+    return true;
   }
-  return true;
+  return EmitChartValidationError(logger, "charts: unknown chart type '" + spec.type + "'");
 }
 
 class HeatmapCommand : public CsvInputCommand {
@@ -228,12 +323,23 @@ protected:
       }
 
       std::optional<std::size_t> value_index;
-      if (!spec_.value_column.empty()) {
+      const auto value_specs = spec_.values;
+      if (value_specs.empty() && !spec_.value_column.empty()) {
         value_index =
             common::FindColumnIndex(headers(), spec_.value_column, options().exact_column_matching);
         if (!value_index) {
           throw std::runtime_error("value column not found: " + spec_.value_column);
         }
+      }
+      std::vector<std::size_t> value_indices;
+      value_indices.reserve(value_specs.size());
+      for (const auto& value_spec : value_specs) {
+        const auto index =
+            common::FindColumnIndex(headers(), value_spec.column, options().exact_column_matching);
+        if (!index) {
+          throw std::runtime_error("value column not found: " + value_spec.column);
+        }
+        value_indices.push_back(*index);
       }
 
       std::optional<std::size_t> label_index;
@@ -274,7 +380,24 @@ protected:
           label = row[*label_index].get<std::string>();
         }
 
-        cells.push_back({svgplot::parse_date(date_text), value, std::move(label)});
+        if (value_specs.empty()) {
+          cells.push_back({svgplot::parse_date(date_text), value, std::move(label)});
+        } else {
+          bool label_used = false;
+          for (std::size_t i = 0; i < value_specs.size(); ++i) {
+            const auto parsed = ParseNumericField(
+                row[value_indices[i]], value_specs[i].column, "heatmap");
+            if (parsed <= 0.0) {
+              continue;
+            }
+            cells.push_back({
+                svgplot::parse_date(date_text),
+                parsed,
+                label_used ? std::string{} : label,
+                {value_specs[i].column}});
+            label_used = true;
+          }
+        }
         ++stats().rows_processed;
         common::AccumulateRowBytes(row, stats());
       }
@@ -284,6 +407,16 @@ protected:
       chart_options.title = spec_.title;
       chart_options.start_date = svgplot::parse_date(start_date);
       chart_options.end_date = svgplot::parse_date(end_date);
+      chart_options.orientation = ParseHeatmapOrientation(spec_.orientation);
+      if (!value_specs.empty()) {
+        chart_options.categories.reserve(value_specs.size());
+        for (std::size_t i = 0; i < value_specs.size(); ++i) {
+          chart_options.categories.push_back({
+              value_specs[i].column,
+              ValueLabel(value_specs[i]),
+              ValueColor(value_specs[i], i)});
+        }
+      }
       output_ << svgplot::heatmap_chart(cells, chart_options).str() << '\n';
       return 0;
     } catch (const std::exception& ex) {
@@ -319,38 +452,88 @@ protected:
       if (!label_index) {
         throw std::runtime_error("label column not found: " + spec_.label_column);
       }
-      const auto value_index =
-          common::FindColumnIndex(headers(), spec_.value_column, options().exact_column_matching);
-      if (!value_index) {
-        throw std::runtime_error("value column not found: " + spec_.value_column);
-      }
-
-      std::vector<std::string> order;
-      std::map<std::string, double> totals;
-      for (auto& row : reader()) {
-        const auto label = row[*label_index].get<std::string>();
-        if (!totals.contains(label)) {
-          order.push_back(label);
-        }
-        totals[label] += ParseNumericField(row[*value_index], spec_.value_column, "bar");
-        ++stats().rows_processed;
-        common::AccumulateRowBytes(row, stats());
-      }
-
-      std::vector<svgplot::Bar> bars;
-      bars.reserve(order.size());
-      for (std::size_t i = 0; i < order.size(); ++i) {
-        bars.push_back({
-            order[i],
-            totals[order[i]],
-            std::string(kSeriesColors[i % kSeriesColors.size()])});
-      }
 
       svgplot::ChartOptions chart_options;
       chart_options.title = spec_.title;
       chart_options.x_label = spec_.x_label;
       chart_options.y_label = spec_.y_label;
-      output_ << svgplot::bar_chart(bars, chart_options).str() << '\n';
+
+      const auto value_specs = EffectiveValues(spec_.values, spec_.value_column);
+      if (value_specs.size() <= 1) {
+        const auto value_index =
+            common::FindColumnIndex(headers(), value_specs.front().column, options().exact_column_matching);
+        if (!value_index) {
+          throw std::runtime_error("value column not found: " + value_specs.front().column);
+        }
+
+        std::vector<std::string> order;
+        std::map<std::string, double> totals;
+        for (auto& row : reader()) {
+          const auto label = row[*label_index].get<std::string>();
+          if (!totals.contains(label)) {
+            order.push_back(label);
+          }
+          totals[label] += ParseNumericField(row[*value_index], value_specs.front().column, "bar");
+          ++stats().rows_processed;
+          common::AccumulateRowBytes(row, stats());
+        }
+
+        std::vector<svgplot::Bar> bars;
+        bars.reserve(order.size());
+        for (std::size_t i = 0; i < order.size(); ++i) {
+          bars.push_back({
+              order[i],
+              totals[order[i]],
+              std::string(kSeriesColors[i % kSeriesColors.size()])});
+        }
+        output_ << svgplot::bar_chart(bars, chart_options).str() << '\n';
+        return 0;
+      }
+
+      std::vector<std::size_t> value_indices;
+      value_indices.reserve(value_specs.size());
+      for (const auto& value_spec : value_specs) {
+        const auto index =
+            common::FindColumnIndex(headers(), value_spec.column, options().exact_column_matching);
+        if (!index) {
+          throw std::runtime_error("value column not found: " + value_spec.column);
+        }
+        value_indices.push_back(*index);
+      }
+
+      std::vector<std::string> order;
+      std::map<std::string, std::vector<double>> totals;
+      for (auto& row : reader()) {
+        const auto label = row[*label_index].get<std::string>();
+        if (!totals.contains(label)) {
+          order.push_back(label);
+          totals[label] = std::vector<double>(value_specs.size(), 0.0);
+        }
+        for (std::size_t i = 0; i < value_specs.size(); ++i) {
+          totals[label][i] += ParseNumericField(row[value_indices[i]], value_specs[i].column, "bar");
+        }
+        ++stats().rows_processed;
+        common::AccumulateRowBytes(row, stats());
+      }
+
+      svgplot::BarChart chart;
+      const auto grouped = IsGroupedBarPresentation(spec_.presentation);
+      for (const auto& label : order) {
+        std::vector<svgplot::BarSegment> segments;
+        segments.reserve(value_specs.size());
+        for (std::size_t i = 0; i < value_specs.size(); ++i) {
+          segments.push_back({
+              ValueLabel(value_specs[i]),
+              totals[label][i],
+              ValueColor(value_specs[i], i)});
+        }
+        if (grouped) {
+          chart.grouped_bar(label, std::move(segments));
+        } else {
+          chart.stacked_bar(label, std::move(segments));
+        }
+      }
+      output_ << chart.render(chart_options).str() << '\n';
       return 0;
     } catch (const std::exception& ex) {
       if (logger().error) {
@@ -385,11 +568,7 @@ protected:
       if (!x_index) {
         throw std::runtime_error("x column not found: " + spec_.x_column);
       }
-      const auto y_index =
-          common::FindColumnIndex(headers(), spec_.y_column, options().exact_column_matching);
-      if (!y_index) {
-        throw std::runtime_error("y column not found: " + spec_.y_column);
-      }
+      const auto value_specs = EffectiveValues(spec_.values, spec_.y_column);
 
       std::optional<std::size_t> series_index;
       if (!spec_.series_column.empty()) {
@@ -398,6 +577,54 @@ protected:
         if (!series_index) {
           throw std::runtime_error("series column not found: " + spec_.series_column);
         }
+      }
+
+      if (value_specs.size() > 1) {
+        std::vector<std::size_t> value_indices;
+        value_indices.reserve(value_specs.size());
+        for (const auto& value_spec : value_specs) {
+          const auto index =
+              common::FindColumnIndex(headers(), value_spec.column, options().exact_column_matching);
+          if (!index) {
+            throw std::runtime_error("y column not found: " + value_spec.column);
+          }
+          value_indices.push_back(*index);
+        }
+
+        std::vector<std::vector<svgplot::Point>> points_by_value(value_specs.size());
+        for (auto& row : reader()) {
+          const auto x = ParseNumericField(row[*x_index], spec_.x_column, "line x");
+          for (std::size_t i = 0; i < value_specs.size(); ++i) {
+            points_by_value[i].push_back({
+                x,
+                ParseNumericField(row[value_indices[i]], value_specs[i].column, "line y")});
+          }
+          ++stats().rows_processed;
+          common::AccumulateRowBytes(row, stats());
+        }
+
+        std::vector<svgplot::Series> series;
+        series.reserve(value_specs.size());
+        for (std::size_t i = 0; i < value_specs.size(); ++i) {
+          auto& points = points_by_value[i];
+          std::sort(points.begin(), points.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.x < rhs.x;
+          });
+          series.push_back({ValueLabel(value_specs[i]), std::move(points), ValueColor(value_specs[i], i)});
+        }
+
+        svgplot::ChartOptions chart_options;
+        chart_options.title = spec_.title;
+        chart_options.x_label = spec_.x_label;
+        chart_options.y_label = spec_.y_label;
+        output_ << svgplot::line_chart(series, chart_options).str() << '\n';
+        return 0;
+      }
+
+      const auto y_index =
+          common::FindColumnIndex(headers(), value_specs.front().column, options().exact_column_matching);
+      if (!y_index) {
+        throw std::runtime_error("y column not found: " + value_specs.front().column);
       }
 
       std::vector<std::string> order;
@@ -411,7 +638,7 @@ protected:
         }
         points_by_series[series].push_back({
             ParseNumericField(row[*x_index], spec_.x_column, "line x"),
-            ParseNumericField(row[*y_index], spec_.y_column, "line y")});
+            ParseNumericField(row[*y_index], value_specs.front().column, "line y")});
         ++stats().rows_processed;
         common::AccumulateRowBytes(row, stats());
       }
@@ -451,6 +678,24 @@ int RenderChartToStream(const common::ChartSpec& spec,
                         const RunOptions& options,
                         const LoggerCallbacks& logger,
                         RunStats& stats) {
+  if (spec.type == "markdown-table") {
+    std::string query = spec.markdown_table.sql;
+    if (query.empty()) {
+      if (spec.markdown_table.columns.empty()) {
+        query = "SELECT * FROM data";
+      } else {
+        query = "SELECT ";
+        for (std::size_t i = 0; i < spec.markdown_table.columns.size(); ++i) {
+          if (i > 0) {
+            query += ", ";
+          }
+          query += sqlite::QuoteIdentifier(spec.markdown_table.columns[i]);
+        }
+        query += " FROM data";
+      }
+    }
+    return RunSqlQueryCsv(query, "data", "markdown", input, output, options, logger, stats);
+  }
   if (spec.type == "heatmap") {
     return RunHeatmap(spec.heatmap, input, output, options, logger, stats);
   }

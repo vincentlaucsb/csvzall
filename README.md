@@ -272,6 +272,44 @@ the chart renderer, and the SVG is written to stdout so it can be redirected or
 piped like any other csvzall command. The command is built when csvzall is
 configured with a local `svgplot` checkout.
 
+### `charts run [id] [--config <path>]`
+
+Run configured generated artifacts from `.csvzall/charts.json`. Existing chart
+types render SVG (`heatmap`, `bar`, `line`); `markdown-table` renders an
+escaped Markdown table note that can be embedded in Obsidian with
+`![[path/to/output]]`. Relative `input` and `output` paths resolve against the
+vault or config root, and `runOnSave` lets the Obsidian plugin regenerate the
+artifact when the source CSV changes.
+
+```json
+{
+  "charts": [
+    {
+      "id": "monthly-summary",
+      "type": "markdown-table",
+      "input": "activity-store.csv",
+      "output": "Reports/generated/monthly-summary.md",
+      "runOnSave": true,
+      "options": {
+        "sql": "SELECT substr(completed_at, 1, 7) AS month, COUNT(*) AS days FROM data GROUP BY month ORDER BY month"
+      }
+    },
+    {
+      "id": "recent-events",
+      "type": "markdown-table",
+      "input": "activity-store.csv",
+      "output": "Reports/generated/recent-events.md",
+      "options": {
+        "columns": ["completed_at", "content", "due_date"]
+      }
+    }
+  ]
+}
+```
+
+If neither `sql` nor `columns` is provided, `markdown-table` exports all CSV
+columns. Pass `--validate` to check selected configs without writing output.
+
 ### `append <existing.csv> <incoming.csv> [--in-place]`
 
 Append one CSV to another after validating that headers match exactly. Without
@@ -401,13 +439,17 @@ Windows users can build, install, and add `csvzall` to PATH with:
 
 By default this installs to `C:\Program Files\csvzall`, adds
 `C:\Program Files\csvzall\bin` to the machine PATH, and relaunches with a
-Windows UAC prompt if Administrator rights are required.
+Windows UAC prompt if Administrator rights are required. The installer refuses
+to install a build without SVG chart support because `csvzall view` and
+Obsidian/plugin chart workflows rely on the `charts` command.
 
 For a per-user install that does not require elevation:
 
 ```powershell
 .\scripts\Install-csvzall.ps1 -InstallPrefix "$env:LOCALAPPDATA\csvzall" -PathScope User
 ```
+
+For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 
 ## Dependencies
 

@@ -175,20 +175,32 @@ html, body {
   font-size: 0.78rem;
 }
 
-.dialog-form input {
+.dialog-form input,
+.dialog-form textarea {
   width: 100%;
-  height: 32px;
   padding: 0 0.55rem;
   border: 1px solid var(--csvzall-border);
   border-radius: var(--radius-s, 4px);
   background: var(--csvzall-background-primary);
   color: var(--csvzall-text-normal);
   font: inherit;
+}
+
+.dialog-form input {
+  height: 32px;
+}
+
+.dialog-form textarea {
+  min-height: 6rem;
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+  line-height: 1.35;
+  resize: vertical;
 }
 
 .dialog-form select {
   width: 100%;
-  height: 32px;
+  min-height: 32px;
   padding: 0 0.55rem;
   border: 1px solid var(--csvzall-border);
   border-radius: var(--radius-s, 4px);
@@ -197,7 +209,8 @@ html, body {
   font: inherit;
 }
 
-.dialog-form input:focus {
+.dialog-form input:focus,
+.dialog-form textarea:focus {
   border-color: var(--csvzall-accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--csvzall-accent) 18%, transparent);
   outline: none;
@@ -323,7 +336,7 @@ html, body {
 }
 
 .dialog-grid:first-of-type {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .toggle-row {
@@ -343,6 +356,13 @@ html, body {
   margin: 0;
   color: var(--text-error, #d14);
   font-size: 0.78rem;
+}
+
+.dialog-form input[aria-invalid="true"],
+.dialog-form select[aria-invalid="true"],
+.dialog-form textarea[aria-invalid="true"] {
+  border-color: var(--text-error, #d14);
+  box-shadow: 0 0 0 1px var(--text-error, #d14);
 }
 
 .dialog-actions {

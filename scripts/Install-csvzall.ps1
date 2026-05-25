@@ -13,6 +13,13 @@ relaunches itself with a UAC prompt.
 .\scripts\Install-csvzall.ps1 -InstallPrefix "$env:LOCALAPPDATA\csvzall" -PathScope User
 
 Installs for the current user without requiring elevation.
+
+.EXAMPLE
+.\scripts\Install-csvzall.ps1 -AllowNoSvg
+
+Installs a build without SVG chart support. This is only for intentionally
+minimal installs; Obsidian/plugin chart rendering requires the default SVG
+chart-enabled build.
 #>
 
 [CmdletBinding()]
@@ -42,7 +49,9 @@ param(
 
     [switch]$NoPath,
 
-    [switch]$NoElevate
+    [switch]$NoElevate,
+
+    [switch]$AllowNoSvg
 )
 
 Set-StrictMode -Version Latest
@@ -90,6 +99,22 @@ function Get-CMakeCacheValue {
     }
 
     return ($line -replace '^[^=]*=', '')
+}
+
+function Test-CMakeFalseValue {
+    param([AllowEmptyString()][string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+
+    return $Value -match '^(0|FALSE|OFF|NO|N)$'
+}
+
+function Test-CMakeSvgPlotExplicitlyDisabled {
+    param([Parameter(Mandatory)][string]$BuildDir)
+
+    return Test-CMakeFalseValue (Get-CMakeCacheValue -BuildDir $BuildDir -Name 'CSVZALL_ENABLE_SVGPLOT')
 }
 
 function Test-MsvcCMakeBuild {
@@ -212,7 +237,10 @@ function Import-VisualStudioDevEnvironment {
 }
 
 function Find-MostRecentCMakeBuildDir {
-    param([Parameter(Mandatory)][string]$SourceDir)
+    param(
+        [Parameter(Mandatory)][string]$SourceDir,
+        [Parameter(Mandatory)][bool]$AllowNoSvg
+    )
 
     $buildRoot = Join-Path $SourceDir 'out\build'
     if (-not (Test-Path $buildRoot)) {
@@ -227,6 +255,10 @@ function Find-MostRecentCMakeBuildDir {
         $dir = $exe.Directory
         while ($null -ne $dir -and $dir.FullName.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCase)) {
             if (Test-Path (Join-Path $dir.FullName 'CMakeCache.txt')) {
+                if ((-not $AllowNoSvg) -and (Test-CMakeSvgPlotExplicitlyDisabled -BuildDir $dir.FullName)) {
+                    Write-Host "Skipping no-SVG CMake build directory: $($dir.FullName)"
+                    break
+                }
                 return $dir.FullName
             }
             $dir = $dir.Parent
@@ -244,6 +276,22 @@ function Find-MostRecentCMakeBuildDir {
 
     if ($null -eq $cache) {
         return $null
+    }
+
+    if ((-not $AllowNoSvg) -and (Test-CMakeSvgPlotExplicitlyDisabled -BuildDir $cache.DirectoryName)) {
+        $cache = Get-ChildItem -Path $buildRoot -Recurse -Filter CMakeCache.txt -File |
+            Where-Object {
+                $_.DirectoryName -notmatch '\\_deps\\' -and
+                $_.DirectoryName -notmatch '\\CMakeFiles\\CMakeScratch\\' -and
+                $_.DirectoryName -notlike (Join-Path $buildRoot 'install') -and
+                -not (Test-CMakeSvgPlotExplicitlyDisabled -BuildDir $_.DirectoryName)
+            } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+
+        if ($null -eq $cache) {
+            return $null
+        }
     }
 
     return $cache.DirectoryName
@@ -348,6 +396,49 @@ function Find-BuiltCsvzallExe {
     return $null
 }
 
+function Test-CsvzallSvgChartSupport {
+    param([Parameter(Mandatory)][string]$ExePath)
+
+    if (-not (Test-Path $ExePath)) {
+        return $false
+    }
+
+    $output = & $ExePath charts --help 2>&1
+    $exitCode = $LASTEXITCODE
+    $text = $output -join "`n"
+
+    return $exitCode -eq 0 -and $text -match 'csvzall charts run'
+}
+
+function Assert-CsvzallSvgChartSupport {
+    param(
+        [Parameter(Mandatory)][string]$ExePath,
+        [Parameter(Mandatory)][bool]$AllowNoSvg
+    )
+
+    if ($AllowNoSvg) {
+        Write-Warning "Installing without requiring SVG chart support because -AllowNoSvg was supplied."
+        return
+    }
+
+    if (Test-CsvzallSvgChartSupport -ExePath $ExePath) {
+        return
+    }
+
+    throw @"
+Refusing to install a csvzall.exe without SVG chart support: $ExePath
+
+The installed binary must include the 'charts' command so viewer/Obsidian chart
+workflows can render SVG files. The selected build was likely configured with
+CSVZALL_ENABLE_SVGPLOT=OFF, or CMake could not find compatible svgplot/svg
+checkouts.
+
+Use an SVG-enabled build directory, configure with -DSVGPLOT_ROOT=<path> and
+-DSVG_ROOT=<path>, or pass -AllowNoSvg only for installs that intentionally
+disable chart rendering.
+"@
+}
+
 function Install-CsvzallExe {
     param(
         [Parameter(Mandatory)][string]$SourceExe,
@@ -385,7 +476,7 @@ function Stop-InstallTranscript {
 
 $SourceDir = Resolve-FullPath $SourceDir
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
-    $recentBuildDir = Find-MostRecentCMakeBuildDir -SourceDir $SourceDir
+    $recentBuildDir = Find-MostRecentCMakeBuildDir -SourceDir $SourceDir -AllowNoSvg ([bool]$AllowNoSvg)
     if ($null -ne $recentBuildDir) {
         $BuildDir = $recentBuildDir
         Write-Host "Using most recent CMake build directory: $BuildDir"
@@ -480,6 +571,8 @@ else {
     Write-Host "Finalizing install from built executable: $CopyFromExe"
 }
 
+Assert-CsvzallSvgChartSupport -ExePath $CopyFromExe -AllowNoSvg ([bool]$AllowNoSvg)
+
 if ($needsAdmin -and -not $isAdmin) {
     if ($NoElevate) {
         throw "Installing to '$InstallPrefix' or setting Machine PATH requires Administrator rights. Rerun elevated or use -InstallPrefix `"$env:LOCALAPPDATA\csvzall`" -PathScope User."
@@ -509,6 +602,7 @@ if ($needsAdmin -and -not $isAdmin) {
         $relayArgs += $arg
     }
     if ($NoPath) { $relayArgs += '-NoPath' }
+    if ($AllowNoSvg) { $relayArgs += '-AllowNoSvg' }
 
     $quotedRelayArgs = $relayArgs | ForEach-Object { Quote-Argument $_ }
     $powerShellExe = (Get-Process -Id $PID).Path

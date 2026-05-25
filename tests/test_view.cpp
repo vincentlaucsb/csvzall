@@ -95,6 +95,30 @@ TEST_CASE("view: loads CSV rows with shared parser behavior") {
   std::filesystem::remove(path);
 }
 
+TEST_CASE("view: empty CSV reports a helpful header message") {
+  const auto path = WriteTempCsv("", "csvzall_view_empty.csv");
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  pipeline::RunStats stats;
+  std::ostringstream output;
+  std::string error;
+  auto logger = tests::MakeNullLogger();
+  logger.error = [&error](const std::string& message) {
+    error = message;
+  };
+
+  const auto rc = pipeline::commands::RunView(
+      path.string(), output, options, logger, stats, 0, false, true, true);
+
+  REQUIRE(rc == 1);
+  CHECK(error.find("CSV file is empty") != std::string::npos);
+  CHECK(error.find("header row") != std::string::npos);
+  CHECK(output.str().empty());
+
+  std::filesystem::remove(path);
+}
+
 TEST_CASE("csv-parser: CSVRow byte_offset reports data row source offsets") {
   SECTION("LF rows") {
     const auto text = std::string{"a,b\n1,2\n3,4\n"};
@@ -260,9 +284,21 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer->body.find("csvzall view") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"add-chart\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"heatmap-chart-dialog\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"heatmap-chart-form\" class=\"dialog-form\" novalidate") !=
+          std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-type\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"chart-orientation\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"chart-presentation\"") != std::string::npos);
+  REQUIRE(viewer->body.find("value=\"markdown-table\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"chart-markdown-columns\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"chart-markdown-sql\"") != std::string::npos);
   REQUIRE(viewer->body.find("Weight column") != std::string::npos);
   REQUIRE(viewer->body.find(">Bar</option>") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"chart-id\" type=\"text\" autocomplete=\"off\" required") ==
+          std::string::npos);
+  REQUIRE(viewer->body.find("id=\"chart-date-column\" required") == std::string::npos);
+  REQUIRE(viewer->body.find("id=\"chart-output\" type=\"text\" autocomplete=\"off\" required") ==
+          std::string::npos);
 
   const auto viewer_js = client.Get("/assets/viewer.js");
   REQUIRE(viewer_js);
@@ -270,8 +306,13 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer_js->body.find("csvzallViewBootstrap") != std::string::npos);
   REQUIRE(viewer_js->body.find("/api/chart-config/heatmap") != std::string::npos);
   REQUIRE(viewer_js->body.find("chartType.value") != std::string::npos);
+  REQUIRE(viewer_js->body.find("markdown-table") != std::string::npos);
+  REQUIRE(viewer_js->body.find("selectedMarkdownColumns") != std::string::npos);
   REQUIRE(viewer_js->body.find("missingChartFields") == std::string::npos);
   REQUIRE(viewer_js->body.find("Complete the required fields") == std::string::npos);
+  REQUIRE(viewer_js->body.find(".required") == std::string::npos);
+  REQUIRE(viewer_js->body.find("checkValidity") == std::string::npos);
+  REQUIRE(viewer_js->body.find("aria-invalid") != std::string::npos);
   REQUIRE(viewer_js->body.find("await loadChartList();\n        clearChartError();") !=
           std::string::npos);
 
@@ -383,7 +424,7 @@ TEST_CASE("view: Add chart endpoint creates heatmap config without editing CSV")
   REQUIRE(response->body.find("\"generated\":true") != std::string::npos);
 #else
   REQUIRE(response->status == 400);
-  REQUIRE(response->body.find("heatmap rendering is disabled") != std::string::npos);
+  REQUIRE(response->body.find("SVG chart rendering is disabled") != std::string::npos);
 #endif
 
   const auto config_text = ReadTextFile(dir / ".csvzall" / "charts.json");
@@ -406,6 +447,109 @@ TEST_CASE("view: Add chart endpoint creates heatmap config without editing CSV")
 
   std::filesystem::remove_all(dir);
 }
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+TEST_CASE("view: Add chart endpoint creates markdown table config and output") {
+  const auto dir = TempDir("csvzall_view_markdown_table_config");
+  const auto path = dir / "events.csv";
+  {
+    std::ofstream output(path, std::ios::binary);
+    output << "date,content,count\n2026-01-01,Gym|Lift,1\n";
+  }
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_mode = pipeline::ViewModeSelection::Paged;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, false, "test-token"}) == 0);
+
+  httplib::Client client("127.0.0.1", server.bound_port());
+  client.set_connection_timeout(2, 0);
+  client.set_read_timeout(2, 0);
+  client.set_write_timeout(2, 0);
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto response = client.Post(
+      "/api/chart-config/heatmap",
+      headers,
+      R"({"type":"markdown-table","id":"events-table","columns":["content","date"],"output":"charts/events.md","runOnSave":true})",
+      "application/json");
+  REQUIRE(response);
+  REQUIRE(response->status == 200);
+  REQUIRE(response->body.find("\"generated\":true") != std::string::npos);
+
+  const auto config_text = ReadTextFile(dir / ".csvzall" / "charts.json");
+  CHECK(config_text.find("\"type\": \"markdown-table\"") != std::string::npos);
+  CHECK(config_text.find("\"columns\": [\"content\", \"date\"]") != std::string::npos);
+  CHECK(config_text.find("\"output\": \"charts/events.md\"") != std::string::npos);
+
+  const auto markdown = ReadTextFile(dir / "charts" / "events.md");
+  CHECK(markdown.find("| content   | date       |") != std::string::npos);
+  CHECK(markdown.find("Gym\\|Lift") != std::string::npos);
+  CHECK(markdown.find("count") == std::string::npos);
+
+  std::filesystem::remove_all(dir);
+}
+#endif
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+TEST_CASE("view edit: save regenerates runOnSave markdown table outputs") {
+  const auto dir = TempDir("csvzall_view_markdown_table_save");
+  const auto path = dir / "events.csv";
+  std::filesystem::create_directories(dir / ".csvzall");
+  {
+    std::ofstream output(path, std::ios::binary);
+    output << "name,value\nalpha,1\ngamma,3\n";
+  }
+  {
+    std::ofstream config(dir / ".csvzall" / "charts.json", std::ios::binary);
+    config
+        << "{\n"
+        << "  \"charts\": [\n"
+        << "    {\"id\":\"events-table\",\"type\":\"markdown-table\",\"input\":\"events.csv\","
+        << "\"output\":\"charts/events.md\",\"runOnSave\":true,"
+        << "\"options\":{\"columns\":[\"name\",\"value\"]}}\n"
+        << "  ]\n"
+        << "}\n";
+  }
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_edit = true;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, true, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  client.set_connection_timeout(2, 0);
+  client.set_read_timeout(2, 0);
+  client.set_write_timeout(2, 0);
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto insert = client.Post(
+      "/api/insert-row", headers, R"({"row":1,"values":["beta","2"]})",
+      "application/json");
+  REQUIRE(insert);
+  REQUIRE(insert->status == 200);
+  const auto save = client.Post("/api/save", headers, "{}", "application/json");
+  REQUIRE(save);
+  REQUIRE(save->status == 200);
+  CHECK(save->body.find("\"chartsGenerated\":1") != std::string::npos);
+  server.Stop();
+
+  const auto markdown = ReadTextFile(dir / "charts" / "events.md");
+  CHECK(markdown.find("| beta  | 2     |") != std::string::npos);
+  CHECK(markdown.find("| gamma | 3     |") != std::string::npos);
+
+  std::filesystem::remove_all(dir);
+}
+#endif
 
 TEST_CASE("view: Add chart endpoint lists and upserts current CSV charts") {
   const auto dir = TempDir("csvzall_view_chart_config_existing");
@@ -495,7 +639,7 @@ TEST_CASE("view: Add chart endpoint creates bar chart configs") {
   const auto path = dir / "volume.csv";
   {
     std::ofstream output(path, std::ios::binary);
-    output << "week,volume\n1,100\n2,125\n";
+    output << "week,volume,cardio\n1,100,25\n2,125,30\n";
   }
 
   pipeline::RunOptions options;
@@ -517,7 +661,7 @@ TEST_CASE("view: Add chart endpoint creates bar chart configs") {
   const auto response = client.Post(
       "/api/chart-config/heatmap",
       headers,
-      R"({"type":"bar","id":"volume-bar","label":"week","value":"volume","title":"Volume","output":"charts/volume.svg","runOnSave":true})",
+      R"({"type":"bar","id":"volume-bar","label":"week","values":["volume","cardio"],"presentation":"grouped","title":"Volume","output":"charts/volume.svg","runOnSave":true})",
       "application/json");
   REQUIRE(response);
   REQUIRE(response->status == 200);
@@ -525,8 +669,54 @@ TEST_CASE("view: Add chart endpoint creates bar chart configs") {
   const auto config_text = ReadTextFile(dir / ".csvzall" / "charts.json");
   CHECK(config_text.find("\"type\": \"bar\"") != std::string::npos);
   CHECK(config_text.find("\"label\": \"week\"") != std::string::npos);
-  CHECK(config_text.find("\"value\": \"volume\"") != std::string::npos);
-  CHECK(ReadTextFile(dir / "charts" / "volume.svg").find("class=\"bar") != std::string::npos);
+  CHECK(config_text.find("\"column\": \"volume\"") != std::string::npos);
+  CHECK(config_text.find("\"column\": \"cardio\"") != std::string::npos);
+  CHECK(config_text.find("\"presentation\": \"grouped\"") != std::string::npos);
+  CHECK(ReadTextFile(dir / "charts" / "volume.svg").find("class=\"bar bar-grouped") != std::string::npos);
+
+  std::filesystem::remove_all(dir);
+}
+#endif
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+TEST_CASE("view: Add chart endpoint creates multi-value heatmap configs") {
+  const auto dir = TempDir("csvzall_view_multi_value_chart_config");
+  const auto path = dir / "training.csv";
+  {
+    std::ofstream output(path, std::ios::binary);
+    output << "date,gym,bike,note\n2026-01-01,1,0,Squat\n2026-01-02,1,1,Brick\n";
+  }
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_mode = pipeline::ViewModeSelection::Paged;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, false, "test-token"}) == 0);
+
+  httplib::Client client("127.0.0.1", server.bound_port());
+  client.set_connection_timeout(2, 0);
+  client.set_read_timeout(2, 0);
+  client.set_write_timeout(2, 0);
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto response = client.Post(
+      "/api/chart-config/heatmap",
+      headers,
+      R"({"id":"training-heatmap","date":"date","values":["gym","bike"],"label":"note","start":"2026-01-01","end":"2026-01-07","orientation":"months-vertical","title":"Training","output":"charts/training.svg","runOnSave":true})",
+      "application/json");
+  REQUIRE(response);
+  REQUIRE(response->status == 200);
+
+  const auto config_text = ReadTextFile(dir / ".csvzall" / "charts.json");
+  CHECK(config_text.find("\"values\":") != std::string::npos);
+  CHECK(config_text.find("\"column\": \"gym\"") != std::string::npos);
+  CHECK(config_text.find("\"column\": \"bike\"") != std::string::npos);
+  CHECK(config_text.find("\"orientation\": \"months-vertical\"") != std::string::npos);
+  CHECK(ReadTextFile(dir / "charts" / "training.svg").find("gym + bike") != std::string::npos);
 
   std::filesystem::remove_all(dir);
 }

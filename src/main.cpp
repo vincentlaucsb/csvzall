@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -280,6 +281,19 @@ std::optional<csvzall::pipeline::ViewModeSelection> ParseViewMode(const std::str
   if (s == "materialized") return csvzall::pipeline::ViewModeSelection::Materialized;
   if (s == "paged") return csvzall::pipeline::ViewModeSelection::Paged;
   return std::nullopt;
+}
+
+csvzall::pipeline::common::ChartValueSpec ParseChartValueArg(const std::string& raw) {
+  const auto pos = raw.find('=');
+  if (pos == std::string::npos) {
+    return {raw, raw, ""};
+  }
+  auto column = raw.substr(0, pos);
+  auto label = raw.substr(pos + 1);
+  if (label.empty()) {
+    label = column;
+  }
+  return {std::move(column), std::move(label), ""};
 }
 
 std::string GetEnvString(const char* name) {
@@ -690,9 +704,13 @@ Examples:
   heatmap_cmd.add_epilog(R"(Input CSV shape:
   A date column is required. It must contain ISO YYYY-MM-DD dates.
   A numeric value column is optional. If omitted, each row contributes 1.
+  Repeat --value to render a multi-value categorical heatmap.
+  Multi-value labels can be written as --value column=Label.
   A label column is optional. Labels are included in SVG cell tooltips.
   Duplicate dates are aggregated by summing values or row counts.
   Rows outside --start/--end or --lookback are ignored by the chart renderer.
+  --orientation months-vertical flips months to the vertical axis and weekdays
+  to the horizontal axis for narrow embeds.
 
 Examples:
   csvzall heatmap gym-attendance.csv --start 2025-05-15 --end 2026-05-15 --date date --title "Gym Attendance" > gym.svg
@@ -700,6 +718,8 @@ Examples:
   csvzall heatmap gym-attendance.csv --lookback 365d --date date --output gym.svg
   csvzall heatmap gym-attendance.csv --start 2025-05-15 --end 2026-05-15 --date date --output gym.svg
   csvzall heatmap daily-counts.csv --start 2026-01-01 --end 2026-12-31 --date day --value count --label note > heatmap.svg
+  csvzall heatmap training.csv --lookback 1y --date date --value gym=Gym --value bike=Bike --label note --output training.svg
+  csvzall heatmap training.csv --lookback 1y --date date --orientation months-vertical --output training.svg
 )");
   AddCsvInputArguments(heatmap_cmd);
   AddExactArgument(heatmap_cmd);
@@ -716,14 +736,18 @@ Examples:
       .help("Date column name (default: date)")
       .default_value(std::string{"date"});
   heatmap_cmd.add_argument("--value")
-      .help("Optional numeric weight column for intensity/duration/counts. Omit it for attendance-style row counting.")
-      .default_value(std::string{});
+      .help("Optional numeric weight column. Repeat for multi-value heatmaps; use column=Label to name a value.")
+      .default_value(std::vector<std::string>{})
+      .append();
   heatmap_cmd.add_argument("--label")
       .help("Optional label column to include in SVG tooltips")
       .default_value(std::string{});
   heatmap_cmd.add_argument("--title")
       .help("Optional SVG title")
       .default_value(std::string{});
+  heatmap_cmd.add_argument("--orientation")
+      .help("Calendar layout: months-horizontal (default) or months-vertical")
+      .default_value(std::string{"months-horizontal"});
   heatmap_cmd.add_argument("--output")
       .help("Optional SVG output file path. If omitted, SVG is written to stdout.")
       .default_value(std::string{});
@@ -734,7 +758,16 @@ Examples:
   charts_cmd.add_epilog(R"(charts run contract:
   Loads JSON chart objects from .csvzall/charts.json by default:
   {"charts":[{"id":"gym","type":"heatmap","input":"gym.csv","output":"gym.svg","options":{"date":"date","lookback":"1y"}}]}
-  Supported chart types: heatmap, bar, line.
+  Supported chart types: heatmap, bar, line, markdown-table.
+  Bar, line, and heatmap options accept either legacy "value"/"y" keys or a
+  multi-dataset "values" array such as [{"column":"gym","label":"Gym"}].
+  Multi-dataset bar charts can set "presentation" to "stacked" or "grouped".
+  Heatmap options can set "orientation" to "months-horizontal" or
+  "months-vertical".
+  Markdown-table options accept "sql" for a custom SELECT, "columns" for a
+  simple SELECT column list, or neither to export all CSV columns. Markdown
+  table outputs are Obsidian-friendly generated notes that can be embedded with
+  ![[path/to/output]].
   Use --config <path> to choose another chart config.
   Relative input and output paths resolve against the config root.
   Configured charts require explicit output paths and overwrite existing outputs.
@@ -1295,12 +1328,23 @@ Examples:
 
     csvzall::pipeline::common::HeatmapSpec heatmap_spec;
     heatmap_spec.date_column = heatmap_cmd.get<std::string>("--date");
-    heatmap_spec.value_column = heatmap_cmd.get<std::string>("--value");
+    const auto value_args = heatmap_cmd.get<std::vector<std::string>>("--value");
+    if (value_args.size() == 1 && value_args.front().find('=') == std::string::npos) {
+      heatmap_spec.value_column = value_args.front();
+    } else {
+      heatmap_spec.values.reserve(value_args.size());
+      for (const auto& value_arg : value_args) {
+        if (!value_arg.empty()) {
+          heatmap_spec.values.push_back(ParseChartValueArg(value_arg));
+        }
+      }
+    }
     heatmap_spec.label_column = heatmap_cmd.get<std::string>("--label");
     heatmap_spec.start_date = heatmap_cmd.get<std::string>("--start");
     heatmap_spec.end_date = heatmap_cmd.get<std::string>("--end");
     heatmap_spec.lookback = heatmap_cmd.get<std::string>("--lookback");
     heatmap_spec.title = heatmap_cmd.get<std::string>("--title");
+    heatmap_spec.orientation = heatmap_cmd.get<std::string>("--orientation");
 
     std::unique_ptr<std::ofstream> output_file;
     std::ostream* output = &std::cout;

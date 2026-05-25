@@ -54,7 +54,7 @@
     </form>
   </dialog>
   <dialog id="heatmap-chart-dialog" class="csvzall-dialog chart-dialog">
-    <form id="heatmap-chart-form" class="dialog-form">
+    <form id="heatmap-chart-form" class="dialog-form" novalidate>
       <div class="chart-dialog-layout">
         <aside class="chart-list-pane">
           <div class="chart-list-header">
@@ -71,32 +71,55 @@
               <option value="heatmap">Heatmap</option>
               <option value="bar">Bar</option>
               <option value="line">Line</option>
+              <option value="markdown-table">Markdown Table</option>
             </select>
           </label>
           <label>
             <span>Chart id</span>
-            <input id="chart-id" type="text" autocomplete="off" required>
+            <input id="chart-id" type="text" autocomplete="off">
           </label>
-          <label>
+          <label id="chart-title-field">
             <span>Title</span>
             <input id="chart-title" type="text" autocomplete="off">
           </label>
-          <div class="dialog-grid">
+          <div id="chart-column-grid" class="dialog-grid">
             <label>
               <span id="chart-primary-column-label">Date column</span>
-              <select id="chart-date-column" required></select>
+              <select id="chart-date-column"></select>
             </label>
             <label>
               <span id="chart-value-column-label">Weight column</span>
               <select id="chart-value-column"></select>
+            </label>
+            <label id="chart-value-column-2-field">
+              <span id="chart-value-column-2-label">Weight column 2</span>
+              <select id="chart-value-column-2"></select>
             </label>
             <label>
               <span id="chart-label-column-label">Label column</span>
               <select id="chart-label-column"></select>
             </label>
           </div>
+          <fieldset id="chart-markdown-table-section" class="chart-range" hidden>
+            <legend>Markdown table</legend>
+            <label>
+              <span>Columns</span>
+              <select id="chart-markdown-columns" multiple size="6"></select>
+            </label>
+            <label>
+              <span>SQL</span>
+              <textarea id="chart-markdown-sql" rows="4" autocomplete="off"></textarea>
+            </label>
+          </fieldset>
           <fieldset id="chart-range-section" class="chart-range">
             <legend>Range</legend>
+            <label>
+              <span>Orientation</span>
+              <select id="chart-orientation">
+                <option value="months-horizontal">Months across</option>
+                <option value="months-vertical">Months down</option>
+              </select>
+            </label>
             <label class="toggle-row">
               <input id="chart-range-fixed" type="radio" name="chart-range-mode" value="fixed" checked>
               <span>Fixed dates</span>
@@ -129,9 +152,16 @@
               </label>
             </div>
           </fieldset>
+          <label id="chart-presentation-field">
+            <span>Presentation</span>
+            <select id="chart-presentation">
+              <option value="stacked">Stacked</option>
+              <option value="grouped">Grouped</option>
+            </select>
+          </label>
           <label>
             <span>Output path</span>
-            <input id="chart-output" type="text" autocomplete="off" required>
+            <input id="chart-output" type="text" autocomplete="off">
           </label>
           <label class="toggle-row">
             <input id="chart-run-on-save" type="checkbox" checked>

@@ -31,6 +31,7 @@ add_executable(csvzall_tests
   ../src/pipeline/common/gzip_stream.cpp
   ../src/pipeline/common/json_path.cpp
   ../src/pipeline/common/markdown_calendar.cpp
+  ../src/pipeline/common/markdown_table.cpp
   ../src/pipeline/common/row_utils.cpp
   ../src/pipeline/sqlite/sqlite_db.cpp
   ../src/pipeline/sqlite/csv_loader.cpp

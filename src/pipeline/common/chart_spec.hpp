@@ -7,31 +7,47 @@
 
 namespace csvzall::pipeline::common {
 
+struct ChartValueSpec {
+  std::string column;
+  std::string label;
+  std::string color;
+};
+
 struct HeatmapSpec {
   std::string date_column = "date";
   std::string value_column;
+  std::vector<ChartValueSpec> values;
   std::string label_column;
   std::string start_date;
   std::string end_date;
   std::string lookback;
   std::string title;
+  std::string orientation = "months-horizontal";
 };
 
 struct BarSpec {
   std::string label_column;
   std::string value_column;
+  std::vector<ChartValueSpec> values;
   std::string title;
   std::string x_label;
   std::string y_label;
+  std::string presentation = "stacked";
 };
 
 struct LineSpec {
   std::string x_column;
   std::string y_column;
+  std::vector<ChartValueSpec> values;
   std::string series_column;
   std::string title;
   std::string x_label;
   std::string y_label;
+};
+
+struct MarkdownTableSpec {
+  std::string sql;
+  std::vector<std::string> columns;
 };
 
 struct ChartSpec {
@@ -43,6 +59,7 @@ struct ChartSpec {
   HeatmapSpec heatmap;
   BarSpec bar;
   LineSpec line;
+  MarkdownTableSpec markdown_table;
 };
 
 struct ChartConfig {
@@ -66,6 +83,11 @@ ChartSpec MakeLineChartSpec(std::string id,
                             std::optional<std::filesystem::path> output,
                             bool run_on_save,
                             LineSpec line);
+ChartSpec MakeMarkdownTableChartSpec(std::string id,
+                                     std::filesystem::path input,
+                                     std::optional<std::filesystem::path> output,
+                                     bool run_on_save,
+                                     MarkdownTableSpec markdown_table);
 
 std::filesystem::path DefaultChartConfigPath();
 std::filesystem::path ResolveChartConfigRoot(const std::filesystem::path& config_path);

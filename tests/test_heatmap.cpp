@@ -96,6 +96,43 @@ TEST_CASE("heatmap counts rows when no value column is provided") {
   CHECK(output.str().find("<title>2026-01-01: 2 - Gym; Lift</title>") != std::string::npos);
 }
 
+TEST_CASE("heatmap renders multiple value columns as categorical days") {
+  std::istringstream input(
+      "date,gym,bike,content\n"
+      "2026-01-01,1,0,Squat\n"
+      "2026-01-02,0,1,Ride\n"
+      "2026-01-03,1,1,Brick\n");
+  std::ostringstream output;
+
+  csvzall::pipeline::common::HeatmapSpec spec;
+  spec.date_column = "date";
+  spec.values = {
+      {"gym", "Gym", ""},
+      {"bike", "Bike", ""},
+  };
+  spec.label_column = "content";
+  spec.start_date = "2026-01-01";
+  spec.end_date = "2026-01-07";
+  spec.title = "Training";
+  spec.orientation = "months-vertical";
+
+  csvzall::pipeline::RunOptions options;
+  options.input_is_stdin = true;
+  csvzall::pipeline::RunStats stats;
+
+  const auto rc = csvzall::pipeline::RunHeatmap(
+      spec, input, output, options, SilentLogger(), stats);
+
+  CHECK(rc == 0);
+  const auto svg = output.str();
+  CHECK(svg.find("text-anchor=\"end\" x=\"133.0\" y=\"49.0\">Thu</text>") !=
+        std::string::npos);
+  CHECK(svg.find(">Gym</text>") != std::string::npos);
+  CHECK(svg.find(">Bike</text>") != std::string::npos);
+  CHECK(svg.find("class=\"heatmap-cell-multi-value") != std::string::npos);
+  CHECK(svg.find("<title>2026-01-03: Gym + Bike - Brick</title>") != std::string::npos);
+}
+
 TEST_CASE("heatmap accepts rolling lookback ranges with an explicit end date") {
   std::istringstream input(
       "date,content\n"
@@ -153,6 +190,32 @@ TEST_CASE("charts config accepts heatmap lookback instead of fixed start and end
   CHECK(config.charts.front().heatmap.end_date.empty());
 }
 
+TEST_CASE("charts config accepts multi-value chart options") {
+  const auto root = TempDir("csvzall_chart_values_config");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"training","type":"heatmap","input":"training.csv","output":"training.svg","options":{"date":"date","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}],"lookback":"365d","orientation":"months-vertical","title":"Training"}}]})");
+
+  const auto config = csvzall::pipeline::common::LoadChartConfig(root / "config.json");
+  REQUIRE(config.charts.size() == 1);
+  CHECK(config.charts.front().heatmap.values.size() == 2);
+  CHECK(config.charts.front().heatmap.values[0].column == "gym");
+  CHECK(config.charts.front().heatmap.values[0].label == "Gym");
+  CHECK(config.charts.front().heatmap.values[1].column == "bike");
+  CHECK(config.charts.front().heatmap.values[1].label == "Bike");
+  CHECK(config.charts.front().heatmap.orientation == "months-vertical");
+}
+
+TEST_CASE("charts config accepts grouped bar presentation") {
+  const auto root = TempDir("csvzall_chart_bar_presentation_config");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"training","type":"bar","input":"training.csv","output":"training.svg","options":{"label":"date","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}],"presentation":"grouped","title":"Training"}}]})");
+
+  const auto config = csvzall::pipeline::common::LoadChartConfig(root / "config.json");
+  REQUIRE(config.charts.size() == 1);
+  CHECK(config.charts.front().bar.values.size() == 2);
+  CHECK(config.charts.front().bar.presentation == "grouped");
+}
+
 TEST_CASE("heatmap chart specs from direct args and JSON config match") {
   const auto root = TempDir("csvzall_chart_spec_match");
   WriteText(root / ".csvzall" / "charts.json",
@@ -204,6 +267,7 @@ TEST_CASE("heatmap chart specs from direct args and JSON config match") {
   CHECK(parsed.heatmap.end_date == direct.heatmap.end_date);
   CHECK(parsed.heatmap.lookback == direct.heatmap.lookback);
   CHECK(parsed.heatmap.title == direct.heatmap.title);
+  CHECK(parsed.heatmap.orientation == direct.heatmap.orientation);
 }
 
 TEST_CASE("charts config root resolution handles default and explicit paths") {
@@ -290,6 +354,76 @@ TEST_CASE("charts run renders configured bar and line outputs") {
   CHECK(rc == 0);
   CHECK(ReadText(root / "bar.svg").find("class=\"bar") != std::string::npos);
   CHECK(ReadText(root / "line.svg").find("class=\"line-series") != std::string::npos);
+}
+
+TEST_CASE("charts run renders configured multi-value heatmap bar and line outputs") {
+  const auto root = TempDir("csvzall_charts_multi_value");
+  WriteText(root / "training.csv",
+            "date,day,gym,bike\n"
+            "2026-01-01,1,1,0\n"
+            "2026-01-02,2,0,1\n"
+            "2026-01-03,3,1,1\n");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"heatmap","type":"heatmap","input":"training.csv","output":"heatmap.svg","options":{"date":"date","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}],"start":"2026-01-01","end":"2026-01-07"}},{"id":"bar","type":"bar","input":"training.csv","output":"bar.svg","options":{"label":"date","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}]}},{"id":"grouped-bar","type":"bar","input":"training.csv","output":"grouped-bar.svg","options":{"label":"date","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}],"presentation":"grouped"}},{"id":"line","type":"line","input":"training.csv","output":"line.svg","options":{"x":"day","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}]}}]})");
+
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  const auto rc = csvzall::pipeline::RunCharts((root / "config.json").string(),
+                                               "", false, options, SilentLogger(), stats);
+
+  CHECK(rc == 0);
+  CHECK(ReadText(root / "heatmap.svg").find("Gym + Bike") != std::string::npos);
+  CHECK(ReadText(root / "bar.svg").find("class=\"bar bar-segment") != std::string::npos);
+  CHECK(ReadText(root / "grouped-bar.svg").find("class=\"bar bar-grouped") != std::string::npos);
+  CHECK(ReadText(root / "line.svg").find(">Gym</text>") != std::string::npos);
+  CHECK(ReadText(root / "line.svg").find(">Bike</text>") != std::string::npos);
+}
+
+TEST_CASE("charts run renders configured Markdown table output") {
+  const auto root = TempDir("csvzall_charts_markdown_table");
+  WriteText(root / "activity.csv",
+            "completed_at,content,due_date\n"
+            "2026-01-02T10:00:00Z,Gym|Lift,2026-01-02\n"
+            "2026-01-15T10:00:00Z,Bike,2026-01-15\n");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"monthly","type":"markdown-table","input":"activity.csv","output":"Reports/generated/monthly.md","runOnSave":true,"options":{"sql":"SELECT substr(completed_at, 1, 7) AS month, COUNT(*) AS days FROM data GROUP BY month ORDER BY month"}}]})");
+
+  const auto config = csvzall::pipeline::common::LoadChartConfig(root / "config.json");
+  REQUIRE(config.charts.size() == 1);
+  CHECK(config.charts.front().type == "markdown-table");
+  CHECK(config.charts.front().markdown_table.sql.find("GROUP BY month") != std::string::npos);
+  CHECK(config.charts.front().run_on_save);
+
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  const auto rc = csvzall::pipeline::RunCharts((root / "config.json").string(),
+                                               "monthly", false, options, SilentLogger(), stats);
+
+  CHECK(rc == 0);
+  CHECK(stats.rows_processed == 1);
+  const auto markdown = ReadText(root / "Reports" / "generated" / "monthly.md");
+  CHECK(markdown.find("| month   | days |") != std::string::npos);
+  CHECK(markdown.find("| 2026-01 | 2    |") != std::string::npos);
+}
+
+TEST_CASE("charts run renders Markdown table column projection") {
+  const auto root = TempDir("csvzall_charts_markdown_columns");
+  WriteText(root / "activity.csv",
+            "completed_at,content,due_date\n"
+            "2026-01-02T10:00:00Z,Gym|Lift,2026-01-02\n");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"events","type":"markdown-table","input":"activity.csv","output":"events.md","options":{"columns":["content","due_date"]}}]})");
+
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  const auto rc = csvzall::pipeline::RunCharts((root / "config.json").string(),
+                                               "events", false, options, SilentLogger(), stats);
+
+  CHECK(rc == 0);
+  const auto markdown = ReadText(root / "events.md");
+  CHECK(markdown.find("| content   | due_date   |") != std::string::npos);
+  CHECK(markdown.find("Gym\\|Lift") != std::string::npos);
+  CHECK(markdown.find("completed_at") == std::string::npos);
 }
 
 TEST_CASE("charts run missing default config fails clearly") {

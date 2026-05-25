@@ -221,6 +221,18 @@ async function csvzallViewBootstrap(dependencies = {}) {
     }
   }
 
+  function populateColumnMultiSelect(select, columns, selectedColumns = []) {
+    const selected = new Set(selectedColumns);
+    select.textContent = '';
+    columns.forEach((column) => {
+      const option = document.createElement('option');
+      option.value = column;
+      option.textContent = column;
+      option.selected = selected.size === 0 || selected.has(column);
+      select.append(option);
+    });
+  }
+
   function guessColumn(columns, patterns) {
     const lowered = columns.map((column) => column.toLowerCase());
     for (const pattern of patterns) {
@@ -260,18 +272,29 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const chartFormTitle = document.getElementById('chart-form-title');
     const chartType = document.getElementById('chart-type');
     const chartId = document.getElementById('chart-id');
+    const chartTitleField = document.getElementById('chart-title-field');
     const chartTitle = document.getElementById('chart-title');
+    const chartColumnGrid = document.getElementById('chart-column-grid');
     const chartPrimaryColumnLabel = document.getElementById('chart-primary-column-label');
     const chartValueColumnLabel = document.getElementById('chart-value-column-label');
+    const chartValueColumn2Label = document.getElementById('chart-value-column-2-label');
+    const chartValueColumn2Field = document.getElementById('chart-value-column-2-field');
     const chartLabelColumnLabel = document.getElementById('chart-label-column-label');
     const chartDateColumn = document.getElementById('chart-date-column');
     const chartValueColumn = document.getElementById('chart-value-column');
+    const chartValueColumn2 = document.getElementById('chart-value-column-2');
     const chartLabelColumn = document.getElementById('chart-label-column');
     const chartRangeSection = document.getElementById('chart-range-section');
     const chartRangeFixed = document.getElementById('chart-range-fixed');
     const chartRangeRolling = document.getElementById('chart-range-rolling');
     const chartFixedRange = document.getElementById('chart-fixed-range');
     const chartRollingRange = document.getElementById('chart-rolling-range');
+    const chartOrientation = document.getElementById('chart-orientation');
+    const chartPresentationField = document.getElementById('chart-presentation-field');
+    const chartPresentation = document.getElementById('chart-presentation');
+    const chartMarkdownTableSection = document.getElementById('chart-markdown-table-section');
+    const chartMarkdownColumns = document.getElementById('chart-markdown-columns');
+    const chartMarkdownSql = document.getElementById('chart-markdown-sql');
     const chartStart = document.getElementById('chart-start');
     const chartEnd = document.getElementById('chart-end');
     const chartLookbackCount = document.getElementById('chart-lookback-count');
@@ -295,36 +318,112 @@ async function csvzallViewBootstrap(dependencies = {}) {
     let selectedChartId = '';
     populateColumnSelect(chartDateColumn, schema.columns, { preferred: guessedDateColumn });
     populateColumnSelect(chartValueColumn, schema.columns, { optional: true, preferred: guessedValueColumn });
+    populateColumnSelect(chartValueColumn2, schema.columns, { optional: true });
     populateColumnSelect(chartLabelColumn, schema.columns, { optional: true, preferred: guessedLabelColumn });
+    populateColumnMultiSelect(chartMarkdownColumns, schema.columns);
 
-    const showChartError = (message) => {
+    const chartValidationFields = [
+      chartType,
+      chartId,
+      chartDateColumn,
+      chartValueColumn,
+      chartValueColumn2,
+      chartLabelColumn,
+      chartOrientation,
+      chartPresentation,
+      chartMarkdownColumns,
+      chartMarkdownSql,
+      chartStart,
+      chartEnd,
+      chartLookbackCount,
+      chartOutput,
+    ];
+    const clearChartFieldErrors = () => {
+      chartValidationFields.forEach((field) => {
+        field.removeAttribute('aria-invalid');
+        field.removeAttribute('title');
+      });
+    };
+    const chartFieldsForError = (message) => {
+      if (message.includes('chart id is required')) return [chartId];
+      if (message.includes('chart not found')) return [chartId];
+      if (message.includes('unknown chart type')) return [chartType];
+      if (message.includes('output path')) return [chartOutput];
+      if (message.includes('heatmap: date column')) return [chartDateColumn];
+      if (message.includes('orientation')) return [chartOrientation];
+      if (message.includes('start and end dates')) return [chartStart, chartEnd];
+      if (message.includes('lookback cannot be combined')) return [chartStart, chartLookbackCount];
+      if (message.includes('lookback')) return [chartLookbackCount];
+      if (message.includes('bar: label column')) return [chartDateColumn];
+      if (message.includes('bar: value column')) return [chartValueColumn];
+      if (message.includes('presentation')) return [chartPresentation];
+      if (message.includes('line: x column')) return [chartDateColumn];
+      if (message.includes('line: y column')) return [chartValueColumn];
+      if (message.includes('series column cannot be combined')) {
+        return [chartLabelColumn, chartValueColumn, chartValueColumn2];
+      }
+      if (message.includes('markdown-table')) return [chartMarkdownSql, chartMarkdownColumns];
+      if (message.includes('no such column')) return [chartMarkdownColumns, chartMarkdownSql];
+      return [];
+    };
+    const markChartFieldsForError = (message) => {
+      const fields = chartFieldsForError(message);
+      fields.forEach((field) => {
+        field.setAttribute('aria-invalid', 'true');
+        field.setAttribute('title', message);
+      });
+      fields[0]?.focus({ preventScroll: true });
+    };
+    const showChartError = (message, { markFields = false } = {}) => {
       chartError.textContent = message;
       chartError.hidden = false;
+      if (markFields) {
+        clearChartFieldErrors();
+        markChartFieldsForError(message);
+      }
     };
     const clearChartError = () => {
       chartError.textContent = '';
       chartError.hidden = true;
+      clearChartFieldErrors();
     };
+    chartValidationFields.forEach((field) => {
+      const clearFieldError = () => {
+        field.removeAttribute('aria-invalid');
+        field.removeAttribute('title');
+      };
+      field.addEventListener('input', clearFieldError);
+      field.addEventListener('change', clearFieldError);
+    });
 
     const chartTypeTitle = (type) => {
       if (type === 'bar') return 'Bar';
       if (type === 'line') return 'Line';
+      if (type === 'markdown-table') return 'Markdown Table';
       return 'Heatmap';
     };
 
-    const defaultChartValues = (type = chartType.value || 'heatmap') => ({
-      type,
-      id: `${baseSlug}-${type}`,
-      title: baseName,
-      date: guessedDateColumn,
-      value: guessedValueColumn,
-      label: guessedLabelColumn,
-      start: '',
-      end: '',
-      lookback: '1y',
-      output: `charts/${baseSlug}_${type}.svg`,
-      runOnSave: true,
-    });
+    const defaultChartValues = (type = chartType.value || 'heatmap') => {
+      const markdown = type === 'markdown-table';
+      return {
+        type,
+        id: `${baseSlug}-${type}`,
+        title: markdown ? '' : baseName,
+        date: guessedDateColumn,
+        value: guessedValueColumn,
+        value2: '',
+        label: guessedLabelColumn,
+        orientation: 'months-horizontal',
+        presentation: 'stacked',
+        start: '',
+        end: '',
+        lookback: markdown ? '' : '1y',
+        output: markdown ? `charts/${baseSlug}_${type}.md` : `charts/${baseSlug}_${type}.svg`,
+        columns: markdown ? schema.columns : [],
+        sql: '',
+        runOnSave: true,
+      };
+    };
 
     const parseLookback = (lookback) => {
       const match = String(lookback || '').trim().match(/^(\d+)\s*(d|day|days|y|year|years)?$/i);
@@ -335,7 +434,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
       return { count: match[1], unit };
     };
 
-    const currentLookback = () => `${Math.max(1, Number.parseInt(chartLookbackCount.value, 10) || 1)}${chartLookbackUnit.value}`;
+    const currentLookback = () => `${chartLookbackCount.value.trim()}${chartLookbackUnit.value}`;
 
     const setRangeMode = (mode) => {
       const rolling = mode === 'rolling';
@@ -343,33 +442,53 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartRangeRolling.checked = rolling;
       chartFixedRange.hidden = rolling;
       chartRollingRange.hidden = !rolling;
-      chartStart.required = !rolling;
-      chartEnd.required = !rolling;
-      chartLookbackCount.required = rolling;
     };
 
     const setChartType = (type) => {
       chartType.value = type;
       chartFormTitle.textContent = chartTypeTitle(type);
+      const markdown = type === 'markdown-table';
+      chartTitleField.hidden = markdown;
+      chartColumnGrid.hidden = markdown;
+      chartMarkdownTableSection.hidden = !markdown;
       chartRangeSection.hidden = type !== 'heatmap';
+      chartPresentationField.hidden = type !== 'bar';
       chartLabelColumn.closest('label').hidden = type === 'bar';
+      if (markdown) {
+        return;
+      }
       chartValueColumnLabel.textContent = type === 'heatmap' ? 'Weight column' : 'Value column';
-      chartValueColumn.querySelector('option[value=""]')?.toggleAttribute('disabled', type !== 'heatmap');
+      chartValueColumn2Label.textContent = type === 'heatmap' ? 'Weight column 2' : 'Value column 2';
+      chartValueColumn2Field.hidden = false;
       if (type === 'heatmap') {
         chartPrimaryColumnLabel.textContent = 'Date column';
         chartLabelColumnLabel.textContent = 'Label column';
-        chartValueColumn.required = false;
       } else if (type === 'bar') {
         chartPrimaryColumnLabel.textContent = 'Label column';
         chartLabelColumnLabel.textContent = 'Unused';
-        chartValueColumn.required = true;
         if (!chartValueColumn.value) chartValueColumn.value = guessedValueColumn || schema.columns[0] || '';
       } else {
         chartPrimaryColumnLabel.textContent = 'X column';
         chartLabelColumnLabel.textContent = 'Series column';
-        chartValueColumn.required = true;
         if (!chartValueColumn.value) chartValueColumn.value = guessedValueColumn || schema.columns[0] || '';
       }
+    };
+
+    const optionValues = (options, scalarKey) => {
+      const explicit = Array.isArray(options?.values)
+        ? options.values.map((value) => typeof value === 'string' ? value : value?.column).filter(Boolean)
+        : [];
+      if (explicit.length > 0) return explicit;
+      const scalar = options?.[scalarKey] ?? '';
+      return scalar ? [scalar] : [];
+    };
+
+    const selectedValueColumns = () => {
+      return [chartValueColumn.value, chartValueColumn2.value].filter(Boolean);
+    };
+
+    const selectedMarkdownColumns = () => {
+      return Array.from(chartMarkdownColumns.selectedOptions).map((option) => option.value);
     };
 
     const applyChartValues = (values) => {
@@ -378,7 +497,12 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartTitle.value = values.title ?? '';
       chartDateColumn.value = values.date ?? '';
       chartValueColumn.value = values.value ?? '';
+      chartValueColumn2.value = values.value2 ?? '';
       chartLabelColumn.value = values.label ?? '';
+      chartOrientation.value = values.orientation ?? 'months-horizontal';
+      chartPresentation.value = values.presentation ?? 'stacked';
+      populateColumnMultiSelect(chartMarkdownColumns, schema.columns, values.columns ?? []);
+      chartMarkdownSql.value = values.sql ?? '';
       chartStart.value = values.start ?? '';
       chartEnd.value = values.end ?? '';
       const lookback = values.lookback ?? '';
@@ -399,8 +523,13 @@ async function csvzallViewBootstrap(dependencies = {}) {
         id: chart.id,
         title: chart.options?.title ?? '',
         date: chart.options?.date ?? chart.options?.label ?? chart.options?.x ?? '',
-        value: chart.options?.value ?? chart.options?.y ?? '',
+        value: optionValues(chart.options, type === 'line' ? 'y' : 'value')[0] ?? '',
+        value2: optionValues(chart.options, type === 'line' ? 'y' : 'value')[1] ?? '',
         label: chart.options?.label ?? chart.options?.series ?? '',
+        orientation: chart.options?.orientation ?? 'months-horizontal',
+        presentation: chart.options?.presentation ?? 'stacked',
+        columns: Array.isArray(chart.options?.columns) ? chart.options.columns : [],
+        sql: chart.options?.sql ?? '',
         start: chart.options?.start ?? '',
         end: chart.options?.end ?? '',
         lookback: chart.options?.lookback ?? '',
@@ -493,32 +622,36 @@ async function csvzallViewBootstrap(dependencies = {}) {
     });
     generateChartButton.addEventListener('click', async () => {
       const id = chartId.value.trim();
-      if (!id) {
-        showChartError('Select or save a chart first.');
-        return;
-      }
       try {
         const result = await postJson('/api/chart-config/generate', { id });
         statusNode.textContent = `Generated chart ${result.id}.`;
         clearChartError();
       } catch (error) {
-        showChartError(error instanceof Error ? error.message : 'Chart generation failed');
+        showChartError(error instanceof Error ? error.message : 'Chart generation failed', { markFields: true });
       }
     });
     chartForm.addEventListener('submit', async (event) => {
       event.preventDefault();
+      const valueColumns = selectedValueColumns();
+      const multiValues = valueColumns.length > 1 ? valueColumns : [];
+      const markdownSql = chartMarkdownSql.value.trim();
       const payload = {
         type: chartType.value,
         id: chartId.value.trim(),
         title: chartTitle.value.trim(),
         date: chartType.value === 'heatmap' ? chartDateColumn.value : '',
-        value: chartType.value !== 'line' ? chartValueColumn.value : '',
+        value: chartType.value !== 'line' && valueColumns.length <= 1 ? (valueColumns[0] ?? '') : '',
+        values: multiValues,
         label: chartType.value === 'heatmap'
           ? chartLabelColumn.value
           : (chartType.value === 'bar' ? chartDateColumn.value : ''),
         x: chartType.value === 'line' ? chartDateColumn.value : '',
-        y: chartType.value === 'line' ? chartValueColumn.value : '',
-        series: chartType.value === 'line' ? chartLabelColumn.value : '',
+        y: chartType.value === 'line' && valueColumns.length <= 1 ? (valueColumns[0] ?? '') : '',
+        series: chartType.value === 'line' && valueColumns.length <= 1 ? chartLabelColumn.value : '',
+        orientation: chartType.value === 'heatmap' ? chartOrientation.value : '',
+        presentation: chartType.value === 'bar' ? chartPresentation.value : '',
+        columns: chartType.value === 'markdown-table' && !markdownSql ? selectedMarkdownColumns() : [],
+        sql: chartType.value === 'markdown-table' ? markdownSql : '',
         start: chartRangeRolling.checked ? '' : chartStart.value,
         end: chartRangeRolling.checked ? '' : chartEnd.value,
         lookback: chartType.value === 'heatmap' && chartRangeRolling.checked ? currentLookback() : '',
@@ -533,8 +666,9 @@ async function csvzallViewBootstrap(dependencies = {}) {
         statusNode.textContent = result.generated
           ? `Saved and generated chart ${result.id}.`
           : `Saved chart ${result.id}.`;
+        chartDialog.close('saved');
       } catch (error) {
-        showChartError(error instanceof Error ? error.message : 'Chart save failed');
+        showChartError(error instanceof Error ? error.message : 'Chart save failed', { markFields: true });
       }
     });
 
@@ -799,9 +933,15 @@ async function csvzallViewBootstrap(dependencies = {}) {
           try {
             saveButton.disabled = true;
             statusNode.textContent = 'Saving…';
-            await postJson('/api/save');
+            const result = await postJson('/api/save');
             setDirty(false);
-            statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows.`;
+            if (result.chartError) {
+              statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows. Chart generation failed: ${result.chartError}`;
+            } else if (result.chartsGenerated > 0) {
+              statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows. Regenerated ${result.chartsGenerated} chart${result.chartsGenerated === 1 ? '' : 's'}.`;
+            } else {
+              statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows.`;
+            }
           } catch (error) {
             saveButton.disabled = !dirty;
             statusNode.textContent = error instanceof Error ? error.message : 'Save failed';
