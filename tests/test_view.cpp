@@ -1005,6 +1005,39 @@ TEST_CASE("view edit: arbitrary row insertion persists through save") {
   std::filesystem::remove(path);
 }
 
+TEST_CASE("view edit: row swaps persist through save") {
+  const auto csv = tests::MakeTestCsv(
+      {"name", "value"},
+      {{"alice", "10"}, {"bob", "20"}, {"charlie", "30"}});
+  const auto path = WriteTempCsv(csv, "csvzall_view_edit_swap.csv");
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_edit = true;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, true, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto swap = client.Post(
+      "/api/swap-rows", headers, R"({"first":1,"second":2})",
+      "application/json");
+  REQUIRE(swap);
+  REQUIRE(swap->status == 200);
+  const auto save = client.Post("/api/save", headers, "{}", "application/json");
+  REQUIRE(save);
+  REQUIRE(save->status == 200);
+  server.Stop();
+
+  REQUIRE(ReadAllRows(path) == std::vector<std::vector<std::string>>{
+      {"alice", "10"}, {"charlie", "30"}, {"bob", "20"}});
+  std::filesystem::remove(path);
+}
+
 TEST_CASE("view edit: column insertion persists through save") {
   const auto csv = tests::MakeTestCsv(
       {"name", "value"},

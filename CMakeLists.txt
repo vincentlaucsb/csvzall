@@ -579,7 +579,13 @@ set(CSVZALL_APP_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/sql_export.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/summarize.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/timeseries.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/assets.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/charts.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/json.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/model.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/server.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/support.cpp)
 
 if(CSVZALL_HAVE_SVGPLOT)
   list(APPEND CSVZALL_APP_SOURCES

@@ -47,6 +47,12 @@ add_executable(csvzall_tests
   ../src/pipeline/commands/summarize.cpp
   ../src/pipeline/commands/timeseries.cpp
   ../src/pipeline/commands/view.cpp
+  ../src/pipeline/commands/view/assets.cpp
+  ../src/pipeline/commands/view/charts.cpp
+  ../src/pipeline/commands/view/json.cpp
+  ../src/pipeline/commands/view/model.cpp
+  ../src/pipeline/commands/view/server.cpp
+  ../src/pipeline/commands/view/support.cpp
   test_view.cpp)
 
 if(CSVZALL_HAVE_SVGPLOT)

@@ -79,6 +79,7 @@ class CsvViewData {
   void edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
   void delete_row(std::uint64_t row);
   void insert_row(std::uint64_t row, const std::vector<std::string>& values);
+  void swap_rows(std::uint64_t first, std::uint64_t second);
   void insert_column(std::uint64_t column, const std::string& name, const std::string& value);
   void delete_column(const std::string& column);
   void reset();

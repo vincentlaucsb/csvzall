@@ -792,6 +792,45 @@ async function csvzallViewBootstrap(dependencies = {}) {
             statusNode.textContent = error instanceof Error ? error.message : 'Delete failed';
           }
         };
+        const moveRowBy = async (row, delta) => {
+          const target = row + delta;
+          if (row < 0 || row >= allRows.length || target < 0 || target >= allRows.length) {
+            return;
+          }
+          try {
+            await postJson('/api/swap-rows', { first: row, second: target });
+            const [moved] = allRows.splice(row, 1);
+            allRows.splice(target, 0, moved);
+            renumberRows(allRows);
+            refreshRows();
+            api.forEachNode?.((node) => {
+              if (node.data?._csvzallRowId === target) {
+                node.setSelected?.(true);
+              }
+            });
+            setDirty(true);
+          } catch (error) {
+            statusNode.textContent = error instanceof Error ? error.message : 'Move failed';
+          }
+        };
+        const deleteColumnByName = async (column) => {
+          if (!column || !schema.columns.includes(column)) {
+            statusNode.textContent = 'Focus a column to delete.';
+            return;
+          }
+          try {
+            await postJson('/api/delete-column', { column });
+            schema.columns.splice(schema.columns.indexOf(column), 1);
+            allRows.forEach((row) => {
+              delete row[column];
+            });
+            refreshColumns();
+            refreshRows();
+            setDirty(true);
+          } catch (error) {
+            statusNode.textContent = error instanceof Error ? error.message : 'Column delete failed';
+          }
+        };
         gridOptions.onCellValueChanged = async (event) => {
           if (!event.colDef.field || event.colDef.field === '_csvzallRowId') {
             return;
@@ -815,19 +854,37 @@ async function csvzallViewBootstrap(dependencies = {}) {
           const rowMenu = createContextMenu({
             trigger: 'manual',
             theme: 'system',
-            items: [
-              { id: 'delete-row', label: 'Delete Row', variant: 'danger' },
-            ],
+            items: ({ data }) => {
+              const row = data?.row;
+              return [
+                { id: 'move-up', label: 'Move Up', disabled: !Number.isInteger(row) || row <= 0 },
+                { id: 'move-down', label: 'Move Down', disabled: !Number.isInteger(row) || row >= allRows.length - 1 },
+                { type: 'separator' },
+                { id: 'delete-row', label: 'Delete Row', variant: 'danger' },
+                { id: 'delete-column', label: 'Delete Column', variant: 'danger' },
+              ];
+            },
             onSelect(event) {
               const row = event.context.data?.row;
+              const column = event.context.data?.column;
+              if (event.id === 'move-up' && Number.isInteger(row)) {
+                void moveRowBy(row, -1);
+              }
+              if (event.id === 'move-down' && Number.isInteger(row)) {
+                void moveRowBy(row, 1);
+              }
               if (event.id === 'delete-row' && Number.isInteger(row)) {
                 void deleteRowAt(row);
+              }
+              if (event.id === 'delete-column' && typeof column === 'string') {
+                void deleteColumnByName(column);
               }
             },
           });
           gridOptions.onCellContextMenu = (event) => {
             const nativeEvent = event.event;
             const row = event.data?._csvzallRowId;
+            const column = event.colDef?.field;
             if (!nativeEvent || !Number.isInteger(row)) {
               return;
             }
@@ -838,7 +895,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
               y: nativeEvent.clientY,
               target: gridElement,
               triggerEvent: nativeEvent,
-              context: { row },
+              context: { row, column },
             });
           };
           if (api.setGridOption) {
@@ -898,23 +955,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
           insertColumnDialog.close('cancel');
         });
         deleteColumnButton.addEventListener('click', async () => {
-          const column = focusedColumnName();
-          if (!column || !schema.columns.includes(column)) {
-            statusNode.textContent = 'Focus a column to delete.';
-            return;
-          }
-          try {
-            await postJson('/api/delete-column', { column });
-            schema.columns.splice(schema.columns.indexOf(column), 1);
-            allRows.forEach((row) => {
-              delete row[column];
-            });
-            refreshColumns();
-            refreshRows();
-            setDirty(true);
-          } catch (error) {
-            statusNode.textContent = error instanceof Error ? error.message : 'Column delete failed';
-          }
+          await deleteColumnByName(focusedColumnName());
         });
         resetButton.addEventListener('click', async () => {
           try {
