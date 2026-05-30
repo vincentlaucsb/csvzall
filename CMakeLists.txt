@@ -256,7 +256,7 @@ if(CSVZALL_NLOHMANN_JSON_TARGET STREQUAL "")
 endif()
 
 set(SVGPLOT_ROOT "" CACHE PATH "Path to svgplot checkout or single-header distribution")
-set(CSVZALL_SVGPLOT_GIT_TAG "main"
+set(CSVZALL_SVGPLOT_GIT_TAG "0.4.0"
     CACHE STRING "svgplot revision used by FetchContent fallback")
 set(CSVZALL_HAVE_SVGPLOT OFF)
 set(CSVZALL_SVGPLOT_TARGET "")
