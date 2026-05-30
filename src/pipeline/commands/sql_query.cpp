@@ -1,6 +1,7 @@
 #include "commands.hpp"
 
 #include "../common/column_lookup.hpp"
+#include "../common/markdown_table.hpp"
 #include "../sqlite/csv_loader.hpp"
 #include "../sqlite/sqlite_db.hpp"
 
@@ -10,7 +11,9 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <ostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace csvzall::pipeline::commands {
@@ -198,12 +201,74 @@ bool IsLikelyIntegerOperand(TokenKind kind) {
   return kind == TokenKind::Identifier || kind == TokenKind::IntegerLiteral;
 }
 
+int WriteQueryResult(SQLite::Statement& query,
+                     const std::string& format,
+                     std::ostream& output,
+                     RunStats& stats,
+                     const LoggerCallbacks& logger) {
+  const int col_count = query.getColumnCount();
+  if (col_count <= 0) {
+    if (logger.error) {
+      logger.error("sql query: statement did not return a result set.");
+    }
+    return 1;
+  }
+
+  std::vector<std::string> out_headers;
+  out_headers.reserve(static_cast<std::size_t>(col_count));
+  for (int i = 0; i < col_count; ++i) {
+    out_headers.emplace_back(query.getColumnName(i));
+  }
+
+  if (format == "csv") {
+    auto writer = csv::make_csv_writer(output).set_auto_flush(false);
+    writer << out_headers;
+
+    while (query.executeStep()) {
+      std::vector<std::string> out_row;
+      out_row.reserve(static_cast<std::size_t>(col_count));
+      for (int i = 0; i < col_count; ++i) {
+        out_row.emplace_back(
+            query.getColumn(i).isNull() ? std::string{} : query.getColumn(i).getString());
+      }
+      writer << out_row;
+      stats.rows_processed++;
+    }
+
+    writer.flush();
+    return 0;
+  }
+
+  if (format == "markdown") {
+    std::vector<std::vector<std::string>> out_rows;
+    while (query.executeStep()) {
+      std::vector<std::string> out_row;
+      out_row.reserve(static_cast<std::size_t>(col_count));
+      for (int i = 0; i < col_count; ++i) {
+        out_row.emplace_back(
+            query.getColumn(i).isNull() ? std::string{} : query.getColumn(i).getString());
+      }
+      out_rows.push_back(std::move(out_row));
+      stats.rows_processed++;
+    }
+
+    common::WriteMarkdownTable(output, out_headers, out_rows);
+    return 0;
+  }
+
+  if (logger.error) {
+    logger.error("sql query: --format must be csv or markdown.");
+  }
+  return 1;
+}
+
 }  // namespace
 
 class SqlQueryCsvCommand : public CsvTransformCommand {
 public:
   SqlQueryCsvCommand(const std::string& sql_query,
                      const std::string& table_name,
+                     const std::string& format,
                      std::istream& input,
                      std::ostream& output,
                      const RunOptions& options,
@@ -211,7 +276,8 @@ public:
                      RunStats& stats)
       : CsvTransformCommand(input, output, options, logger, stats),
         sql_query_(sql_query),
-        table_name_(table_name) {}
+        table_name_(table_name),
+        format_(format) {}
 
 protected:
   int run() override {
@@ -232,41 +298,18 @@ protected:
     }
 
     sqlite::SqliteDb sdb = sqlite::OpenSqliteDb(options());
-    if (!sqlite::LoadCsvIntoTable(reader(), headers(), sdb.db(), table_name_text, options(), logger())) {
+    const auto column_affinities = sqlite::InferColumnAffinities(reader(), headers());
+    if (reset_reader() != 0) {
+      return 1;
+    }
+    if (!sqlite::LoadCsvIntoTable(
+            reader(), headers(), sdb.db(), table_name_text, column_affinities, options(), logger())) {
       return 1;
     }
 
     try {
       SQLite::Statement query(sdb.db(), query_text);
-      const int col_count = query.getColumnCount();
-      if (col_count <= 0) {
-        if (logger().error) {
-          logger().error("sql query: statement did not return a result set.");
-        }
-        return 1;
-      }
-
-      auto writer = csv::make_csv_writer(output()).set_auto_flush(false);
-
-      std::vector<std::string> out_headers;
-      out_headers.reserve(static_cast<std::size_t>(col_count));
-      for (int i = 0; i < col_count; ++i) {
-        out_headers.emplace_back(query.getColumnName(i));
-      }
-      writer << out_headers;
-
-      while (query.executeStep()) {
-        std::vector<std::string> out_row;
-        out_row.reserve(static_cast<std::size_t>(col_count));
-        for (int i = 0; i < col_count; ++i) {
-          out_row.emplace_back(
-              query.getColumn(i).isNull() ? std::string{} : query.getColumn(i).getString());
-        }
-        writer << out_row;
-        stats().rows_processed++;
-      }
-
-      writer.flush();
+      return WriteQueryResult(query, format_, output(), stats(), logger());
     } catch (const SQLite::Exception& ex) {
       if (logger().error) {
         logger().error(std::string("sql query: SQLite error: ") + ex.what());
@@ -280,16 +323,18 @@ protected:
 private:
   std::string sql_query_;
   std::string table_name_;
+  std::string format_;
 };
 
 int RunSqlQueryCsv(const std::string& sql_query,
                    const std::string& table_name,
+                   const std::string& format,
                    std::istream& input,
                    std::ostream& output,
                    const RunOptions& options,
                    const LoggerCallbacks& logger,
                    RunStats& stats) {
-  SqlQueryCsvCommand cmd(sql_query, table_name, input, output, options, logger, stats);
+  SqlQueryCsvCommand cmd(sql_query, table_name, format, input, output, options, logger, stats);
   return cmd.execute();
 }
 
@@ -313,6 +358,7 @@ SqlQueryInputKind DetectSqlQueryInputKind(const std::string& path) {
 
 int RunSqlQueryDb(const std::string& sql_query,
                   const std::string& db_path,
+                  const std::string& format,
                   std::ostream& output,
                   const LoggerCallbacks& logger,
                   RunStats& stats) {
@@ -332,36 +378,9 @@ int RunSqlQueryDb(const std::string& sql_query,
 
   try {
     SQLite::Database db(db_path, SQLite::OPEN_READONLY);
+    sqlite::RegisterSqliteRegexFunctions(db);
     SQLite::Statement query(db, query_text);
-
-    const int col_count = query.getColumnCount();
-    if (col_count <= 0) {
-      if (logger.error) {
-        logger.error("sql query: statement did not return a result set.");
-      }
-      return 1;
-    }
-
-    auto writer = csv::make_csv_writer(output).set_auto_flush(false);
-    std::vector<std::string> out_headers;
-    out_headers.reserve(static_cast<std::size_t>(col_count));
-    for (int i = 0; i < col_count; ++i) {
-      out_headers.emplace_back(query.getColumnName(i));
-    }
-    writer << out_headers;
-
-    while (query.executeStep()) {
-      std::vector<std::string> out_row;
-      out_row.reserve(static_cast<std::size_t>(col_count));
-      for (int i = 0; i < col_count; ++i) {
-        out_row.emplace_back(
-            query.getColumn(i).isNull() ? std::string{} : query.getColumn(i).getString());
-      }
-      writer << out_row;
-      stats.rows_processed++;
-    }
-
-    writer.flush();
+    return WriteQueryResult(query, format, output, stats, logger);
   } catch (const SQLite::Exception& ex) {
     if (logger.error) {
       logger.error(std::string("sql query: SQLite error: ") + ex.what());

@@ -29,6 +29,12 @@ std::string MainDatabasePath(csvzall::pipeline::sqlite::SqliteDb& db) {
   return {};
 }
 
+std::filesystem::path EquivalentPath(const std::filesystem::path& path) {
+  std::error_code ec;
+  const auto canonical = std::filesystem::weakly_canonical(path, ec);
+  return ec ? path.lexically_normal() : canonical;
+}
+
 }  // namespace
 
 TEST_CASE("SqliteDb: explicit db path is preserved after close") {
@@ -40,7 +46,7 @@ TEST_CASE("SqliteDb: explicit db path is preserved after close") {
 
   {
     auto db = csvzall::pipeline::sqlite::OpenSqliteDb(options);
-    REQUIRE(MainDatabasePath(db) == db_path.string());
+    REQUIRE(EquivalentPath(MainDatabasePath(db)) == EquivalentPath(db_path));
     db.db().exec("CREATE TABLE data(value INTEGER)");
   }
 

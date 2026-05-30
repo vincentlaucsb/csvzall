@@ -9,10 +9,16 @@
 #include <vector>
 
 #include "../../pipeline_types.hpp"
+#include "view.hpp"
 
 // Forward declarations for PostgreSQL types
 namespace csvzall::pipeline::postgres {
 struct ConnectionConfig;
+}
+
+namespace csvzall::pipeline::common {
+struct ChartSpec;
+struct HeatmapSpec;
 }
 
 namespace csvzall::pipeline::commands {
@@ -92,6 +98,85 @@ int RunTimeseries(const std::string& x_column, const std::string& y_column,
                   std::istream& input, std::ostream& output,
                   const RunOptions& options, const LoggerCallbacks& logger, RunStats& stats);
 
+int RunJsonExtract(const std::string& input_path,
+                   const std::string& mapping_path,
+                   std::ostream& output,
+                   const LoggerCallbacks& logger,
+                   RunStats& stats);
+
+int RunMax(const std::string& column,
+           std::istream& input,
+           std::ostream& output,
+           const RunOptions& options,
+           const LoggerCallbacks& logger,
+           RunStats& stats);
+
+int RunMin(const std::string& column,
+           std::istream& input,
+           std::ostream& output,
+           const RunOptions& options,
+           const LoggerCallbacks& logger,
+           RunStats& stats);
+
+int RunAppend(const std::string& existing_path,
+              const std::string& incoming_path,
+              bool in_place,
+              std::ostream& output,
+              const LoggerCallbacks& logger,
+              RunStats& stats);
+
+int RunMerge(const std::string& existing_path,
+             const std::string& incoming_path,
+             const std::string& key_column,
+             bool in_place,
+             std::ostream& output,
+             const LoggerCallbacks& logger,
+             RunStats& stats);
+
+int RunView(const std::string& input_path,
+            std::ostream& output,
+            const RunOptions& options,
+            const LoggerCallbacks& logger,
+            RunStats& stats,
+            int requested_port,
+            bool open_browser,
+            bool serve_once,
+            bool startup_json);
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+int RunHeatmap(const std::string& date_column,
+               const std::string& value_column,
+               const std::string& label_column,
+               const std::string& start_date,
+               const std::string& end_date,
+               const std::string& title,
+               std::istream& input,
+               std::ostream& output,
+               const RunOptions& options,
+               const LoggerCallbacks& logger,
+               RunStats& stats);
+int RunHeatmap(const common::HeatmapSpec& spec,
+               std::istream& input,
+               std::ostream& output,
+               const RunOptions& options,
+               const LoggerCallbacks& logger,
+               RunStats& stats);
+int RunChart(const common::ChartSpec& spec,
+             const RunOptions& options,
+             const LoggerCallbacks& logger,
+             RunStats& stats);
+int ValidateChart(const common::ChartSpec& spec,
+                  const RunOptions& options,
+                  const LoggerCallbacks& logger,
+                  RunStats& stats);
+int RunCharts(const std::string& config_path,
+              const std::string& chart_id,
+              bool validate_only,
+              const RunOptions& options,
+              const LoggerCallbacks& logger,
+              RunStats& stats);
+#endif
+
 // Export a CSV to a SQLite database file.
 // input_path  — original file path (used to derive dest_path when dest_path is empty).
 // dest_path   — explicit destination; if empty, derived from input_path (.csv -> .db).
@@ -108,6 +193,7 @@ int RunSqlExport(const std::string& input_path,
 // The result set is streamed as CSV to output.
 int RunSqlQueryCsv(const std::string& sql_query,
                    const std::string& table_name,
+                   const std::string& format,
                    std::istream& input,
                    std::ostream& output,
                    const RunOptions& options,
@@ -130,6 +216,7 @@ SqlQueryInputKind DetectSqlQueryInputKind(const std::string& path);
 // The result set is streamed as CSV to output.
 int RunSqlQueryDb(const std::string& sql_query,
                   const std::string& db_path,
+                  const std::string& format,
                   std::ostream& output,
                   const LoggerCallbacks& logger,
                   RunStats& stats);

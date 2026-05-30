@@ -70,6 +70,7 @@ third_party/
 *.tmp
 *.temp
 .coverage-analysis/
+.todoist-analysis/
 
 # Package managers / dependencies we don't want
 node_modules/

@@ -75,6 +75,37 @@ TEST_CASE("SqlExport: custom table name") {
   std::filesystem::remove(db_path);
 }
 
+TEST_CASE("SqlExport: stores big integer identifiers as text") {
+  const std::string db_path = TempDbPath("csvzall_test_bigint_id.db");
+  std::filesystem::remove(db_path);
+
+  const std::string id = "2131482199146031144677029033454318611";
+  auto csv = tests::MakeTestCsv({"id", "value"}, {{id, "10"}});
+  std::istringstream input(csv);
+
+  pipeline::RunOptions options;
+  options.input_is_stdin = true;
+  pipeline::LoggerCallbacks logger{nullptr, nullptr};
+  pipeline::RunStats stats;
+
+  const int rc = pipeline::RunSqlExport("-", db_path, "data", input, options, logger, stats);
+
+  REQUIRE(rc == 0);
+  REQUIRE(stats.rows_processed == 1);
+
+  {
+    SQLite::Database db(db_path, SQLite::OPEN_READONLY);
+    SQLite::Statement q(db, "SELECT id, typeof(id), value, typeof(value) FROM \"data\"");
+    REQUIRE(q.executeStep());
+    REQUIRE(q.getColumn(0).getString() == id);
+    REQUIRE(q.getColumn(1).getString() == "text");
+    REQUIRE(q.getColumn(2).getString() == "10");
+    REQUIRE(q.getColumn(3).getString() == "integer");
+  }
+
+  std::filesystem::remove(db_path);
+}
+
 TEST_CASE("SqlExport: RunOptions defaults journaling off") {
   pipeline::RunOptions options;
   REQUIRE(options.sqlite_journal_enabled == false);

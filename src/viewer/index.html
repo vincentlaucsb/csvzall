@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>csvzall view</title>
+  <link rel="stylesheet" href="/assets/ag-grid.css">
+  <link rel="stylesheet" href="/assets/ag-theme-alpine.css">
+  <link rel="stylesheet" href="/assets/viewer.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="file-meta">
+        <h1 id="file-name">Loading…</h1>
+        <span id="summary" class="summary" aria-hidden="true"></span>
+      </div>
+      <label class="search">
+        <span id="mode-label">Loading rows</span>
+        <input id="quick-filter" type="search" placeholder="Filter loaded table">
+      </label>
+      <div class="chart-toolbar">
+        <button id="add-chart" type="button" hidden>Add chart</button>
+      </div>
+      <div id="edit-toolbar" class="edit-toolbar" hidden>
+        <button id="insert-row" type="button">Insert row</button>
+        <button id="delete-row" type="button">Delete row</button>
+        <button id="insert-column" type="button">Insert column</button>
+        <button id="delete-column" type="button">Delete column</button>
+        <button id="reset" type="button" disabled>Reset</button>
+        <button id="save" type="button" disabled>Save</button>
+      </div>
+    </header>
+    <main class="grid-wrap">
+      <div id="grid" class="ag-theme-alpine-auto-dark"></div>
+    </main>
+    <footer class="footer">
+      <span id="status">Connecting…</span>
+      <span id="record-count"></span>
+    </footer>
+  </div>
+  <dialog id="insert-column-dialog" class="csvzall-dialog">
+    <form id="insert-column-form" class="dialog-form">
+      <h2>Insert column</h2>
+      <label>
+        <span>Column name</span>
+        <input id="insert-column-name" type="text" autocomplete="off" required>
+      </label>
+      <p id="insert-column-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancel-insert-column" type="button">Cancel</button>
+        <button type="submit">Insert</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="heatmap-chart-dialog" class="csvzall-dialog chart-dialog">
+    <form id="heatmap-chart-form" class="dialog-form" novalidate>
+      <div class="chart-dialog-layout">
+        <aside class="chart-list-pane">
+          <div class="chart-list-header">
+            <h2>Charts</h2>
+            <button id="new-chart" type="button">New</button>
+          </div>
+          <div id="chart-list" class="chart-list" role="listbox" aria-label="Charts for this CSV"></div>
+        </aside>
+        <section class="chart-form-pane">
+          <h2 id="chart-form-title">Heatmap</h2>
+          <label>
+            <span>Chart type</span>
+            <select id="chart-type">
+              <option value="heatmap">Heatmap</option>
+              <option value="bar">Bar</option>
+              <option value="line">Line</option>
+              <option value="markdown-table">Markdown Table</option>
+            </select>
+          </label>
+          <label>
+            <span>Chart id</span>
+            <input id="chart-id" type="text" autocomplete="off">
+          </label>
+          <label id="chart-title-field">
+            <span>Title</span>
+            <input id="chart-title" type="text" autocomplete="off">
+          </label>
+          <div id="chart-column-grid" class="dialog-grid">
+            <label>
+              <span id="chart-primary-column-label">Date column</span>
+              <select id="chart-date-column"></select>
+            </label>
+            <label>
+              <span id="chart-value-column-label">Weight column</span>
+              <select id="chart-value-column"></select>
+            </label>
+            <label id="chart-value-column-2-field">
+              <span id="chart-value-column-2-label">Weight column 2</span>
+              <select id="chart-value-column-2"></select>
+            </label>
+            <label>
+              <span id="chart-label-column-label">Label column</span>
+              <select id="chart-label-column"></select>
+            </label>
+          </div>
+          <fieldset id="chart-markdown-table-section" class="chart-range" hidden>
+            <legend>Markdown table</legend>
+            <label>
+              <span>Columns</span>
+              <select id="chart-markdown-columns" multiple size="6"></select>
+            </label>
+            <label>
+              <span>SQL</span>
+              <textarea id="chart-markdown-sql" rows="4" autocomplete="off"></textarea>
+            </label>
+          </fieldset>
+          <fieldset id="chart-range-section" class="chart-range">
+            <legend>Range</legend>
+            <label>
+              <span>Orientation</span>
+              <select id="chart-orientation">
+                <option value="months-horizontal">Months across</option>
+                <option value="months-vertical">Months down</option>
+              </select>
+            </label>
+            <label class="toggle-row">
+              <input id="chart-range-fixed" type="radio" name="chart-range-mode" value="fixed" checked>
+              <span>Fixed dates</span>
+            </label>
+            <label class="toggle-row">
+              <input id="chart-range-rolling" type="radio" name="chart-range-mode" value="rolling">
+              <span>Rolling</span>
+            </label>
+            <div id="chart-fixed-range" class="dialog-grid">
+              <label>
+                <span>Start</span>
+                <input id="chart-start" type="date">
+              </label>
+              <label>
+                <span>End</span>
+                <input id="chart-end" type="date">
+              </label>
+            </div>
+            <div id="chart-rolling-range" class="dialog-grid" hidden>
+              <label>
+                <span>Look back</span>
+                <input id="chart-lookback-count" type="number" min="1" step="1" value="1">
+              </label>
+              <label>
+                <span>Unit</span>
+                <select id="chart-lookback-unit">
+                  <option value="y">Years</option>
+                  <option value="d">Days</option>
+                </select>
+              </label>
+            </div>
+          </fieldset>
+          <label id="chart-presentation-field">
+            <span>Presentation</span>
+            <select id="chart-presentation">
+              <option value="stacked">Stacked</option>
+              <option value="grouped">Grouped</option>
+            </select>
+          </label>
+          <label>
+            <span>Output path</span>
+            <input id="chart-output" type="text" autocomplete="off">
+          </label>
+          <label class="toggle-row">
+            <input id="chart-run-on-save" type="checkbox" checked>
+            <span>Run on save</span>
+          </label>
+        </section>
+      </div>
+      <p id="chart-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancel-chart" type="button">Cancel</button>
+        <button id="generate-chart" type="button">Create chart</button>
+        <button type="submit">Save chart</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/assets/ag-grid-community.min.js"></script>
+  <script src="/assets/viewer.js"></script>
+</body>
+</html>

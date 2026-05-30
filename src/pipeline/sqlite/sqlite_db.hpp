@@ -47,4 +47,8 @@ class SqliteDb {
 //   4. otherwise -> temp-file database in system temp dir (deleted on exit).
 SqliteDb OpenSqliteDb(const RunOptions& options);
 
+// Register csvzall SQLite scalar functions that must be available anywhere
+// CSV-backed SQL executes.
+void RegisterSqliteRegexFunctions(SQLite::Database& db);
+
 }  // namespace csvzall::pipeline::sqlite

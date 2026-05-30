@@ -16,11 +16,14 @@ This file mirrors [AGENTS.md](AGENTS.md).
 - **Streaming** (`head`): row-by-row, no buffering, no SQLite.
 - **SQLite-backed** (`filter`, `derive`, `summarize`, `timeseries`): load CSV into SQLite, execute SQL, stream output.
 - **Export** (`sql`): load CSV into a persistent SQLite database file; no transform output stream.
+- **File update** (`append`, `merge`): exact-header CSV file combination; `merge` is the keyed rerunnable import primitive.
+- **Rendering** (`calendar`, `heatmap`): convert fixed-shape tabular data to Markdown or SVG report artifacts.
 
 ## SQLite conventions
 
 - Use [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) with its bundled internal SQLite.
-- All columns loaded as `NUMERIC` affinity; SQLite stores each cell as INTEGER, REAL, or TEXT based on content — no per-column inference needed. Numeric comparisons in WHERE work correctly.
+- CSV input is scanned with csv-parser scalar type inference before SQLite load.
+- Columns containing only integer/real values load as `NUMERIC`; columns containing text, booleans, timestamps, or `CSV_BIGINT` values load as `TEXT` to preserve exact lexical identifiers. Numeric comparisons in WHERE work correctly for inferred numeric columns.
 - All column names quoted with `"` in generated SQL.
 - Memory strategy: in-memory below threshold, temp-file database above it.
 - Default threshold: 256 MB (`RunOptions::sqlite_threshold_mb`). Not yet exposed as a CLI flag.
@@ -36,6 +39,12 @@ This file mirrors [AGENTS.md](AGENTS.md).
 - Keep `RunOptions` as the shared cross-command behavior point (including SQLite threshold).
 - Avoid duplicating logic. Move shared helpers to `src/pipeline/common/` (general) or `src/pipeline/sqlite/` (SQLite-specific). If no clean home exists, add a `// TODO(dedup):` comment rather than copying.
 
+## CLI help quality
+
+- Every public CLI command must be self-discoverable from `--help`.
+- Command help must include the required input shape, output shape, one realistic example, important edge-case behavior, and related commands or a pipeline example when relevant.
+- Do not rely on README-only documentation for command-critical behavior. Agents often inspect `--help` before reading project docs.
+
 ## Dependency documentation
 
 - When adding, removing, or materially changing a third-party dependency, update the README dependency table in the same change.
@@ -47,6 +56,14 @@ This file mirrors [AGENTS.md](AGENTS.md).
 - Do not reconfigure an existing CMake build directory with a different generator. If the generator needs to change, create a new build directory instead.
 - Before manually running `cmake -S ... -B ...`, inspect the target build directory's existing `CMakeCache.txt` or use a fresh build directory to avoid generator mismatches.
 - On Windows with MSVC + Ninja, run configure/build from a Visual Studio developer environment, preferably through the Visual Studio-bundled CMake. Bare sandboxed shells can hang during CMake's compiler/linker probe.
+
+## Viewer development mode
+
+- The production `view` command serves embedded first-party viewer assets plus embedded AG Grid and Popright assets.
+- For vanilla JS/CSS/HTML iteration, use `csvzall view <file.csv> --viewer-assets src/viewer` or set `CSVZALL_VIEWER_ASSETS=<absolute-or-relative-src/viewer-path>`.
+- Developer asset mode reloads `src/viewer/index.html`, `src/viewer/viewer.css`, and `src/viewer/viewer.js` from disk on each request. Refreshing the browser is enough after editing those files; rebuilding C++ is not required.
+- AG Grid and Popright vendor files remain embedded in developer asset mode. Changes to `vendor/ag-grid/*`, `vendor/popright/*`, or `cmake/embed_viewer_assets.cmake` still require regenerating/rebuilding.
+- Keep the viewer framework-free. Prefer small vanilla JS modules/helpers for modals, context menus, grid adapters, and API calls.
 
 ## csv-parser feedback loop
 

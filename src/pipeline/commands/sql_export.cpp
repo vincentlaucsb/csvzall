@@ -64,9 +64,13 @@ protected:
       return 1;
     }
 
+    const auto column_affinities = sqlite::InferColumnAffinities(reader(), headers());
+    if (reset_reader() != 0) {
+      return 1;
+    }
+
     try {
       SQLite::Database db(db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
-
       bool committed = false;
       auto cleanup = [&]() {
         if (!committed) {
@@ -75,7 +79,8 @@ protected:
         }
       };
 
-      if (!sqlite::LoadCsvIntoTable(reader(), headers(), db, table_name_, options(), logger())) {
+      if (!sqlite::LoadCsvIntoTable(
+              reader(), headers(), db, table_name_, column_affinities, options(), logger())) {
         cleanup();
         return 1;
       }

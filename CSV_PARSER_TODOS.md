@@ -11,14 +11,13 @@ for csv-parser follow-ups, not a committed roadmap.
   of the pattern rather than the final abstraction. Pipelines often need richer
   per-column state: null counts, text/numeric conflict counts, sample limits,
   domain-specific coercion, database-specific type collapsing, and diagnostics.
+- csvzall's SQLite loader needs to preserve 30+ digit identifier text, so its
+  inference policy treats any `CSV_BIGINT` observation as a reason to load the
+  whole column as `TEXT`. A future `csv_data_types()` note or helper variant
+  could make this "lossless identifier" policy easier to discover.
 - `csv::chunk_parallel_apply()` is the more important building block for those
   advanced cases. It gives callers bounded chunking and per-column parallelism
   while leaving the inference policy under application control.
-- Make `CSVReader`'s default variable-column behavior obvious in the docs:
-  rows that are too short or too long are ignored by default. Generic ETL
-  callers can rely on that instead of duplicating row-width checks after
-  `read_chunk()`, and users who want different behavior should be pointed at
-  the variable-columns configuration.
 - Document that `CSVField::is_null()` is backed by scalar classification via
   `CSVField::type()`. This is the right default because null semantics stay in
   one place, but it matters in ultra-hot ETL loops: callers that only need the
@@ -29,6 +28,12 @@ for csv-parser follow-ups, not a committed roadmap.
   - use `csv_data_types()` when the default SQL-friendly inference is enough
   - copy the `chunk_parallel_apply()` pattern when the workflow needs more
     control over state, sampling, coercion, or error reporting
+- Tighten the `CSVField` constness story in the docs. csvzall's `heatmap`
+  command accidentally stored `row[index]` as `const auto field`, then hit MSVC
+  errors because `CSVField::is_null()`, `CSVField::get<T>()`, and
+  `CSVField::try_get<T>()` are non-const. The documentation should either show
+  local `CSVField` temporaries as mutable (`auto field = row[i]`) or explain why
+  these accessors are intentionally non-const.
 
 ## infer_scalar
 

@@ -3,6 +3,7 @@
 #include <SQLiteCpp/SQLiteCpp.h>
 #include <csv.hpp>
 
+#include <algorithm>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -28,17 +29,45 @@ std::string QuoteIdentifier(const std::string& name) {
 
 namespace {
 
-// All columns use NUMERIC affinity. SQLite stores each value as INTEGER,
-// REAL, or TEXT depending on the cell content — no per-column inference
-// needed. "5" → INTEGER 5 → reads back as "5"; "5.5" → REAL 5.5 → "5.5";
-// "active" → TEXT "active". Numeric comparisons in WHERE work correctly.
+struct AffinityStats {
+  bool saw_numeric = false;
+  bool needs_text = false;
+};
+
+bool IsSqliteNumericType(csv::DataType type) {
+  return (type >= csv::DataType::CSV_INT8 && type <= csv::DataType::CSV_INT64) ||
+         type == csv::DataType::CSV_DOUBLE;
+}
+
+void ObserveType(AffinityStats& stats, csv::DataType type) {
+  if (type == csv::DataType::CSV_NULL) {
+    return;
+  }
+  if (IsSqliteNumericType(type)) {
+    stats.saw_numeric = true;
+    return;
+  }
+  stats.needs_text = true;
+}
+
+const char* AffinitySql(SqliteColumnAffinity affinity) {
+  switch (affinity) {
+    case SqliteColumnAffinity::Numeric:
+      return "NUMERIC";
+    case SqliteColumnAffinity::Text:
+    default:
+      return "TEXT";
+  }
+}
+
 std::string BuildCreateTable(const std::string& table_name,
-                              const std::vector<std::string>& headers) {
+                             const std::vector<std::string>& headers,
+                             const std::vector<SqliteColumnAffinity>& column_affinities) {
   std::ostringstream sql;
   sql << "CREATE TABLE " << QuoteIdentifier(table_name) << " (";
   for (std::size_t i = 0; i < headers.size(); ++i) {
     if (i > 0) sql << ", ";
-    sql << QuoteIdentifier(headers[i]) << " NUMERIC";
+    sql << QuoteIdentifier(headers[i]) << ' ' << AffinitySql(column_affinities[i]);
   }
   sql << ')';
   return sql.str();
@@ -57,14 +86,42 @@ std::string BuildInsert(const std::string& table_name, std::size_t col_count) {
 
 }  // namespace
 
+std::vector<SqliteColumnAffinity> InferColumnAffinities(
+    csv::CSVReader& reader,
+    const std::vector<std::string>& headers) {
+  std::vector<AffinityStats> stats(headers.size());
+
+  for (auto& row : reader) {
+    const std::size_t n = std::min(headers.size(), row.size());
+    for (std::size_t i = 0; i < n; ++i) {
+      auto field = row[i];
+      ObserveType(stats[i], field.type());
+    }
+  }
+
+  std::vector<SqliteColumnAffinity> affinities;
+  affinities.reserve(headers.size());
+  for (const auto& column_stats : stats) {
+    affinities.push_back(column_stats.saw_numeric && !column_stats.needs_text
+                             ? SqliteColumnAffinity::Numeric
+                             : SqliteColumnAffinity::Text);
+  }
+  return affinities;
+}
+
 bool LoadCsvIntoTable(csv::CSVReader& reader,
                       const std::vector<std::string>& headers,
                       SQLite::Database& db,
                       const std::string& table_name,
+                      const std::vector<SqliteColumnAffinity>& column_affinities,
                       const RunOptions& options,
                       const LoggerCallbacks& logger) {
   if (headers.empty()) {
     if (logger.error) logger.error("Cannot load CSV into SQLite: no column headers.");
+    return false;
+  }
+  if (column_affinities.size() != headers.size()) {
+    if (logger.error) logger.error("Cannot load CSV into SQLite: column affinity count mismatch.");
     return false;
   }
 
@@ -73,7 +130,7 @@ bool LoadCsvIntoTable(csv::CSVReader& reader,
       db.exec("PRAGMA journal_mode = OFF");
     }
 
-    db.exec(BuildCreateTable(table_name, headers));
+    db.exec(BuildCreateTable(table_name, headers, column_affinities));
 
     SQLite::Statement stmt(db, BuildInsert(table_name, headers.size()));
     SQLite::Transaction tx(db);
