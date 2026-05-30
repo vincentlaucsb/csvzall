@@ -1,8 +1,11 @@
-name: Build Binaries (on every push to master)
+name: Build Release Binaries
 
 on:
-  push:
-    branches: [ master ]
+  release:
+    types: [published]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -10,18 +13,20 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            name: linux-x86_64
-            artifact: csvzall-linux-x86_64
+            platform: linux
+            archive-extension: tar.gz
 
           - os: windows-latest
-            name: windows-x64
-            artifact: csvzall-windows-x64.exe
+            platform: windows
+            archive-extension: zip
 
           - os: macos-latest
-            name: macos-x86_64
-            artifact: csvzall-macos-x86_64
+            platform: macos
+            archive-extension: tar.gz
 
     runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
 
     steps:
       - uses: actions/checkout@v6.0.2
@@ -57,16 +62,67 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Upload Binary
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: ${{ matrix.artifact }}
-          path: |
-            build/csvzall
-            build/csvzall.exe
-            build/*.dll
-            build/Release/csvzall.exe
-            build/Release/*.dll
-            build/RelWithDebInfo/csvzall.exe
-            build/RelWithDebInfo/*.dll
-          if-no-files-found: error
+      - name: Package release binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $packageDir = "dist/package"
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+
+          $candidates = @(
+            "build/csvzall.exe",
+            "build/Release/csvzall.exe",
+            "build/RelWithDebInfo/csvzall.exe"
+          )
+          $binary = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $binary) {
+            throw "csvzall.exe was not found in the build output."
+          }
+          Copy-Item -LiteralPath $binary -Destination "$packageDir/csvzall.exe"
+
+          $runtimeFiles = @(
+            "build/*.dll",
+            "build/Release/*.dll",
+            "build/RelWithDebInfo/*.dll"
+          )
+          foreach ($pattern in $runtimeFiles) {
+            Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue |
+              Copy-Item -Destination $packageDir -Force
+          }
+
+          $safeTag = $env:RELEASE_TAG -replace '[\\/]', '-'
+          $arch = [string]$env:RUNNER_ARCH
+          $arch = $arch.ToLowerInvariant()
+          $assetPath = "dist/csvzall-$safeTag-${{ matrix.platform }}-$arch.${{ matrix.archive-extension }}"
+          Compress-Archive -Path "$packageDir/*" -DestinationPath $assetPath -Force
+          "ASSET_PATH=$assetPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Package release binary (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="dist/package"
+          mkdir -p "$package_dir"
+
+          if [[ ! -f build/csvzall ]]; then
+            echo "csvzall was not found in the build output." >&2
+            exit 1
+          fi
+          cp build/csvzall "$package_dir/csvzall"
+          chmod +x "$package_dir/csvzall"
+
+          find build -maxdepth 2 -type f \( -name '*.so' -o -name '*.so.*' -o -name '*.dylib' \) \
+            -exec cp {} "$package_dir/" \;
+
+          safe_tag="${RELEASE_TAG//\//-}"
+          arch="$(printf '%s' "$RUNNER_ARCH" | tr '[:upper:]' '[:lower:]')"
+          asset_path="dist/csvzall-${safe_tag}-${{ matrix.platform }}-${arch}.${{ matrix.archive-extension }}"
+          tar -czf "$asset_path" -C "$package_dir" .
+          echo "ASSET_PATH=$asset_path" >> "$GITHUB_ENV"
+
+      - name: Attach binary to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" "$ASSET_PATH" --clobber

@@ -473,7 +473,9 @@ For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 | [PostgreSQL libpq](https://www.postgresql.org/docs/current/libpq.html) | [PostgreSQL Global Development Group](https://www.postgresql.org/community/) | PostgreSQL client C library required by libpqxx | System PostgreSQL installation |
 | [Catch2](https://github.com/catchorg/Catch2) v3.4.0 | [Catch2 contributors](https://github.com/catchorg/Catch2) | Test framework | FetchContent, tests only |
 | [gcovr](https://github.com/gcovr/gcovr) | [gcovr contributors](https://github.com/gcovr/gcovr/graphs/contributors) | Coverage report generation for CI | GitHub Actions coverage workflow only |
-| [Codecov GitHub Action](https://github.com/codecov/codecov-action) v5 | [Codecov](https://about.codecov.io/) | Upload coverage reports to Codecov | GitHub Actions coverage workflow only |
+| [actions/cache](https://github.com/actions/cache) v5.0.5 | [GitHub](https://github.com/actions) | Cache CMake FetchContent dependencies in CI | GitHub Actions workflows only |
+| [lukka/get-cmake](https://github.com/lukka/get-cmake) v4.3.3 | [Luca K.](https://github.com/lukka) and contributors | Install CMake for release binary builds | GitHub Actions release workflow only |
+| [Codecov GitHub Action](https://github.com/codecov/codecov-action) v6.0.1 | [Codecov](https://about.codecov.io/) | Upload coverage reports to Codecov | GitHub Actions coverage workflow only |
 
 ## Design notes
 
