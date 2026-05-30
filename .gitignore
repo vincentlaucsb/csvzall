@@ -75,5 +75,4 @@ third_party/
 # Package managers / dependencies we don't want
 node_modules/
 package-lock.json
-!obsidian-plugin/package-lock.json
 yarn.lock

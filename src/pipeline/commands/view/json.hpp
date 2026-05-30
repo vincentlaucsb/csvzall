@@ -10,8 +10,6 @@
 
 namespace csvzall::pipeline::commands::view_internal {
 
-void AppendJsonString(std::string& output, std::string_view value);
-
 std::string BuildSchemaJson(const CsvViewData& data, bool editable);
 std::string BuildRowsJson(const CsvViewData& data,
                           std::uint64_t offset,

@@ -1,292 +1,134 @@
 #include "json.hpp"
 
-#include <cctype>
+#include <nlohmann/json.hpp>
+
 #include <stdexcept>
+#include <string>
 
 namespace csvzall::pipeline::commands::view_internal {
-void AppendJsonString(std::string& output, std::string_view value) {
-  output.push_back('"');
-  for (const unsigned char ch : value) {
-    switch (ch) {
-      case '\\':
-        output += "\\\\";
-        break;
-      case '"':
-        output += "\\\"";
-        break;
-      case '\b':
-        output += "\\b";
-        break;
-      case '\f':
-        output += "\\f";
-        break;
-      case '\n':
-        output += "\\n";
-        break;
-      case '\r':
-        output += "\\r";
-        break;
-      case '\t':
-        output += "\\t";
-        break;
-      default:
-        if (ch < 0x20) {
-          static constexpr char hex[] = "0123456789abcdef";
-          output += "\\u00";
-          output.push_back(hex[(ch >> 4) & 0x0f]);
-          output.push_back(hex[ch & 0x0f]);
-        } else {
-          output.push_back(static_cast<char>(ch));
-        }
-        break;
-    }
+namespace {
+
+using Json = nlohmann::ordered_json;
+
+Json ParseJsonObject(std::string_view body) {
+  auto parsed = Json::parse(body.begin(), body.end());
+  if (!parsed.is_object()) {
+    throw std::runtime_error("expected JSON object");
   }
-  output.push_back('"');
+  return parsed;
 }
 
-std::string BuildSchemaJson(const CsvViewData& data, bool editable) {
-  std::string json;
-  json.reserve(256 + data.headers().size() * 32);
-  json += "{\"file\":";
-  AppendJsonString(json, data.file_name());
-  json += ",\"columns\":[";
-  for (std::size_t i = 0; i < data.headers().size(); ++i) {
-    if (i > 0) {
-      json.push_back(',');
-    }
-    AppendJsonString(json, data.headers()[i]);
+const Json& RequiredField(const Json& object, std::string_view field) {
+  const auto iter = object.find(std::string(field));
+  if (iter == object.end()) {
+    throw std::runtime_error("missing JSON field: " + std::string(field));
   }
-  json += "],\"readOnly\":";
-  json += editable ? "false" : "true";
-  json += ",\"editable\":";
-  json += editable ? "true" : "false";
-  json += ",\"mode\":";
-  AppendJsonString(json, data.mode_name());
-  json += ",\"totalRows\":";
-  json += std::to_string(data.row_count());
-  json += "}";
-  return json;
+  return *iter;
+}
+
+bool IsMissingFieldError(const std::exception& ex, std::string_view field) {
+  return ex.what() == "missing JSON field: " + std::string(field);
+}
+
+std::vector<std::string> StringsFromJsonArray(const Json& value) {
+  if (!value.is_array()) {
+    throw std::runtime_error("expected JSON array");
+  }
+
+  std::vector<std::string> values;
+  values.reserve(value.size());
+  for (const auto& item : value) {
+    if (!item.is_string()) {
+      throw std::runtime_error("expected JSON string");
+    }
+    values.push_back(item.get<std::string>());
+  }
+  return values;
+}
+
+}  // namespace
+
+std::string BuildSchemaJson(const CsvViewData& data, bool editable) {
+  Json json;
+  json["file"] = data.file_name();
+  json["columns"] = data.headers();
+  json["readOnly"] = !editable;
+  json["editable"] = editable;
+  json["mode"] = std::string(data.mode_name());
+  json["totalRows"] = data.row_count();
+  return json.dump();
 }
 
 std::string BuildRowsJson(const CsvViewData& data,
                           std::uint64_t offset,
                           std::uint64_t limit,
                           const std::vector<std::vector<std::string>>& rows) {
-  std::string json;
-  json += "{\"offset\":";
-  json += std::to_string(offset);
-  json += ",\"limit\":";
-  json += std::to_string(limit);
-  json += ",\"totalRows\":";
-  json += std::to_string(data.row_count());
-  json += ",\"rows\":[";
-
-  for (std::size_t row_index = 0; row_index < rows.size(); ++row_index) {
-    if (row_index > 0) {
-      json.push_back(',');
-    }
-    json.push_back('[');
-    const auto& row = rows[row_index];
+  Json row_values = Json::array();
+  for (const auto& row : rows) {
+    Json cells = Json::array();
     for (std::size_t col_index = 0; col_index < data.headers().size(); ++col_index) {
-      if (col_index > 0) {
-        json.push_back(',');
-      }
-      if (col_index < row.size()) {
-        AppendJsonString(json, row[col_index]);
-      } else {
-        AppendJsonString(json, "");
-      }
+      cells.push_back(col_index < row.size() ? row[col_index] : "");
     }
-    json.push_back(']');
+    row_values.push_back(std::move(cells));
   }
 
-  json += "]}";
-  return json;
+  Json json;
+  json["offset"] = offset;
+  json["limit"] = limit;
+  json["totalRows"] = data.row_count();
+  json["rows"] = std::move(row_values);
+  return json.dump();
 }
 
 std::string BuildHealthJson() {
-  return "{\"status\":\"ok\",\"readOnly\":true}";
+  Json json;
+  json["status"] = "ok";
+  json["readOnly"] = true;
+  return json.dump();
 }
 
 std::string BuildStartupJson(const std::string& url) {
-  std::string json = "{\"url\":";
-  AppendJsonString(json, url);
-  json += "}";
-  return json;
-}
-
-void SkipJsonWs(std::string_view text, std::size_t& pos) {
-  while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos])) != 0) {
-    ++pos;
-  }
-}
-
-std::string ParseJsonString(std::string_view text, std::size_t& pos) {
-  SkipJsonWs(text, pos);
-  if (pos >= text.size() || text[pos] != '"') {
-    throw std::runtime_error("expected JSON string");
-  }
-  ++pos;
-  std::string value;
-  while (pos < text.size()) {
-    const char ch = text[pos++];
-    if (ch == '"') {
-      return value;
-    }
-    if (ch != '\\') {
-      value.push_back(ch);
-      continue;
-    }
-    if (pos >= text.size()) {
-      throw std::runtime_error("unterminated JSON escape");
-    }
-    const char escaped = text[pos++];
-    switch (escaped) {
-      case '"': value.push_back('"'); break;
-      case '\\': value.push_back('\\'); break;
-      case '/': value.push_back('/'); break;
-      case 'b': value.push_back('\b'); break;
-      case 'f': value.push_back('\f'); break;
-      case 'n': value.push_back('\n'); break;
-      case 'r': value.push_back('\r'); break;
-      case 't': value.push_back('\t'); break;
-      default:
-        throw std::runtime_error("unsupported JSON escape");
-    }
-  }
-  throw std::runtime_error("unterminated JSON string");
-}
-
-void SkipJsonValue(std::string_view text, std::size_t& pos) {
-  SkipJsonWs(text, pos);
-  if (pos >= text.size()) {
-    throw std::runtime_error("expected JSON value");
-  }
-  if (text[pos] == '"') {
-    (void)ParseJsonString(text, pos);
-    return;
-  }
-  if (text[pos] == '{' || text[pos] == '[') {
-    const char open = text[pos++];
-    const char close = open == '{' ? '}' : ']';
-    int depth = 1;
-    while (pos < text.size() && depth > 0) {
-      if (text[pos] == '"') {
-        (void)ParseJsonString(text, pos);
-      } else if (text[pos] == open) {
-        ++depth;
-        ++pos;
-      } else if (text[pos] == close) {
-        --depth;
-        ++pos;
-      } else {
-        ++pos;
-      }
-    }
-    if (depth != 0) {
-      throw std::runtime_error("unterminated JSON value");
-    }
-    return;
-  }
-  while (pos < text.size() && text[pos] != ',' && text[pos] != '}' && text[pos] != ']') {
-    ++pos;
-  }
-}
-
-template <typename Parser>
-auto ParseJsonField(std::string_view body, std::string_view field, Parser parser) {
-  std::size_t pos = 0;
-  SkipJsonWs(body, pos);
-  if (pos >= body.size() || body[pos++] != '{') {
-    throw std::runtime_error("expected JSON object");
-  }
-  while (true) {
-    SkipJsonWs(body, pos);
-    if (pos < body.size() && body[pos] == '}') {
-      break;
-    }
-    const auto key = ParseJsonString(body, pos);
-    SkipJsonWs(body, pos);
-    if (pos >= body.size() || body[pos++] != ':') {
-      throw std::runtime_error("expected JSON object separator");
-    }
-    if (key == field) {
-      return parser(body, pos);
-    }
-    SkipJsonValue(body, pos);
-    SkipJsonWs(body, pos);
-    if (pos < body.size() && body[pos] == ',') {
-      ++pos;
-      continue;
-    }
-    if (pos < body.size() && body[pos] == '}') {
-      break;
-    }
-  }
-  throw std::runtime_error("missing JSON field: " + std::string(field));
+  Json json;
+  json["url"] = url;
+  return json.dump();
 }
 
 std::uint64_t JsonUintField(std::string_view body, std::string_view field) {
-  return ParseJsonField(body, field, [](std::string_view text, std::size_t& pos) {
-    SkipJsonWs(text, pos);
-    if (pos >= text.size() || !std::isdigit(static_cast<unsigned char>(text[pos]))) {
-      throw std::runtime_error("expected JSON integer");
+  const auto object = ParseJsonObject(body);
+  const auto& value = RequiredField(object, field);
+  if (value.is_number_unsigned()) {
+    return value.get<std::uint64_t>();
+  }
+  if (value.is_number_integer()) {
+    const auto signed_value = value.get<std::int64_t>();
+    if (signed_value >= 0) {
+      return static_cast<std::uint64_t>(signed_value);
     }
-    std::uint64_t value = 0;
-    while (pos < text.size() && std::isdigit(static_cast<unsigned char>(text[pos])) != 0) {
-      value = value * 10 + static_cast<std::uint64_t>(text[pos++] - '0');
-    }
-    return value;
-  });
+  }
+  throw std::runtime_error("expected JSON integer");
 }
 
 std::string JsonStringField(std::string_view body, std::string_view field) {
-  return ParseJsonField(body, field, [](std::string_view text, std::size_t& pos) {
-    return ParseJsonString(text, pos);
-  });
+  const auto object = ParseJsonObject(body);
+  const auto& value = RequiredField(object, field);
+  if (!value.is_string()) {
+    throw std::runtime_error("expected JSON string");
+  }
+  return value.get<std::string>();
 }
 
 std::vector<std::string> JsonStringArrayField(std::string_view body, std::string_view field) {
-  return ParseJsonField(body, field, [](std::string_view text, std::size_t& pos) {
-    SkipJsonWs(text, pos);
-    if (pos >= text.size() || text[pos++] != '[') {
-      throw std::runtime_error("expected JSON array");
-    }
-    std::vector<std::string> values;
-    while (true) {
-      SkipJsonWs(text, pos);
-      if (pos < text.size() && text[pos] == ']') {
-        ++pos;
-        return values;
-      }
-      values.push_back(ParseJsonString(text, pos));
-      SkipJsonWs(text, pos);
-      if (pos < text.size() && text[pos] == ',') {
-        ++pos;
-        continue;
-      }
-      if (pos < text.size() && text[pos] == ']') {
-        ++pos;
-        return values;
-      }
-      throw std::runtime_error("expected JSON array separator");
-    }
-  });
+  const auto object = ParseJsonObject(body);
+  return StringsFromJsonArray(RequiredField(object, field));
 }
 
 bool JsonBoolField(std::string_view body, std::string_view field) {
-  return ParseJsonField(body, field, [](std::string_view text, std::size_t& pos) {
-    SkipJsonWs(text, pos);
-    if (text.substr(pos, 4) == "true") {
-      pos += 4;
-      return true;
-    }
-    if (text.substr(pos, 5) == "false") {
-      pos += 5;
-      return false;
-    }
+  const auto object = ParseJsonObject(body);
+  const auto& value = RequiredField(object, field);
+  if (!value.is_boolean()) {
     throw std::runtime_error("expected JSON boolean");
-  });
+  }
+  return value.get<bool>();
 }
 
 std::string JsonStringFieldOr(std::string_view body,
@@ -295,8 +137,7 @@ std::string JsonStringFieldOr(std::string_view body,
   try {
     return JsonStringField(body, field);
   } catch (const std::exception& ex) {
-    const std::string missing = "missing JSON field: " + std::string(field);
-    if (ex.what() == missing) {
+    if (IsMissingFieldError(ex, field)) {
       return fallback;
     }
     throw;
@@ -307,8 +148,7 @@ bool JsonBoolFieldOr(std::string_view body, std::string_view field, bool fallbac
   try {
     return JsonBoolField(body, field);
   } catch (const std::exception& ex) {
-    const std::string missing = "missing JSON field: " + std::string(field);
-    if (ex.what() == missing) {
+    if (IsMissingFieldError(ex, field)) {
       return fallback;
     }
     throw;
@@ -321,8 +161,7 @@ std::vector<std::string> JsonStringArrayFieldOr(std::string_view body,
   try {
     return JsonStringArrayField(body, field);
   } catch (const std::exception& ex) {
-    const std::string missing = "missing JSON field: " + std::string(field);
-    if (ex.what() == missing) {
+    if (IsMissingFieldError(ex, field)) {
       return fallback;
     }
     throw;
@@ -331,13 +170,13 @@ std::vector<std::string> JsonStringArrayFieldOr(std::string_view body,
 
 std::string SaveResultJson(std::size_t charts_generated,
                            std::string_view chart_error) {
-  std::string result = "{\"ok\":true,\"chartsGenerated\":";
-  result += std::to_string(charts_generated);
+  Json json;
+  json["ok"] = true;
+  json["chartsGenerated"] = charts_generated;
   if (!chart_error.empty()) {
-    result += ",\"chartError\":";
-    AppendJsonString(result, chart_error);
+    json["chartError"] = chart_error;
   }
-  result += "}";
-  return result;
+  return json.dump();
 }
+
 }  // namespace csvzall::pipeline::commands::view_internal

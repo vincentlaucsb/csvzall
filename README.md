@@ -198,7 +198,8 @@ server binds to `127.0.0.1`, prints the full viewer URL to stdout, and opens a
 browser by default unless `--no-open` is passed. API requests are gated by a
 random session token, and the file path is fixed for the lifetime of the
 process. Pass `--startup-json` to print `{"url":"http://127.0.0.1:..."}` for
-host integrations such as the Obsidian plugin.
+host integrations such as
+[obsidian-csvzall](https://github.com/vincentlaucsb/obsidian-csvzall).
 
 In auto mode, files at or below `--materialize-threshold-mb` (default: 200) are
 materialized once so AG Grid can provide client-side sorting, column filters,
@@ -278,8 +279,9 @@ Run configured generated artifacts from `.csvzall/charts.json`. Existing chart
 types render SVG (`heatmap`, `bar`, `line`); `markdown-table` renders an
 escaped Markdown table note that can be embedded in Obsidian with
 `![[path/to/output]]`. Relative `input` and `output` paths resolve against the
-vault or config root, and `runOnSave` lets the Obsidian plugin regenerate the
-artifact when the source CSV changes.
+vault or config root, and `runOnSave` lets companion integrations such as
+[obsidian-csvzall](https://github.com/vincentlaucsb/obsidian-csvzall)
+regenerate the artifact when the source CSV changes.
 
 ```json
 {
@@ -441,7 +443,7 @@ By default this installs to `C:\Program Files\csvzall`, adds
 `C:\Program Files\csvzall\bin` to the machine PATH, and relaunches with a
 Windows UAC prompt if Administrator rights are required. The installer refuses
 to install a build without SVG chart support because `csvzall view` and
-Obsidian/plugin chart workflows rely on the `charts` command.
+companion integration chart workflows rely on the `charts` command.
 
 For a per-user install that does not require elevation:
 
@@ -457,6 +459,7 @@ For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 |---|---|---|---|
 | [csv-parser](https://github.com/vincentlaucsb/csv-parser) | [Vincent La](https://github.com/vincentlaucsb) | CSV parsing, writing, and scalar type classification | Local checkout preferred; in-repo submodule for CI/release builds; pinned FetchContent fallback |
 | [simdjson](https://github.com/simdjson/simdjson) v3.13.0 | [Daniel Lemire](https://github.com/lemire), [Geoff Langdale](https://github.com/geofflangdale), and contributors | JSON parsing for mapping-driven `json extract` | System package if available; FetchContent fallback |
+| [JSON for Modern C++](https://github.com/nlohmann/json) v3.12.0 | [Niels Lohmann](https://github.com/nlohmann) and contributors | JSON serialization and configuration helpers | System package if available; FetchContent fallback |
 | svgplot | Local project | SVG calendar heatmap rendering for the `heatmap` command | Local checkout via `SVGPLOT_ROOT` or sibling `../svgplot`; optional |
 | [svg](https://github.com/vincentlaucsb/svg) | [Vincent La](https://github.com/vincentlaucsb) | Low-level SVG element construction used through svgplot | Local checkout via `SVG_ROOT` or sibling `../svg`; fallback to svgplot's populated dependency tree |
 | [argparse](https://github.com/p-ranav/argparse) v3.1 | [Pranav](https://github.com/p-ranav) | CLI argument parsing | FetchContent |

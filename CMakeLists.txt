@@ -27,6 +27,7 @@ option(CSVZALL_ENABLE_KEYCHAIN "Enable OS keychain credential storage when avail
 option(CSVZALL_FETCH_KEYCHAIN "Fetch hrantzsch/keychain when not found on system" ON)
 option(CSVZALL_FETCH_ZLIB "Fetch zlib when not found on system" ON)
 option(CSVZALL_FETCH_SIMDJSON "Fetch simdjson when not found on system" ON)
+option(CSVZALL_FETCH_NLOHMANN_JSON "Fetch nlohmann/json when not found on system" ON)
 option(CSVZALL_ENABLE_SVGPLOT "Enable SVG chart output through a local svgplot checkout" ON)
 set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT ON)
 if(MSVC)
@@ -230,6 +231,27 @@ elseif(TARGET simdjson)
 endif()
 if(CSVZALL_SIMDJSON_TARGET STREQUAL "")
   message(FATAL_ERROR "simdjson is required for JSON extraction. Install simdjson or enable CSVZALL_FETCH_SIMDJSON.")
+endif()
+
+find_package(nlohmann_json CONFIG QUIET)
+if(NOT TARGET nlohmann_json::nlohmann_json AND CSVZALL_FETCH_NLOHMANN_JSON)
+  message(STATUS "nlohmann/json not found; using FetchContent cache/fetch")
+  FetchContent_Declare(
+    nlohmann_json
+    URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+    UPDATE_DISCONNECTED TRUE
+  )
+  set(JSON_BuildTests OFF CACHE INTERNAL "")
+  set(JSON_Install OFF CACHE INTERNAL "")
+  FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
+set(CSVZALL_NLOHMANN_JSON_TARGET "")
+if(TARGET nlohmann_json::nlohmann_json)
+  set(CSVZALL_NLOHMANN_JSON_TARGET nlohmann_json::nlohmann_json)
+endif()
+if(CSVZALL_NLOHMANN_JSON_TARGET STREQUAL "")
+  message(FATAL_ERROR "nlohmann/json is required. Install nlohmann_json or enable CSVZALL_FETCH_NLOHMANN_JSON.")
 endif()
 
 set(SVGPLOT_ROOT "" CACHE PATH "Path to svgplot checkout (must contain include/svgplot/svgplot.hpp)")
@@ -606,6 +628,7 @@ function(csvzall_configure_app target_name)
     ${CSVZALL_ARGPARSE_TARGET}
     ${CSVZALL_INDICATORS_TARGET}
     ${CSVZALL_SIMDJSON_TARGET}
+    ${CSVZALL_NLOHMANN_JSON_TARGET}
     csv
     SQLiteCpp
     Threads::Threads

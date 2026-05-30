@@ -484,7 +484,9 @@ TEST_CASE("view: Add chart endpoint creates markdown table config and output") {
 
   const auto config_text = ReadTextFile(dir / ".csvzall" / "charts.json");
   CHECK(config_text.find("\"type\": \"markdown-table\"") != std::string::npos);
-  CHECK(config_text.find("\"columns\": [\"content\", \"date\"]") != std::string::npos);
+  CHECK(config_text.find("\"columns\":") != std::string::npos);
+  CHECK(config_text.find("\"content\"") != std::string::npos);
+  CHECK(config_text.find("\"date\"") != std::string::npos);
   CHECK(config_text.find("\"output\": \"charts/events.md\"") != std::string::npos);
 
   const auto markdown = ReadTextFile(dir / "charts" / "events.md");

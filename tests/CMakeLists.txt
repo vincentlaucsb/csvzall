@@ -76,6 +76,7 @@ target_link_libraries(csvzall_tests
     ${CSVZALL_ARGPARSE_TARGET}
     ${CSVZALL_INDICATORS_TARGET}
     ${CSVZALL_SIMDJSON_TARGET}
+    ${CSVZALL_NLOHMANN_JSON_TARGET}
     csv
     SQLiteCpp
     Threads::Threads
