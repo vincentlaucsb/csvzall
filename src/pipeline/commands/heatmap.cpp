@@ -8,7 +8,6 @@
 #include <svgplot/svgplot.hpp>
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cmath>
 #include <cctype>
@@ -29,10 +28,6 @@ namespace csvzall::pipeline::commands {
 namespace {
 
 using Day = std::chrono::sys_days;
-
-static constexpr std::array<std::string_view, 8> kSeriesColors{
-    "#2563eb", "#059669", "#dc2626", "#7c3aed",
-    "#ea580c", "#0891b2", "#be123c", "#4b5563"};
 
 std::string Trim(std::string_view value) {
   const auto first = value.find_first_not_of(" \t\r\n");
@@ -176,9 +171,7 @@ std::string ValueLabel(const common::ChartValueSpec& spec) {
 }
 
 std::string ValueColor(const common::ChartValueSpec& spec, std::size_t index) {
-  return spec.color.empty()
-      ? std::string(kSeriesColors[index % kSeriesColors.size()])
-      : spec.color;
+  return spec.color.empty() ? svgplot::default_series_color(index) : spec.color;
 }
 
 std::string NormalizedOrientation(std::string_view raw) {
@@ -484,7 +477,7 @@ protected:
           bars.push_back({
               order[i],
               totals[order[i]],
-              std::string(kSeriesColors[i % kSeriesColors.size()])});
+              svgplot::default_series_color(i)});
         }
         output_ << svgplot::bar_chart(bars, chart_options).str() << '\n';
         return 0;
@@ -650,7 +643,7 @@ protected:
         std::sort(points.begin(), points.end(), [](const auto& lhs, const auto& rhs) {
           return lhs.x < rhs.x;
         });
-        series.push_back({order[i], std::move(points), std::string(kSeriesColors[i % kSeriesColors.size()])});
+        series.push_back({order[i], std::move(points), svgplot::default_series_color(i)});
       }
 
       svgplot::ChartOptions chart_options;

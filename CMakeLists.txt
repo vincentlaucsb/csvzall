@@ -28,7 +28,8 @@ option(CSVZALL_FETCH_KEYCHAIN "Fetch hrantzsch/keychain when not found on system
 option(CSVZALL_FETCH_ZLIB "Fetch zlib when not found on system" ON)
 option(CSVZALL_FETCH_SIMDJSON "Fetch simdjson when not found on system" ON)
 option(CSVZALL_FETCH_NLOHMANN_JSON "Fetch nlohmann/json when not found on system" ON)
-option(CSVZALL_ENABLE_SVGPLOT "Enable SVG chart output through a local svgplot checkout" ON)
+option(CSVZALL_ENABLE_SVGPLOT "Enable SVG chart output through svgplot" ON)
+option(CSVZALL_FETCH_SVGPLOT "Fetch svgplot from GitHub when not found on system or locally" ON)
 set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT ON)
 if(MSVC)
   set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT OFF)
@@ -254,58 +255,128 @@ if(CSVZALL_NLOHMANN_JSON_TARGET STREQUAL "")
   message(FATAL_ERROR "nlohmann/json is required. Install nlohmann_json or enable CSVZALL_FETCH_NLOHMANN_JSON.")
 endif()
 
-set(SVGPLOT_ROOT "" CACHE PATH "Path to svgplot checkout (must contain include/svgplot/svgplot.hpp)")
-set(SVG_ROOT "" CACHE PATH "Path to vincentlaucsb/svg checkout (must contain src/svg.hpp)")
+set(SVGPLOT_ROOT "" CACHE PATH "Path to svgplot checkout or single-header distribution")
+set(CSVZALL_SVGPLOT_GIT_TAG "main"
+    CACHE STRING "svgplot revision used by FetchContent fallback")
 set(CSVZALL_HAVE_SVGPLOT OFF)
 set(CSVZALL_SVGPLOT_TARGET "")
 set(CSVZALL_SIBLING_SVGPLOT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../svgplot")
-set(CSVZALL_SIBLING_SVG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../svg")
 get_filename_component(CSVZALL_SIBLING_SVGPLOT_ROOT "${CSVZALL_SIBLING_SVGPLOT_ROOT}" ABSOLUTE)
-get_filename_component(CSVZALL_SIBLING_SVG_ROOT "${CSVZALL_SIBLING_SVG_ROOT}" ABSOLUTE)
 
-if(CSVZALL_ENABLE_SVGPLOT)
-  set(CSVZALL_LOCAL_SVGPLOT_ROOT "")
-  if(NOT SVGPLOT_ROOT STREQUAL "")
-    get_filename_component(CSVZALL_LOCAL_SVGPLOT_ROOT "${SVGPLOT_ROOT}" ABSOLUTE)
-  elseif(EXISTS "${CSVZALL_SIBLING_SVGPLOT_ROOT}/include/svgplot/svgplot.hpp")
-    set(CSVZALL_LOCAL_SVGPLOT_ROOT "${CSVZALL_SIBLING_SVGPLOT_ROOT}")
+function(csvzall_validate_svgplot_api header_path source_description)
+  if(NOT EXISTS "${header_path}")
+    message(FATAL_ERROR "svgplot header not found: ${header_path}")
+  endif()
+  file(READ "${header_path}" _csvzall_svgplot_header)
+  if(NOT _csvzall_svgplot_header MATCHES "default_series_color")
+    message(FATAL_ERROR
+      "svgplot is too old for csvzall: ${source_description}\n"
+      "Expected svgplot::default_series_color(). Update svgplot or set SVGPLOT_ROOT to a newer checkout.")
+  endif()
+endfunction()
+
+macro(csvzall_use_svgplot_target target_name source_description)
+  set(CSVZALL_SVGPLOT_TARGET "${target_name}")
+  set(CSVZALL_HAVE_SVGPLOT ON)
+  message(STATUS "Using svgplot from: ${source_description}")
+endmacro()
+
+function(csvzall_try_svgplot_root root_path source_description)
+  set(_svgplot_root "${root_path}")
+  if(NOT IS_ABSOLUTE "${_svgplot_root}")
+    get_filename_component(_svgplot_root "${_svgplot_root}" ABSOLUTE)
   endif()
 
-  if(NOT CSVZALL_LOCAL_SVGPLOT_ROOT STREQUAL "" AND
-     EXISTS "${CSVZALL_LOCAL_SVGPLOT_ROOT}/include/svgplot/svgplot.hpp")
-    set(CSVZALL_LOCAL_SVG_ROOT "")
-    if(NOT SVG_ROOT STREQUAL "")
-      get_filename_component(CSVZALL_LOCAL_SVG_ROOT "${SVG_ROOT}" ABSOLUTE)
-    elseif(EXISTS "${CSVZALL_SIBLING_SVG_ROOT}/src/svg.hpp")
-      set(CSVZALL_LOCAL_SVG_ROOT "${CSVZALL_SIBLING_SVG_ROOT}")
-    else()
-      set(_csvzall_svg_candidates
-        "${CSVZALL_LOCAL_SVGPLOT_ROOT}/out/build/x64-Release/_deps/svg-src"
-        "${CSVZALL_LOCAL_SVGPLOT_ROOT}/out/build/x64-Debug/_deps/svg-src"
-        "${CSVZALL_LOCAL_SVGPLOT_ROOT}/out/build/_deps/svg-src")
-      foreach(_candidate IN LISTS _csvzall_svg_candidates)
-        if(EXISTS "${_candidate}/src/svg.hpp")
-          set(CSVZALL_LOCAL_SVG_ROOT "${_candidate}")
-          break()
-        endif()
-      endforeach()
+  set(_single_header "${_svgplot_root}/single_include/svgplot/svgplot.hpp")
+  if(EXISTS "${_single_header}")
+    file(READ "${_single_header}" _single_header_content)
+    if(_single_header_content MATCHES "default_series_color")
+      add_library(csvzall_svgplot_single_header INTERFACE)
+      target_include_directories(csvzall_svgplot_single_header INTERFACE
+        "${_svgplot_root}/single_include")
+      target_compile_features(csvzall_svgplot_single_header INTERFACE cxx_std_23)
+      csvzall_use_svgplot_target(csvzall_svgplot_single_header
+        "${source_description} single-header distribution")
+      set(CSVZALL_SVGPLOT_TARGET "${CSVZALL_SVGPLOT_TARGET}" PARENT_SCOPE)
+      set(CSVZALL_HAVE_SVGPLOT "${CSVZALL_HAVE_SVGPLOT}" PARENT_SCOPE)
+      return()
     endif()
+    message(STATUS
+      "svgplot single-header distribution is present but too old; falling back to svgplot CMake target.")
+  endif()
 
-    if(CSVZALL_LOCAL_SVG_ROOT STREQUAL "" OR NOT EXISTS "${CSVZALL_LOCAL_SVG_ROOT}/src/svg.hpp")
-      message(STATUS "svgplot found, but vincentlaucsb/svg was not found; heatmap command disabled. Set -DSVG_ROOT=<path-to-svg>.")
+  if(EXISTS "${_svgplot_root}/CMakeLists.txt" AND
+     EXISTS "${_svgplot_root}/include/svgplot/svgplot.hpp")
+    csvzall_validate_svgplot_api(
+      "${_svgplot_root}/include/svgplot/palette.hpp"
+      "${source_description}")
+    set(SVGPLOT_ENABLE_COVERAGE OFF CACHE BOOL "Disable svgplot coverage when consumed by csvzall" FORCE)
+    set(_csvzall_saved_build_testing "${BUILD_TESTING}")
+    set(BUILD_TESTING OFF CACHE BOOL "Disable subproject tests while adding svgplot" FORCE)
+    add_subdirectory("${_svgplot_root}" "${CMAKE_BINARY_DIR}/svgplot-local-build" EXCLUDE_FROM_ALL)
+    set(BUILD_TESTING "${_csvzall_saved_build_testing}" CACHE BOOL "Build the testing tree." FORCE)
+    foreach(_csvzall_svgplot_aux_target
+        exercise_log_svg
+        training_heatmap_svg
+        multi_series_line_svg
+        stacked_bar_svg
+        svgplot_tests)
+      if(TARGET ${_csvzall_svgplot_aux_target})
+        set_target_properties(${_csvzall_svgplot_aux_target} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+      endif()
+    endforeach()
+    if(TARGET svgplot::svgplot)
+      csvzall_use_svgplot_target(svgplot::svgplot "${source_description} CMake target")
+    elseif(TARGET svgplot)
+      csvzall_use_svgplot_target(svgplot "${source_description} CMake target")
     else()
-      message(STATUS "Using svgplot from: ${CSVZALL_LOCAL_SVGPLOT_ROOT}")
-      message(STATUS "Using svg dependency from: ${CSVZALL_LOCAL_SVG_ROOT}")
-      add_library(csvzall_svgplot INTERFACE)
-      target_include_directories(csvzall_svgplot INTERFACE
-        "${CSVZALL_LOCAL_SVGPLOT_ROOT}/include"
-        "${CSVZALL_LOCAL_SVG_ROOT}/src")
-      target_compile_features(csvzall_svgplot INTERFACE cxx_std_23)
-      set(CSVZALL_SVGPLOT_TARGET csvzall_svgplot)
-      set(CSVZALL_HAVE_SVGPLOT ON)
+      message(FATAL_ERROR "svgplot CMake target was not created by ${source_description}.")
     endif()
-  else()
-    message(STATUS "svgplot checkout not found; heatmap command disabled. Set -DSVGPLOT_ROOT=<path-to-svgplot>.")
+    set(CSVZALL_SVGPLOT_TARGET "${CSVZALL_SVGPLOT_TARGET}" PARENT_SCOPE)
+    set(CSVZALL_HAVE_SVGPLOT "${CSVZALL_HAVE_SVGPLOT}" PARENT_SCOPE)
+    return()
+  endif()
+
+  message(STATUS "svgplot not found or invalid at: ${_svgplot_root}")
+endfunction()
+
+if(CSVZALL_ENABLE_SVGPLOT)
+  find_package(svgplot CONFIG QUIET)
+  if(TARGET svgplot::svgplot)
+    csvzall_use_svgplot_target(svgplot::svgplot "CMake package svgplot::svgplot")
+  elseif(TARGET svgplot)
+    csvzall_use_svgplot_target(svgplot "CMake package svgplot")
+  endif()
+
+  if(NOT CSVZALL_HAVE_SVGPLOT AND NOT SVGPLOT_ROOT STREQUAL "")
+    csvzall_try_svgplot_root("${SVGPLOT_ROOT}" "SVGPLOT_ROOT")
+  endif()
+
+  if(NOT CSVZALL_HAVE_SVGPLOT AND
+     EXISTS "${CSVZALL_SIBLING_SVGPLOT_ROOT}/include/svgplot/svgplot.hpp")
+    csvzall_try_svgplot_root("${CSVZALL_SIBLING_SVGPLOT_ROOT}" "sibling ../svgplot")
+  endif()
+
+  if(NOT CSVZALL_HAVE_SVGPLOT AND CSVZALL_FETCH_SVGPLOT)
+    message(STATUS "Fetching svgplot with FetchContent")
+    FetchContent_Declare(
+      svgplot
+      GIT_REPOSITORY https://github.com/vincentlaucsb/svgplot.git
+      GIT_TAG ${CSVZALL_SVGPLOT_GIT_TAG}
+      GIT_SHALLOW TRUE
+      UPDATE_DISCONNECTED TRUE
+    )
+    FetchContent_GetProperties(svgplot)
+    if(NOT svgplot_POPULATED)
+      FetchContent_Populate(svgplot)
+    endif()
+    csvzall_try_svgplot_root("${svgplot_SOURCE_DIR}" "FetchContent svgplot")
+  endif()
+
+  if(NOT CSVZALL_HAVE_SVGPLOT)
+    message(STATUS
+      "svgplot not found; SVG chart output disabled. Install svgplot, set SVGPLOT_ROOT, "
+      "provide sibling ../svgplot, or enable CSVZALL_FETCH_SVGPLOT.")
   endif()
 else()
   message(STATUS "SVG chart output disabled (CSVZALL_ENABLE_SVGPLOT=OFF)")

@@ -422,11 +422,11 @@ To specify a custom csv-parser location:
 cmake -S . -B build -DCSV_PARSER_ROOT=/path/to/csv-parser
 ```
 
-To enable the `heatmap` command, keep `svgplot` and `svg` as sibling checkouts
-or pass their locations explicitly:
+To enable SVG chart output, install `svgplot`, keep it as a sibling checkout, let
+CMake fetch it from GitHub, or pass its location explicitly:
 
 ```sh
-cmake -S . -B build -DSVGPLOT_ROOT=/path/to/svgplot -DSVG_ROOT=/path/to/svg
+cmake -S . -B build -DSVGPLOT_ROOT=/path/to/svgplot
 ```
 
 The binary is at `build/Release/csvzall.exe` (Windows) or `build/csvzall` (Linux/macOS).
@@ -460,8 +460,7 @@ For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 | [csv-parser](https://github.com/vincentlaucsb/csv-parser) | [Vincent La](https://github.com/vincentlaucsb) | CSV parsing, writing, and scalar type classification | Local checkout preferred; in-repo submodule for CI/release builds; pinned FetchContent fallback |
 | [simdjson](https://github.com/simdjson/simdjson) v3.13.0 | [Daniel Lemire](https://github.com/lemire), [Geoff Langdale](https://github.com/geofflangdale), and contributors | JSON parsing for mapping-driven `json extract` | System package if available; FetchContent fallback |
 | [JSON for Modern C++](https://github.com/nlohmann/json) v3.12.0 | [Niels Lohmann](https://github.com/nlohmann) and contributors | JSON serialization and configuration helpers | System package if available; FetchContent fallback |
-| svgplot | Local project | SVG calendar heatmap rendering for the `heatmap` command | Local checkout via `SVGPLOT_ROOT` or sibling `../svgplot`; optional |
-| [svg](https://github.com/vincentlaucsb/svg) | [Vincent La](https://github.com/vincentlaucsb) | Low-level SVG element construction used through svgplot | Local checkout via `SVG_ROOT` or sibling `../svg`; fallback to svgplot's populated dependency tree |
+| [svgplot](https://github.com/vincentlaucsb/svgplot) | [Vincent La](https://github.com/vincentlaucsb) | SVG chart rendering for `heatmap`, `bar`, and `line` chart outputs | CMake package if available; local checkout via `SVGPLOT_ROOT` or sibling `../svgplot`; FetchContent fallback |
 | [argparse](https://github.com/p-ranav/argparse) v3.1 | [Pranav](https://github.com/p-ranav) | CLI argument parsing | FetchContent |
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) v0.18.5 | [Yuji Hirose](https://github.com/yhirose) and contributors | Embedded local HTTP server for the `view` command | Vendored single header under `vendor/httplib` |
 | [indicators](https://github.com/p-ranav/indicators) v2.3 | [Pranav](https://github.com/p-ranav) | Terminal progress bars for long-running imports | FetchContent |
@@ -487,6 +486,10 @@ For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 - Column matching is case-insensitive by default (SQLite identifier resolution).
 - `calendar` consumes fixed-shape `date,content` CSV, rejects duplicate dates, and renders locale-independent Sunday-first month tables.
 - `heatmap` consumes generic dated CSV, aggregates duplicate dates, and renders a self-contained SVG through svgplot when that library is configured.
+
+## License
+
+csvzall is licensed under the MIT License. See [LICENSE](LICENSE).
 
 ## Roadmap
 
