@@ -431,6 +431,11 @@ cmake -S . -B build -DSVGPLOT_ROOT=/path/to/svgplot
 
 The binary is at `build/Release/csvzall.exe` (Windows) or `build/csvzall` (Linux/macOS).
 
+The C++ implementation is also built as `csvzall_core`, with the alias target
+`csvzall::core`, and the CLI executable links that library from a thin
+`main.cpp` layer. This is an early library target for custom C++ programs and
+in-tree tests; the installed SDK/header surface is still intentionally rough.
+
 ### Windows install helper
 
 Windows users can build, install, and add `csvzall` to PATH with:

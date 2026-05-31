@@ -9,8 +9,6 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(Catch2)
 
 add_executable(csvzall_tests
-  ${CSVZALL_VIEWER_ASSET_CPP}
-  ${CSVZALL_VIEWER_ASSET_HPP}
   test_filter.cpp
   test_derive.cpp
   test_head.cpp
@@ -23,80 +21,22 @@ add_executable(csvzall_tests
   test_markdown_calendar.cpp
   test_summarize.cpp
   test_timeseries.cpp
-  ../src/credentials.cpp
-  ../src/util.cpp
-  ../src/transform_pipeline.cpp
-  ../src/pipeline/common/chart_spec.cpp
-  ../src/pipeline/common/column_lookup.cpp
-  ../src/pipeline/common/gzip_stream.cpp
-  ../src/pipeline/common/json_path.cpp
-  ../src/pipeline/common/markdown_calendar.cpp
-  ../src/pipeline/common/markdown_table.cpp
-  ../src/pipeline/common/row_utils.cpp
-  ../src/pipeline/sqlite/sqlite_db.cpp
-  ../src/pipeline/sqlite/csv_loader.cpp
-  ../src/pipeline/commands/append.cpp
-  ../src/pipeline/commands/CsvInputCommand.cpp
-  ../src/pipeline/commands/CsvTransformCommand.cpp
-  ../src/pipeline/commands/derive.cpp
-  ../src/pipeline/commands/filter.cpp
-  ../src/pipeline/commands/json_extract.cpp
-  ../src/pipeline/commands/max.cpp
-  ../src/pipeline/commands/sql_query.cpp
-  ../src/pipeline/commands/sql_export.cpp
-  ../src/pipeline/commands/summarize.cpp
-  ../src/pipeline/commands/timeseries.cpp
-  ../src/pipeline/commands/view.cpp
-  ../src/pipeline/commands/view/assets.cpp
-  ../src/pipeline/commands/view/charts.cpp
-  ../src/pipeline/commands/view/json.cpp
-  ../src/pipeline/commands/view/model.cpp
-  ../src/pipeline/commands/view/server.cpp
-  ../src/pipeline/commands/view/support.cpp
   test_view.cpp)
 
 if(CSVZALL_HAVE_SVGPLOT)
   target_sources(csvzall_tests PRIVATE
-    test_heatmap.cpp
-    ../src/pipeline/commands/charts.cpp
-    ../src/pipeline/commands/heatmap.cpp)
-endif()
-
-if(CSVZALL_HAVE_POSTGRESQL)
-  target_sources(csvzall_tests PRIVATE
-    ../src/pipeline/postgres/postgres_connection.cpp
-    ../src/pipeline/postgres/schema_inference.cpp
-    ../src/pipeline/postgres/row_loader.cpp
-    ../src/pipeline/commands/postgres_export.cpp)
+    test_heatmap.cpp)
 endif()
 
 target_link_libraries(csvzall_tests
   PRIVATE
     Catch2::Catch2WithMain
-    ${CSVZALL_ARGPARSE_TARGET}
-    ${CSVZALL_INDICATORS_TARGET}
-    ${CSVZALL_SIMDJSON_TARGET}
-    ${CSVZALL_NLOHMANN_JSON_TARGET}
-    csv
-    SQLiteCpp
-    Threads::Threads
-    ${CSVZALL_ZLIB_TARGET})
-
-if(CSVZALL_HAVE_POSTGRESQL)
-  target_link_libraries(csvzall_tests PRIVATE ${CSVZALL_LIBPQXX_TARGET})
-endif()
-if(CSVZALL_HAVE_KEYCHAIN)
-  target_link_libraries(csvzall_tests PRIVATE ${CSVZALL_KEYCHAIN_TARGET})
-endif()
-if(CSVZALL_HAVE_SVGPLOT)
-  target_link_libraries(csvzall_tests PRIVATE ${CSVZALL_SVGPLOT_TARGET})
-endif()
+    csvzall::core)
 
 csvzall_copy_runtime_dependencies(csvzall_tests)
 
 target_include_directories(csvzall_tests
   PRIVATE
-    "${CSVZALL_VIEWER_GENERATED_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 set_property(TARGET csvzall_tests PROPERTY CXX_STANDARD ${CSVZALL_CXX_STANDARD})
