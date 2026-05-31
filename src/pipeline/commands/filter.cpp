@@ -1,14 +1,12 @@
 #include "commands.hpp"
+#include "sqlite_options.hpp"
 
 #include "../common/column_lookup.hpp"
 #include "../sqlite/csv_loader.hpp"
 #include "../sqlite/sqlite_db.hpp"
 
 #include <SQLiteCpp/SQLiteCpp.h>
-#include <csv.hpp>
-
 #include <string>
-#include <vector>
 
 namespace csvzall::pipeline::commands {
 
@@ -30,14 +28,11 @@ protected:
       return 1;
     }
 
-    sqlite::SqliteDb sdb = sqlite::OpenSqliteDb(options());
-    const auto column_affinities = sqlite::InferColumnAffinities(reader(), headers());
-    if (reset_reader() != 0) {
-      return 1;
-    }
-
-    if (!sqlite::LoadCsvIntoTable(
-            reader(), headers(), sdb.db(), "t", column_affinities, options(), logger())) {
+    sqlite::SqliteDb sdb = sqlite::OpenSqliteDb(MakeSqliteDbOpenOptions(options()));
+    if (!sqlite::LoadCsvIntoTableWithInferredAffinities(
+            [this]() -> csv::CSVReader& { return reader(); }, headers(), sdb.db(), "t",
+            [this]() { return reset_reader() == 0; },
+            MakeCsvLoadOptions(options()), MakeSqliteLogCallbacks(logger()))) {
       return 1;
     }
 
@@ -45,22 +40,8 @@ protected:
 
     try {
       SQLite::Statement query(sdb.db(), sql);
-
-      auto writer = csv::make_csv_writer(output()).set_auto_flush(false);
-      writer << headers();
-
-      while (query.executeStep()) {
-        std::vector<std::string> out_row;
-        out_row.reserve(static_cast<std::size_t>(query.getColumnCount()));
-        for (int i = 0; i < query.getColumnCount(); ++i) {
-          out_row.emplace_back(
-              query.getColumn(i).isNull() ? std::string{} : query.getColumn(i).getString());
-        }
-        writer << out_row;
-        stats().rows_processed++;
-      }
-
-      writer.flush();
+      stats().rows_processed +=
+          sqlite::WriteStatementRowsAsCsv(query, headers(), output());
     } catch (const SQLite::Exception& ex) {
       if (logger().error) {
         logger().error(std::string("SQLite filter error: ") + ex.what());

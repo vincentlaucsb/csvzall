@@ -8,7 +8,7 @@
 #include <regex>
 #include <string>
 
-namespace csvzall::pipeline::sqlite {
+namespace csvzall::sqlite {
 
 namespace {
 
@@ -139,10 +139,10 @@ SQLite::Database& SqliteDb::db() {
   return *db_;
 }
 
-SqliteDb OpenSqliteDb(const RunOptions& options) {
+SqliteDb OpenSqliteDb(const SqliteDbOpenOptions& options) {
   // Rule 1: explicit user-provided path (not managed by us).
-  if (!options.sqlite_db_path.empty()) {
-    return SqliteDb(options.sqlite_db_path, /*owns_temp_file=*/false);
+  if (!options.db_path.empty()) {
+    return SqliteDb(options.db_path, /*owns_temp_file=*/false);
   }
 
   // Rule 2: stdin or no path — size is unknown, always use in-memory.
@@ -163,7 +163,7 @@ SqliteDb OpenSqliteDb(const RunOptions& options) {
   }
 
   const auto threshold_bytes =
-      static_cast<std::uintmax_t>(options.sqlite_threshold_mb) * 1024ULL * 1024ULL;
+      static_cast<std::uintmax_t>(options.threshold_mb) * 1024ULL * 1024ULL;
 
   if (file_size <= threshold_bytes) {
     return SqliteDb(":memory:", /*owns_temp_file=*/false);
@@ -183,4 +183,4 @@ void RegisterSqliteRegexFunctions(SQLite::Database& db) {
                     RegexMatchFunction);
 }
 
-}  // namespace csvzall::pipeline::sqlite
+}  // namespace csvzall::sqlite

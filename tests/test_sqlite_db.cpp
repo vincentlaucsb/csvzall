@@ -19,7 +19,7 @@ void WriteBytes(const std::filesystem::path& path, const std::string& bytes) {
   out << bytes;
 }
 
-std::string MainDatabasePath(csvzall::pipeline::sqlite::SqliteDb& db) {
+std::string MainDatabasePath(csvzall::sqlite::SqliteDb& db) {
   SQLite::Statement query(db.db(), "PRAGMA database_list");
   while (query.executeStep()) {
     if (query.getColumn(1).getString() == "main") {
@@ -41,11 +41,11 @@ TEST_CASE("SqliteDb: explicit db path is preserved after close") {
   const auto db_path = TempPath("csvzall_sqlite_explicit.db");
   std::filesystem::remove(db_path);
 
-  csvzall::pipeline::RunOptions options;
-  options.sqlite_db_path = db_path.string();
+  csvzall::sqlite::SqliteDbOpenOptions options;
+  options.db_path = db_path.string();
 
   {
-    auto db = csvzall::pipeline::sqlite::OpenSqliteDb(options);
+    auto db = csvzall::sqlite::OpenSqliteDb(options);
     REQUIRE(EquivalentPath(MainDatabasePath(db)) == EquivalentPath(db_path));
     db.db().exec("CREATE TABLE data(value INTEGER)");
   }
@@ -55,11 +55,11 @@ TEST_CASE("SqliteDb: explicit db path is preserved after close") {
 }
 
 TEST_CASE("SqliteDb: stdin uses in-memory database") {
-  csvzall::pipeline::RunOptions options;
+  csvzall::sqlite::SqliteDbOpenOptions options;
   options.input_is_stdin = true;
   options.input_path = "-";
 
-  auto db = csvzall::pipeline::sqlite::OpenSqliteDb(options);
+  auto db = csvzall::sqlite::OpenSqliteDb(options);
 
   REQUIRE(MainDatabasePath(db).empty());
 }
@@ -68,11 +68,11 @@ TEST_CASE("SqliteDb: small file below threshold uses in-memory database") {
   const auto input_path = TempPath("csvzall_sqlite_small.csv");
   WriteBytes(input_path, "a\n1\n");
 
-  csvzall::pipeline::RunOptions options;
+  csvzall::sqlite::SqliteDbOpenOptions options;
   options.input_path = input_path.string();
-  options.sqlite_threshold_mb = 1;
+  options.threshold_mb = 1;
 
-  auto db = csvzall::pipeline::sqlite::OpenSqliteDb(options);
+  auto db = csvzall::sqlite::OpenSqliteDb(options);
 
   REQUIRE(MainDatabasePath(db).empty());
   std::filesystem::remove(input_path);
@@ -84,11 +84,11 @@ TEST_CASE("SqliteDb: file above threshold uses self-deleting temp database") {
 
   std::string sqlite_path;
   {
-    csvzall::pipeline::RunOptions options;
+    csvzall::sqlite::SqliteDbOpenOptions options;
     options.input_path = input_path.string();
-    options.sqlite_threshold_mb = 0;
+    options.threshold_mb = 0;
 
-    auto db = csvzall::pipeline::sqlite::OpenSqliteDb(options);
+    auto db = csvzall::sqlite::OpenSqliteDb(options);
     sqlite_path = MainDatabasePath(db);
 
     REQUIRE(!sqlite_path.empty());
@@ -106,11 +106,11 @@ TEST_CASE("SqliteDb: moved temp database is deleted only once") {
 
   std::string sqlite_path;
   {
-    csvzall::pipeline::RunOptions options;
+    csvzall::sqlite::SqliteDbOpenOptions options;
     options.input_path = input_path.string();
-    options.sqlite_threshold_mb = 0;
+    options.threshold_mb = 0;
 
-    auto first = csvzall::pipeline::sqlite::OpenSqliteDb(options);
+    auto first = csvzall::sqlite::OpenSqliteDb(options);
     sqlite_path = MainDatabasePath(first);
     REQUIRE(std::filesystem::exists(sqlite_path));
 

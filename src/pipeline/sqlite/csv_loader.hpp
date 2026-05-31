@@ -1,16 +1,29 @@
 #pragma once
 
+#include <cstdint>
+#include <functional>
+#include <ostream>
 #include <string>
 #include <vector>
-
-#include "../../pipeline_types.hpp"
 
 // Forward declarations — consumers that need to call db methods must include
 // the full SQLiteCpp and csv-parser headers themselves.
 namespace csv { class CSVReader; }
-namespace SQLite { class Database; }
+namespace SQLite {
+class Database;
+class Statement;
+}
 
-namespace csvzall::pipeline::sqlite {
+namespace csvzall::sqlite {
+
+struct SqliteLogCallbacks {
+  std::function<void(const std::string&)> error;
+  std::function<void(const std::string&)> verbose;
+};
+
+struct CsvLoadOptions {
+  bool sqlite_journal_enabled = false;
+};
 
 enum class SqliteColumnAffinity {
   Numeric,
@@ -54,7 +67,27 @@ bool LoadCsvIntoTable(csv::CSVReader& reader,
                       SQLite::Database& db,
                       const std::string& table_name,
                       const std::vector<SqliteColumnAffinity>& column_affinities,
-                      const RunOptions& options,
-                      const LoggerCallbacks& logger);
+                      const CsvLoadOptions& options,
+                      const SqliteLogCallbacks& logger);
 
-}  // namespace csvzall::pipeline::sqlite
+bool LoadCsvIntoTableWithInferredAffinities(
+    const std::function<csv::CSVReader&()>& reader,
+    const std::vector<std::string>& headers,
+    SQLite::Database& db,
+    const std::string& table_name,
+    const std::function<bool()>& reset_reader,
+    const CsvLoadOptions& options,
+    const SqliteLogCallbacks& logger);
+
+std::vector<std::string> StatementColumnNames(SQLite::Statement& statement);
+std::vector<std::string> StatementRowValues(SQLite::Statement& statement);
+
+std::uint64_t WriteStatementRowsAsCsv(SQLite::Statement& statement,
+                                      const std::vector<std::string>& headers,
+                                      std::ostream& output);
+
+}  // namespace csvzall::sqlite
+
+namespace csvzall::pipeline {
+namespace sqlite = ::csvzall::sqlite;
+}

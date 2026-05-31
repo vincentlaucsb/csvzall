@@ -4,6 +4,8 @@
 #include <csv.hpp>
 
 #include <algorithm>
+#include <cstdint>
+#include <ostream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -12,7 +14,7 @@
 #define CSVZALL_SQLITE_BIND_USE_STRING_COPY 1
 #endif
 
-namespace csvzall::pipeline::sqlite {
+namespace csvzall::sqlite {
 
 // Returns a double-quoted SQL identifier with embedded " escaped by doubling.
 std::string QuoteIdentifier(const std::string& name) {
@@ -114,8 +116,8 @@ bool LoadCsvIntoTable(csv::CSVReader& reader,
                       SQLite::Database& db,
                       const std::string& table_name,
                       const std::vector<SqliteColumnAffinity>& column_affinities,
-                      const RunOptions& options,
-                      const LoggerCallbacks& logger) {
+                      const CsvLoadOptions& options,
+                      const SqliteLogCallbacks& logger) {
   if (headers.empty()) {
     if (logger.error) logger.error("Cannot load CSV into SQLite: no column headers.");
     return false;
@@ -161,4 +163,56 @@ bool LoadCsvIntoTable(csv::CSVReader& reader,
   return true;
 }
 
-}  // namespace csvzall::pipeline::sqlite
+bool LoadCsvIntoTableWithInferredAffinities(
+    const std::function<csv::CSVReader&()>& reader,
+    const std::vector<std::string>& headers,
+    SQLite::Database& db,
+    const std::string& table_name,
+    const std::function<bool()>& reset_reader,
+    const CsvLoadOptions& options,
+    const SqliteLogCallbacks& logger) {
+  const auto column_affinities = InferColumnAffinities(reader(), headers);
+  if (!reset_reader()) {
+    return false;
+  }
+  return LoadCsvIntoTable(reader(), headers, db, table_name, column_affinities, options, logger);
+}
+
+std::vector<std::string> StatementColumnNames(SQLite::Statement& statement) {
+  const int column_count = statement.getColumnCount();
+  std::vector<std::string> names;
+  names.reserve(static_cast<std::size_t>(column_count));
+  for (int i = 0; i < column_count; ++i) {
+    names.emplace_back(statement.getColumnName(i));
+  }
+  return names;
+}
+
+std::vector<std::string> StatementRowValues(SQLite::Statement& statement) {
+  const int column_count = statement.getColumnCount();
+  std::vector<std::string> values;
+  values.reserve(static_cast<std::size_t>(column_count));
+  for (int i = 0; i < column_count; ++i) {
+    values.emplace_back(
+        statement.getColumn(i).isNull() ? std::string{} : statement.getColumn(i).getString());
+  }
+  return values;
+}
+
+std::uint64_t WriteStatementRowsAsCsv(SQLite::Statement& statement,
+                                      const std::vector<std::string>& headers,
+                                      std::ostream& output) {
+  auto writer = csv::make_csv_writer(output).set_auto_flush(false);
+  writer << headers;
+
+  std::uint64_t rows_written = 0;
+  while (statement.executeStep()) {
+    writer << StatementRowValues(statement);
+    ++rows_written;
+  }
+
+  writer.flush();
+  return rows_written;
+}
+
+}  // namespace csvzall::sqlite

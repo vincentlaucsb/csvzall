@@ -1,4 +1,5 @@
 #include "commands.hpp"
+#include "sqlite_options.hpp"
 
 #include "../sqlite/csv_loader.hpp"
 
@@ -64,11 +65,6 @@ protected:
       return 1;
     }
 
-    const auto column_affinities = sqlite::InferColumnAffinities(reader(), headers());
-    if (reset_reader() != 0) {
-      return 1;
-    }
-
     try {
       SQLite::Database db(db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
       bool committed = false;
@@ -79,8 +75,10 @@ protected:
         }
       };
 
-      if (!sqlite::LoadCsvIntoTable(
-              reader(), headers(), db, table_name_, column_affinities, options(), logger())) {
+      if (!sqlite::LoadCsvIntoTableWithInferredAffinities(
+              [this]() -> csv::CSVReader& { return reader(); }, headers(), db, table_name_,
+              [this]() { return reset_reader() == 0; },
+              MakeCsvLoadOptions(options()), MakeSqliteLogCallbacks(logger()))) {
         cleanup();
         return 1;
       }

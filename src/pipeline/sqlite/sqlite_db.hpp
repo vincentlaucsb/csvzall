@@ -1,13 +1,19 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <string>
 
 #include <SQLiteCpp/SQLiteCpp.h>
 
-#include "../../pipeline_types.hpp"
+namespace csvzall::sqlite {
 
-namespace csvzall::pipeline::sqlite {
+struct SqliteDbOpenOptions {
+  std::string db_path;
+  bool input_is_stdin = false;
+  std::string input_path;
+  std::size_t threshold_mb = 256;
+};
 
 // RAII wrapper around SQLite::Database.
 //
@@ -45,10 +51,14 @@ class SqliteDb {
 //   2. options.input_is_stdin or options.input_path empty/"-" -> :memory:
 //   3. file_size(options.input_path) <= options.sqlite_threshold_mb MB -> :memory:
 //   4. otherwise -> temp-file database in system temp dir (deleted on exit).
-SqliteDb OpenSqliteDb(const RunOptions& options);
+SqliteDb OpenSqliteDb(const SqliteDbOpenOptions& options);
 
 // Register csvzall SQLite scalar functions that must be available anywhere
 // CSV-backed SQL executes.
 void RegisterSqliteRegexFunctions(SQLite::Database& db);
 
-}  // namespace csvzall::pipeline::sqlite
+}  // namespace csvzall::sqlite
+
+namespace csvzall::pipeline {
+namespace sqlite = ::csvzall::sqlite;
+}
