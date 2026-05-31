@@ -127,6 +127,9 @@ html, body {
 
 .chart-toolbar button,
 .edit-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 28px;
   padding: 0 0.6rem;
   border: 1px solid var(--csvzall-border);
@@ -134,6 +137,20 @@ html, body {
   background: var(--csvzall-background-secondary);
   color: var(--csvzall-text-normal);
   font: inherit;
+}
+
+.csvzall-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
+.action-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: 0;
 }
 
 .edit-toolbar button:disabled {
@@ -184,6 +201,18 @@ html, body {
   background: var(--csvzall-background-primary);
   color: var(--csvzall-text-normal);
   font: inherit;
+}
+
+.field-help {
+  margin: -0.25rem 0 0;
+  color: var(--csvzall-text-muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.field-help code {
+  color: var(--csvzall-text-normal);
+  font-size: 0.74rem;
 }
 
 .dialog-form input {
@@ -253,6 +282,9 @@ html, body {
 }
 
 .chart-list-header button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 28px;
   padding: 0 0.55rem;
   border: 1px solid var(--csvzall-border);
@@ -372,6 +404,9 @@ html, body {
 }
 
 .dialog-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 30px;
   padding: 0 0.7rem;
   border: 1px solid var(--csvzall-border);
@@ -413,6 +448,18 @@ html, body {
   font: inherit;
   white-space: nowrap;
   text-align: left;
+}
+
+[data-popright-menu][data-popright-has-icons] [data-popright-item] {
+  grid-template-columns: var(--popright-icon-size, 16px) minmax(0, 1fr) auto;
+}
+
+[data-popright-icon] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--popright-icon-size, 16px);
+  height: var(--popright-icon-size, 16px);
 }
 
 [data-popright-item][data-active] {

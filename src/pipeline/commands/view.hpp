@@ -83,7 +83,7 @@ class CsvViewData {
   void insert_column(std::uint64_t column, const std::string& name, const std::string& value);
   void delete_column(const std::string& column);
   void reset();
-  void save();
+  void save(const std::vector<std::string>& columns = {});
 
  private:
   explicit CsvViewData(CsvMaterializedFile materialized);

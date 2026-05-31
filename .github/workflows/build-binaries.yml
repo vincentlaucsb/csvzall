@@ -60,7 +60,7 @@ jobs:
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCSVZALL_CXX_STANDARD=23 -DCSVZALL_REQUIRE_POSTGRESQL=ON
 
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --parallel --target csvzall
 
       - name: Package release binary (Windows)
         if: runner.os == 'Windows'

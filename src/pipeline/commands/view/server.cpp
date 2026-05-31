@@ -29,6 +29,7 @@ using view_internal::BuildSchemaJson;
 using view_internal::GenerateCurrentCsvChart;
 using view_internal::GenerateSessionToken;
 using view_internal::JsonStringArrayField;
+using view_internal::JsonStringArrayFieldOr;
 using view_internal::JsonStringField;
 using view_internal::JsonUintField;
 using view_internal::RenderRunOnSaveChartsForCurrentCsv;
@@ -396,7 +397,8 @@ int ViewServer::Start(const ViewServerOptions& options) {
                          return;
                        }
                        try {
-                         impl_->data.save();
+                         impl_->data.save(
+                             JsonStringArrayFieldOr(request.body, "columns", {}));
                          std::size_t charts_generated = 0;
                          std::string chart_error;
                          try {

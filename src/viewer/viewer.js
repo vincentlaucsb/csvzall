@@ -1,3 +1,118 @@
+const TABLER_ICON_PATHS = {
+  'arrow-down': ['M12 5l0 14', 'M18 13l-6 6', 'M6 13l6 6'],
+  'arrow-up': ['M12 5l0 14', 'M18 11l-6 -6', 'M6 11l6 -6'],
+  'chart-bar': ['M3 12m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z', 'M9 8m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z', 'M15 4m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z', 'M4 20l14 0'],
+  'column-insert-right': ['M4 6a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-4a2 2 0 0 1 -2 -2z', 'M16 12h6', 'M19 9v6'],
+  'column-remove': ['M4 6a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-4a2 2 0 0 1 -2 -2z', 'M16 12h6'],
+  'device-floppy': ['M6 4h10l4 4v10a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2', 'M12 14m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0', 'M14 4l0 4l-6 0l0 -4'],
+  'plus': ['M12 5l0 14', 'M5 12l14 0'],
+  'restore': ['M3.06 13a9 9 0 1 0 3.59 -7.36', 'M3 4v6h6'],
+  'row-insert-bottom': ['M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z', 'M12 15v6', 'M9 18h6'],
+  'row-remove': ['M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z', 'M9 18h6'],
+  'trash': ['M4 7h16', 'M10 11v6', 'M14 11v6', 'M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12', 'M9 7v-3h6v3'],
+  'x': ['M18 6l-12 12', 'M6 6l12 12'],
+};
+
+function createTablerIcon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('csvzall-icon');
+  (TABLER_ICON_PATHS[name] || []).forEach((d) => {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  });
+  return svg;
+}
+
+function actionContent(iconName, label) {
+  const wrapper = document.createElement('span');
+  wrapper.className = 'action-content';
+  if (iconName) {
+    wrapper.append(createTablerIcon(iconName));
+  }
+  const text = document.createElement('span');
+  text.textContent = label;
+  wrapper.append(text);
+  return wrapper;
+}
+
+function decorateButton(button, iconName, label = button.textContent.trim()) {
+  button.replaceChildren(actionContent(iconName, label));
+  button.setAttribute('aria-label', label);
+  button.title = label;
+}
+
+function createViewStateStore() {
+  let dataDirty = false;
+  let columnOrderDirty = false;
+
+  return {
+    get dataDirty() {
+      return dataDirty;
+    },
+    get columnOrderDirty() {
+      return columnOrderDirty;
+    },
+    get dirty() {
+      return dataDirty || columnOrderDirty;
+    },
+    markDataDirty() {
+      dataDirty = true;
+    },
+    markColumnOrderDirty() {
+      columnOrderDirty = true;
+    },
+    setColumnOrderDirty(value) {
+      columnOrderDirty = value === true;
+    },
+    markClean() {
+      dataDirty = false;
+      columnOrderDirty = false;
+    },
+  };
+}
+
+function currentGridColumns(api, columns) {
+  const knownColumns = new Set(columns);
+  const gridColumns = typeof api.getAllDisplayedColumns === 'function'
+    ? api.getAllDisplayedColumns().map((column) => column.getColId ? column.getColId() : (column.colId || ''))
+    : [];
+  const columnIds = gridColumns.length > 0 || typeof api.getColumnState !== 'function'
+    ? gridColumns
+    : api.getColumnState().map((column) => column.colId);
+  return columnIds.filter((column) => knownColumns.has(column));
+}
+
+function buildSavePayload(viewState, getColumns) {
+  if (!viewState.columnOrderDirty) {
+    return {};
+  }
+  return { columns: getColumns() };
+}
+
+async function saveViewerState({ viewState, postJson, getColumns }) {
+  const reloadAfterSave = viewState.columnOrderDirty;
+  const result = await postJson('/api/save', buildSavePayload(viewState, getColumns));
+  viewState.markClean();
+  return { result, reloadAfterSave };
+}
+
+if (typeof globalThis !== 'undefined') {
+  globalThis.csvzallViewerInternals = {
+    createViewStateStore,
+    currentGridColumns,
+    buildSavePayload,
+    saveViewerState,
+  };
+}
+
 function createFallbackContextMenu(options) {
   let root = null;
   let currentInput = {};
@@ -38,6 +153,7 @@ function createFallbackContextMenu(options) {
     root = document.createElement('div');
     root.setAttribute('data-popright-menu', '');
     root.setAttribute('role', 'menu');
+    root.toggleAttribute('data-popright-has-icons', visibleItems.some((item) => item.icon));
     root.tabIndex = -1;
     root.style.position = 'fixed';
     root.style.left = `${input.x ?? 0}px`;
@@ -55,7 +171,16 @@ function createFallbackContextMenu(options) {
       button.type = 'button';
       button.setAttribute('data-popright-item', '');
       button.setAttribute('role', 'menuitem');
-      button.textContent = item.label ?? item.id ?? '';
+      if (item.icon) {
+        const icon = document.createElement('span');
+        icon.setAttribute('data-popright-icon', '');
+        icon.append(typeof item.icon === 'function' ? item.icon({ item, context: currentInput.context }) : item.icon);
+        button.append(icon);
+      }
+      const label = document.createElement('span');
+      label.setAttribute('data-popright-label-text', '');
+      label.textContent = item.label ?? item.id ?? '';
+      button.append(label);
       if (item.variant) {
         button.dataset.variant = item.variant;
       }
@@ -303,6 +428,19 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const chartRunOnSave = document.getElementById('chart-run-on-save');
     const chartError = document.getElementById('chart-error');
     const cancelChart = document.getElementById('cancel-chart');
+    decorateButton(addChartButton, 'chart-bar', 'Add chart');
+    decorateButton(insertButton, 'row-insert-bottom', 'Insert row');
+    decorateButton(deleteButton, 'row-remove', 'Delete row');
+    decorateButton(insertColumnButton, 'column-insert-right', 'Insert column');
+    decorateButton(deleteColumnButton, 'column-remove', 'Delete column');
+    decorateButton(resetButton, 'restore', 'Reset');
+    decorateButton(saveButton, 'device-floppy', 'Save');
+    decorateButton(cancelInsertColumn, 'x', 'Cancel');
+    decorateButton(insertColumnForm.querySelector('button[type="submit"]'), 'plus', 'Insert');
+    decorateButton(newChartButton, 'plus', 'New');
+    decorateButton(cancelChart, 'x', 'Cancel');
+    decorateButton(generateChartButton, 'chart-bar', 'Create chart');
+    decorateButton(chartForm.querySelector('button[type="submit"]'), 'device-floppy', 'Save chart');
     modeNode.textContent = materialized ? 'Client-side' : 'Paged';
     quickFilterNode.hidden = !materialized;
     quickFilterNode.disabled = !materialized;
@@ -713,17 +851,20 @@ async function csvzallViewBootstrap(dependencies = {}) {
 
     if (materialized) {
       statusNode.textContent = `Loading ${schema.totalRows.toLocaleString()} rows for client-side sort/filter…`;
-      let dirty = false;
+      const viewState = createViewStateStore();
       const allRows = schema.totalRows === 0
         ? []
         : rowsToObjects(schema.columns, (await fetchJson('/api/rows', { offset: 0, limit: schema.totalRows })).rows);
-      const setDirty = (value) => {
-        dirty = value;
-        saveButton.disabled = !dirty;
-        resetButton.disabled = !dirty;
-        statusNode.textContent = dirty
+      const refreshDirtyUi = () => {
+        saveButton.disabled = !viewState.dirty;
+        resetButton.disabled = !viewState.dirty;
+        statusNode.textContent = viewState.dirty
           ? 'Unsaved changes.'
           : `Loaded ${allRows.length.toLocaleString()} rows for ${editable ? 'editing' : 'client-side sort/filter'}.`;
+      };
+      const markDataDirty = () => {
+        viewState.markDataDirty();
+        refreshDirtyUi();
       };
       if (api.setGridOption) {
         api.setGridOption('rowData', allRows);
@@ -775,7 +916,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
           });
           refreshColumns();
           refreshRows();
-          setDirty(true);
+          markDataDirty();
         };
         const deleteRowAt = async (row) => {
           if (row >= allRows.length) {
@@ -787,7 +928,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
             allRows.splice(row, 1);
             renumberRows(allRows);
             refreshRows();
-            setDirty(true);
+            markDataDirty();
           } catch (error) {
             statusNode.textContent = error instanceof Error ? error.message : 'Delete failed';
           }
@@ -808,7 +949,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
                 node.setSelected?.(true);
               }
             });
-            setDirty(true);
+            markDataDirty();
           } catch (error) {
             statusNode.textContent = error instanceof Error ? error.message : 'Move failed';
           }
@@ -826,7 +967,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
             });
             refreshColumns();
             refreshRows();
-            setDirty(true);
+            markDataDirty();
           } catch (error) {
             statusNode.textContent = error instanceof Error ? error.message : 'Column delete failed';
           }
@@ -841,7 +982,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
               column: event.colDef.field,
               value: event.newValue ?? '',
             });
-            setDirty(true);
+            markDataDirty();
           } catch (error) {
             event.node.setDataValue(event.colDef.field, event.oldValue ?? '');
             statusNode.textContent = error instanceof Error ? error.message : 'Edit failed';
@@ -850,6 +991,21 @@ async function csvzallViewBootstrap(dependencies = {}) {
         if (api.setGridOption) {
           api.setGridOption('onCellValueChanged', gridOptions.onCellValueChanged);
         }
+        gridOptions.onColumnMoved = (event) => {
+          if (event.finished !== true) {
+            return;
+          }
+          const columns = currentGridColumns(api, schema.columns);
+          if (columns.length !== schema.columns.length) {
+            return;
+          }
+          const changed = !columns.every((column, index) => column === schema.columns[index]);
+          viewState.setColumnOrderDirty(changed);
+          refreshDirtyUi();
+        };
+        if (api.setGridOption) {
+          api.setGridOption('onColumnMoved', gridOptions.onColumnMoved);
+        }
         if (typeof createContextMenu === 'function') {
           const rowMenu = createContextMenu({
             trigger: 'manual',
@@ -857,11 +1013,11 @@ async function csvzallViewBootstrap(dependencies = {}) {
             items: ({ data }) => {
               const row = data?.row;
               return [
-                { id: 'move-up', label: 'Move Up', disabled: !Number.isInteger(row) || row <= 0 },
-                { id: 'move-down', label: 'Move Down', disabled: !Number.isInteger(row) || row >= allRows.length - 1 },
+                { id: 'move-up', label: 'Move Up', icon: () => createTablerIcon('arrow-up'), disabled: !Number.isInteger(row) || row <= 0 },
+                { id: 'move-down', label: 'Move Down', icon: () => createTablerIcon('arrow-down'), disabled: !Number.isInteger(row) || row >= allRows.length - 1 },
                 { type: 'separator' },
-                { id: 'delete-row', label: 'Delete Row', variant: 'danger' },
-                { id: 'delete-column', label: 'Delete Column', variant: 'danger' },
+                { id: 'delete-row', label: 'Delete Row', icon: () => createTablerIcon('trash'), variant: 'danger' },
+                { id: 'delete-column', label: 'Delete Column', icon: () => createTablerIcon('column-remove'), variant: 'danger' },
               ];
             },
             onSelect(event) {
@@ -917,7 +1073,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
             allRows.splice(row, 0, inserted);
             renumberRows(allRows);
             refreshRows();
-            setDirty(true);
+            markDataDirty();
           } catch (error) {
             statusNode.textContent = error instanceof Error ? error.message : 'Insert failed';
           }
@@ -965,8 +1121,8 @@ async function csvzallViewBootstrap(dependencies = {}) {
             await postJson('/api/reset');
             window.location.reload();
           } catch (error) {
-            resetButton.disabled = !dirty;
-            saveButton.disabled = !dirty;
+            resetButton.disabled = !viewState.dirty;
+            saveButton.disabled = !viewState.dirty;
             statusNode.textContent = error instanceof Error ? error.message : 'Reset failed';
           }
         });
@@ -974,8 +1130,17 @@ async function csvzallViewBootstrap(dependencies = {}) {
           try {
             saveButton.disabled = true;
             statusNode.textContent = 'Saving…';
-            const result = await postJson('/api/save');
-            setDirty(false);
+            const { result, reloadAfterSave } = await saveViewerState({
+              viewState,
+              postJson,
+              getColumns: () => currentGridColumns(api, schema.columns),
+            });
+            refreshDirtyUi();
+            if (reloadAfterSave) {
+              statusNode.textContent = 'Saved. Reloading…';
+              window.location.reload();
+              return;
+            }
             if (result.chartError) {
               statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows. Chart generation failed: ${result.chartError}`;
             } else if (result.chartsGenerated > 0) {
@@ -984,12 +1149,12 @@ async function csvzallViewBootstrap(dependencies = {}) {
               statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows.`;
             }
           } catch (error) {
-            saveButton.disabled = !dirty;
+            saveButton.disabled = !viewState.dirty;
             statusNode.textContent = error instanceof Error ? error.message : 'Save failed';
           }
         });
       }
-      setDirty(false);
+      refreshDirtyUi();
     } else {
       setDatasource(api, {
         async getRows(params) {
@@ -1037,6 +1202,8 @@ async function loadContextMenuFactory() {
   }
 }
 
-loadContextMenuFactory().then((createContextMenu) => {
-  void csvzallViewBootstrap({ createContextMenu });
-});
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  loadContextMenuFactory().then((createContextMenu) => {
+    void csvzallViewBootstrap({ createContextMenu });
+  });
+}

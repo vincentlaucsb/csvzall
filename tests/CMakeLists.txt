@@ -129,6 +129,13 @@ endif()
 
 add_test(NAME csvzall_tests COMMAND csvzall_tests)
 
+find_program(CSVZALL_NODE_EXE NAMES node nodejs)
+if(CSVZALL_NODE_EXE)
+  add_test(
+    NAME csvzall_viewer_state_tests
+    COMMAND ${CSVZALL_NODE_EXE} --test ${CMAKE_CURRENT_SOURCE_DIR}/viewer_state.test.mjs)
+endif()
+
 add_test(
   NAME csvzall_cli_smoke
   COMMAND

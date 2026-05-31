@@ -1107,6 +1107,55 @@ TEST_CASE("view edit: column deletion persists through save") {
   std::filesystem::remove(path);
 }
 
+TEST_CASE("view edit: save applies column order with pending edits atomically") {
+  const auto csv = tests::MakeTestCsv(
+      {"name", "note", "value"},
+      {{"alice", "x", "10"}, {"bob", "y", "20"}});
+  const auto path = WriteTempCsv(csv, "csvzall_view_edit_reorder_column.csv");
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_edit = true;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, true, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto edit = client.Post(
+      "/api/edit-cell", headers, R"({"row":1,"column":"note","value":"edited"})",
+      "application/json");
+  REQUIRE(edit);
+  REQUIRE(edit->status == 200);
+  const auto save = client.Post(
+      "/api/save", headers, R"({"columns":["value","name","note"]})",
+      "application/json");
+  REQUIRE(save);
+  REQUIRE(save->status == 200);
+
+  const auto schema = client.Get("/api/schema", headers);
+  REQUIRE(schema);
+  REQUIRE(schema->status == 200);
+  REQUIRE(
+      schema->body ==
+      R"({"file":"csvzall_view_edit_reorder_column.csv","columns":["value","name","note"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2})");
+
+  const auto rows = client.Get("/api/rows?offset=0&limit=2", headers);
+  REQUIRE(rows);
+  REQUIRE(rows->status == 200);
+  REQUIRE(rows->body.find("\"rows\":[[\"10\",\"alice\",\"x\"],[\"20\",\"bob\",\"edited\"]]") !=
+          std::string::npos);
+  server.Stop();
+
+  REQUIRE(ReadHeaders(path) == std::vector<std::string>{"value", "name", "note"});
+  REQUIRE(ReadAllRows(path) == std::vector<std::vector<std::string>>{
+      {"10", "alice", "x"}, {"20", "bob", "edited"}});
+  std::filesystem::remove(path);
+}
+
 TEST_CASE("view edit: reset reloads source from disk and discards unsaved changes") {
   const auto csv = tests::MakeTestCsv(
       {"name", "value"},
