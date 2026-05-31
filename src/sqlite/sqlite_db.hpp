@@ -34,7 +34,7 @@ class SqliteDb {
   SqliteDb& operator=(const SqliteDb&) = delete;
 
   SqliteDb(SqliteDb&&) noexcept;
-  SqliteDb& operator=(SqliteDb&&) noexcept;
+  SqliteDb& operator=(SqliteDb&&) = delete;
 
   SQLite::Database& db();
 

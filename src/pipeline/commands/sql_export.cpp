@@ -1,7 +1,7 @@
 #include "commands.hpp"
 #include "sqlite_options.hpp"
 
-#include "../sqlite/csv_loader.hpp"
+#include "../../sqlite/csv_loader.hpp"
 
 #include <SQLiteCpp/SQLiteCpp.h>
 

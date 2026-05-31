@@ -2,8 +2,8 @@
 #include "sqlite_options.hpp"
 
 #include "../common/column_lookup.hpp"
-#include "../sqlite/csv_loader.hpp"
-#include "../sqlite/sqlite_db.hpp"
+#include "../../sqlite/csv_loader.hpp"
+#include "../../sqlite/sqlite_db.hpp"
 
 #include <SQLiteCpp/SQLiteCpp.h>
 #include <string>

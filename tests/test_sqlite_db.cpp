@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "../src/pipeline/sqlite/sqlite_db.hpp"
+#include "../src/sqlite/sqlite_db.hpp"
 
 #include <SQLiteCpp/SQLiteCpp.h>
 

@@ -12,7 +12,7 @@ struct HeatmapSpec;
 }
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
-#include "pipeline/postgres/postgres_connection.hpp"
+#include "postgres/postgres_connection.hpp"
 #endif
 
 namespace csvzall::pipeline {

@@ -2,7 +2,7 @@
 
 #include "commands.hpp"
 
-#include "../postgres/exporter.hpp"
+#include "../../postgres/exporter.hpp"
 
 #include <exception>
 #include <string>

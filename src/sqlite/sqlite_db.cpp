@@ -121,20 +121,6 @@ SqliteDb::SqliteDb(SqliteDb&& other) noexcept
   other.temp_path_.clear();  // Source must not delete the file on its destroy.
 }
 
-SqliteDb& SqliteDb::operator=(SqliteDb&& other) noexcept {
-  if (this != &other) {
-    db_.reset();
-    if (!temp_path_.empty()) {
-      std::error_code ec;
-      std::filesystem::remove(temp_path_, ec);
-    }
-    db_ = std::move(other.db_);
-    temp_path_ = std::move(other.temp_path_);
-    other.temp_path_.clear();
-  }
-  return *this;
-}
-
 SQLite::Database& SqliteDb::db() {
   return *db_;
 }

@@ -3,7 +3,7 @@
 #include "../common/chart_spec.hpp"
 #include "../common/column_lookup.hpp"
 #include "../common/row_utils.hpp"
-#include "../sqlite/csv_loader.hpp"
+#include "../../sqlite/csv_loader.hpp"
 
 #include <svgplot/svgplot.hpp>
 

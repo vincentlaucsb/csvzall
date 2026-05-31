@@ -3,8 +3,8 @@
 
 #include "../common/column_lookup.hpp"
 #include "../common/markdown_table.hpp"
-#include "../sqlite/csv_loader.hpp"
-#include "../sqlite/sqlite_db.hpp"
+#include "../../sqlite/csv_loader.hpp"
+#include "../../sqlite/sqlite_db.hpp"
 
 #include <SQLiteCpp/SQLiteCpp.h>
 

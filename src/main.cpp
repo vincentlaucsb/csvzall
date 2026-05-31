@@ -9,8 +9,8 @@
 #include "util.hpp"
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
-#include "pipeline/postgres/postgres_connection.hpp"
-#include "pipeline/postgres/row_loader.hpp"
+#include "postgres/postgres_connection.hpp"
+#include "postgres/row_loader.hpp"
 #endif
 
 #include <algorithm>
@@ -187,7 +187,7 @@ std::optional<std::string> ReadEnvironmentVariable(const std::string& name) {
 #ifdef CSVZALL_HAVE_POSTGRESQL
 bool ApplyPasswordSources(argparse::ArgumentParser& cmd,
                           Logger& logger,
-                          csvzall::pipeline::postgres::ConnectionConfig& pg_config,
+                          csvzall::postgres::ConnectionConfig& pg_config,
                           const csvzall::CredentialTarget& credential_target,
                           const bool allow_prompt) {
   if (cmd.is_used("--password")) {
@@ -1574,7 +1574,7 @@ Examples:
     }
 
     // Build PostgreSQL configuration
-    csvzall::pipeline::postgres::ConnectionConfig pg_config;
+    csvzall::postgres::ConnectionConfig pg_config;
     pg_config.host = postgres_cmd.get<std::string>("--host");
     pg_config.port = postgres_cmd.get<int>("--port");
     pg_config.database = postgres_cmd.get<std::string>("--dbname");
@@ -1610,7 +1610,7 @@ Examples:
 
       bool connected = false;
       try {
-        csvzall::pipeline::postgres::PostgresConnection test_conn(pg_config);
+        csvzall::postgres::PostgresConnection test_conn(pg_config);
         connected = true;
       } catch (const std::exception& ex) {
         logger.Error(std::string("postgres --save: connection failed: ") + ex.what());

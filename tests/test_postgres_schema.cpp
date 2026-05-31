@@ -2,7 +2,7 @@
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
 
-#include "../src/pipeline/postgres/schema_inference.hpp"
+#include "../src/postgres/schema_inference.hpp"
 
 #include <vector>
 #include <string>

@@ -658,8 +658,8 @@ set(CSVZALL_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/markdown_calendar.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/markdown_table.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/row_utils.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/sqlite/sqlite_db.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/sqlite/csv_loader.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/sqlite/sqlite_db.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/sqlite/csv_loader.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/append.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/CsvInputCommand.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/CsvTransformCommand.cpp
@@ -687,10 +687,10 @@ endif()
 
 if(CSVZALL_HAVE_POSTGRESQL)
   list(APPEND CSVZALL_CORE_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/exporter.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/postgres_connection.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/schema_inference.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/row_loader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/postgres/exporter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/postgres/postgres_connection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/postgres/schema_inference.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/postgres/row_loader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/postgres_export.cpp)
 endif()
 
