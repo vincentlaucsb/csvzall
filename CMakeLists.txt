@@ -687,6 +687,7 @@ endif()
 
 if(CSVZALL_HAVE_POSTGRESQL)
   list(APPEND CSVZALL_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/exporter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/postgres_connection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/schema_inference.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/row_loader.cpp

@@ -8,7 +8,7 @@
 
 #include <stdexcept>
 
-namespace csvzall::pipeline::postgres {
+namespace csvzall::postgres {
 
 namespace {
 
@@ -149,6 +149,6 @@ RowLoader::~RowLoader() {
   stream_.reset();
 }
 
-}  // namespace csvzall::pipeline::postgres
+}  // namespace csvzall::postgres
 
 #endif  // CSVZALL_HAVE_POSTGRESQL

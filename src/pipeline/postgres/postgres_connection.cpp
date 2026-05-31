@@ -5,7 +5,7 @@
 #include <sstream>
 #include <stdexcept>
 
-namespace csvzall::pipeline::postgres {
+namespace csvzall::postgres {
 
 std::string ConnectionConfig::to_connection_string() const {
   std::ostringstream oss;
@@ -58,6 +58,6 @@ void DropTableIfExists(pqxx::connection& conn, const std::string& table_name) {
   tx.commit();
 }
 
-}  // namespace csvzall::pipeline::postgres
+}  // namespace csvzall::postgres
 
 #endif  // CSVZALL_HAVE_POSTGRESQL

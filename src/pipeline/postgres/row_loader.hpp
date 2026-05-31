@@ -12,7 +12,7 @@
 #include <vector>
 #include "schema_inference.hpp"
 
-namespace csvzall::pipeline::postgres {
+namespace csvzall::postgres {
 
 // Batch loader state
 class RowLoader {
@@ -55,6 +55,10 @@ class RowLoader {
   void write_values(std::vector<PgValue>& values);
 };
 
-}  // namespace csvzall::pipeline::postgres
+}  // namespace csvzall::postgres
+
+namespace csvzall::pipeline {
+namespace postgres = ::csvzall::postgres;
+}
 
 #endif  // CSVZALL_HAVE_POSTGRESQL

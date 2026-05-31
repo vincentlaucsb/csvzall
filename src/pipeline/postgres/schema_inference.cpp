@@ -4,7 +4,7 @@
 
 #include <csv.hpp>
 
-namespace csvzall::pipeline::postgres {
+namespace csvzall::postgres {
 
 std::string ColumnTypeToString(ColumnType type) {
   switch (type) {
@@ -112,6 +112,6 @@ ColumnType SchemaInference::infer_type(const ColumnStats& stats) {
   return ColumnType::TEXT;
 }
 
-}  // namespace csvzall::pipeline::postgres
+}  // namespace csvzall::postgres
 
 #endif  // CSVZALL_HAVE_POSTGRESQL

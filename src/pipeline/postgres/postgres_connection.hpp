@@ -6,7 +6,7 @@
 
 #include <string>
 
-namespace csvzall::pipeline::postgres {
+namespace csvzall::postgres {
 
 // PostgreSQL connection options
 struct ConnectionConfig {
@@ -46,6 +46,10 @@ void DropTableIfExists(pqxx::connection& conn, const std::string& table_name);
 
 [[nodiscard]] std::string QuoteIdentifier(const std::string& identifier);
 
-}  // namespace csvzall::pipeline::postgres
+}  // namespace csvzall::postgres
+
+namespace csvzall::pipeline {
+namespace postgres = ::csvzall::postgres;
+}
 
 #endif  // CSVZALL_HAVE_POSTGRESQL

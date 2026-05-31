@@ -12,7 +12,7 @@
 #include "view.hpp"
 
 // Forward declarations for PostgreSQL types
-namespace csvzall::pipeline::postgres {
+namespace csvzall::postgres {
 struct ConnectionConfig;
 }
 
@@ -234,7 +234,7 @@ int RunPostgresExport(std::istream& input,
                       const RunOptions& options,
                       const LoggerCallbacks& logger,
                       RunStats& stats,
-                      const postgres::ConnectionConfig& pg_config,
+                      const ::csvzall::postgres::ConnectionConfig& pg_config,
                       const std::string& table_name,
                       const std::string& if_exists_mode);
 

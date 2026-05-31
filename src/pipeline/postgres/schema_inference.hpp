@@ -10,7 +10,7 @@ class CSVRow;
 enum class DataType;
 }
 
-namespace csvzall::pipeline::postgres {
+namespace csvzall::postgres {
 
 // PostgreSQL column type
 enum class ColumnType {
@@ -68,6 +68,10 @@ class SchemaInference {
   static ColumnType infer_type(const ColumnStats& stats);
 };
 
-}  // namespace csvzall::pipeline::postgres
+}  // namespace csvzall::postgres
+
+namespace csvzall::pipeline {
+namespace postgres = ::csvzall::postgres;
+}
 
 #endif  // CSVZALL_HAVE_POSTGRESQL
