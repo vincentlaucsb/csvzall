@@ -9,7 +9,7 @@
 #include <string_view>
 #include <utility>
 
-namespace csvzall::pipeline::common {
+namespace csvzall::charts {
 namespace {
 
 bool Contains(const std::set<std::string_view>& values, std::string_view value) {
@@ -445,4 +445,4 @@ ChartConfig LoadChartConfig(const std::filesystem::path& config_path) {
   return config;
 }
 
-}  // namespace csvzall::pipeline::common
+}  // namespace csvzall::charts

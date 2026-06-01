@@ -1,15 +1,12 @@
 #pragma once
 
 #include "pipeline_types.hpp"
+#include "charts/chart_spec.hpp"
 
 #include <istream>
 #include <ostream>
 #include <string>
 #include <vector>
-
-namespace csvzall::pipeline::common {
-struct HeatmapSpec;
-}
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
 #include "postgres/postgres_connection.hpp"

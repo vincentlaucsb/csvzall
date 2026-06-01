@@ -8,6 +8,7 @@ This file mirrors [AGENTS.md](AGENTS.md).
 
 - Keep pipeline orchestration in `src/transform_pipeline.*`.
 - Keep shared helpers in `src/pipeline/common/`.
+- Keep reusable CSV-to-chart config and rendering helpers in `src/charts/`; SVGPlot remains the general-purpose chart drawing library.
 - Keep reusable SQLite integration (CSV loader, query execution, memory strategy) in `src/sqlite/`.
 - Keep reusable PostgreSQL integration (connection, schema inference, row loading, export orchestration) in `src/postgres/`.
 - Keep command implementations in `src/pipeline/commands/`.

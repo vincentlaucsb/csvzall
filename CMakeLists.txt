@@ -651,7 +651,7 @@ set(CSVZALL_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/credentials.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/util.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/transform_pipeline.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/chart_spec.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/chart_spec.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/column_lookup.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/gzip_stream.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/json_path.cpp
@@ -681,8 +681,16 @@ set(CSVZALL_CORE_SOURCES
 
 if(CSVZALL_HAVE_SVGPLOT)
   list(APPEND CSVZALL_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/bar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/csv_chart_common.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/heatmap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/line.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/validation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/bar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/chart.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/charts.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/heatmap.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/heatmap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/line.cpp)
 endif()
 
 if(CSVZALL_HAVE_POSTGRESQL)
