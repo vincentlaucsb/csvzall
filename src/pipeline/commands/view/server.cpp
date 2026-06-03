@@ -196,16 +196,17 @@ int ViewServer::Start(const ViewServerOptions& options) {
                         response.status = 404;
                       }
                     });
-  impl_->server.Get(R"(/assets/popright/([A-Za-z0-9._-]+\.js))",
+  impl_->server.Get(R"(/assets/popright/([A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\.js))",
                     [](const httplib::Request& request, httplib::Response& response) {
                       const auto route = std::string("/assets/popright/") + request.matches[1].str();
                       if (!ServeEmbeddedViewerAsset(route, response)) {
                         response.status = 404;
                       }
                     });
-  impl_->server.Get("/assets/popright/styles.css",
-                    [](const httplib::Request&, httplib::Response& response) {
-                      if (!ServeEmbeddedViewerAsset("/assets/popright/styles.css", response)) {
+  impl_->server.Get(R"(/assets/popright/([A-Za-z0-9._-]+\.css))",
+                    [](const httplib::Request& request, httplib::Response& response) {
+                      const auto route = std::string("/assets/popright/") + request.matches[1].str();
+                      if (!ServeEmbeddedViewerAsset(route, response)) {
                         response.status = 404;
                       }
                     });

@@ -330,6 +330,12 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(popright_js);
   REQUIRE(popright_js->status == 200);
   REQUIRE(popright_js->body.find("createContextMenu") != std::string::npos);
+  REQUIRE(popright_js->body.find("createDropdownMenu") != std::string::npos);
+
+  const auto popright_render_js = client.Get("/assets/popright/render/root.js");
+  REQUIRE(popright_render_js);
+  REQUIRE(popright_render_js->status == 200);
+  REQUIRE(popright_render_js->body.find("createMenuRoot") != std::string::npos);
 
   const auto schema = client.Get("/api/schema", headers);
   REQUIRE(schema);

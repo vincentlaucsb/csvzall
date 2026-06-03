@@ -246,11 +246,12 @@ export class ContextMenu {
             root.style.overflowY = "auto";
             rect = root.getBoundingClientRect();
         }
-        const preferredLeft = input.x ?? 0;
-        const preferredTop = input.y ?? 0;
+        const preferred = this.getPreferredPosition(input, rect);
         const position = computeMenuPosition({
-            preferredLeft,
-            preferredTop,
+            preferredLeft: preferred.left,
+            preferredTop: preferred.top,
+            fallbackLeft: preferred.fallbackLeft,
+            fallbackTop: preferred.fallbackTop,
             width: rect.width,
             height: rect.height,
             viewportWidth,
@@ -262,6 +263,55 @@ export class ContextMenu {
         });
         root.style.left = `${position.left}px`;
         root.style.top = `${position.top}px`;
+    }
+    getPreferredPosition(input, rect) {
+        if (this.options.placement !== "target" || !input.target) {
+            return { left: input.x ?? 0, top: input.y ?? 0 };
+        }
+        const targetRect = input.target.getBoundingClientRect();
+        const sideOffset = this.options.sideOffset;
+        const alignOffset = this.options.alignOffset;
+        const side = this.options.side;
+        const align = this.options.align;
+        const dir = this.options.dir ?? input.target.ownerDocument?.dir ?? "ltr";
+        const resolvedAlign = dir === "rtl" && (align === "start" || align === "end") ? (align === "start" ? "end" : "start") : align;
+        const crossStart = side === "left" || side === "right" ? targetRect.top : targetRect.left;
+        const crossSize = side === "left" || side === "right" ? targetRect.height : targetRect.width;
+        const menuCrossSize = side === "left" || side === "right" ? rect.height : rect.width;
+        let cross = crossStart;
+        if (resolvedAlign === "center") {
+            cross += (crossSize - menuCrossSize) / 2;
+        }
+        else if (resolvedAlign === "end") {
+            cross += crossSize - menuCrossSize;
+        }
+        cross += alignOffset;
+        if (side === "top") {
+            return {
+                left: cross,
+                top: targetRect.top - rect.height - sideOffset,
+                fallbackTop: targetRect.bottom + sideOffset
+            };
+        }
+        if (side === "right") {
+            return {
+                left: targetRect.right + sideOffset,
+                top: cross,
+                fallbackLeft: targetRect.left - rect.width - sideOffset
+            };
+        }
+        if (side === "left") {
+            return {
+                left: targetRect.left - rect.width - sideOffset,
+                top: cross,
+                fallbackLeft: targetRect.right + sideOffset
+            };
+        }
+        return {
+            left: cross,
+            top: targetRect.bottom + sideOffset,
+            fallbackTop: targetRect.top - rect.height - sideOffset
+        };
     }
     get isOpen() {
         return this.root !== null;
@@ -394,12 +444,15 @@ export class ContextMenu {
             this.selectIndex(this.activeIndex, event);
             return;
         }
-        if (event.key === "ArrowRight") {
+        const dir = this.options.dir ?? this.root?.dir ?? "ltr";
+        const openSubmenuKey = dir === "rtl" ? "ArrowLeft" : "ArrowRight";
+        const closeSubmenuKey = dir === "rtl" ? "ArrowRight" : "ArrowLeft";
+        if (event.key === openSubmenuKey) {
             event.preventDefault();
             this.openSubmenu(this.activeIndex);
             return;
         }
-        if (event.key === "ArrowLeft" && this.parent) {
+        if (event.key === closeSubmenuKey && this.parent) {
             event.preventDefault();
             this.parent.closeChild("manual", event);
             this.parent.root?.focus({ preventScroll: true });
@@ -488,6 +541,10 @@ export class ContextMenu {
         const childMenu = new ContextMenu(this.controller, null, {
             ...this.options,
             trigger: "manual",
+            placement: "target",
+            side: (this.options.dir ?? this.root?.dir) === "rtl" ? "left" : "right",
+            align: "start",
+            sideOffset: -2,
             items: childItems,
             onBeforeOpen: undefined,
             onOpen: undefined,
@@ -496,10 +553,7 @@ export class ContextMenu {
         }, { parent: this, register: false });
         childMenu.itemsSource = item.items;
         this.childMenu = childMenu;
-        const rect = trigger.getBoundingClientRect();
         childMenu.openNow({
-            x: rect.right,
-            y: rect.top,
             target: trigger,
             triggerEvent: this.currentContext?.triggerEvent,
             context: this.currentContext?.data

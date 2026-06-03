@@ -9,7 +9,7 @@ export function normalizeThemeInput(input, fallback = BUILT_IN_THEME) {
         return cloneTheme(fallback);
     }
     if (typeof input === "string") {
-        return { ...cloneTheme(fallback), mode: input };
+        return { ...cloneTheme(fallback), mode: input === "system" ? "automatic" : input };
     }
     if (isThemeStoreInput(input)) {
         return normalizeThemeInput(input.get(), fallback);

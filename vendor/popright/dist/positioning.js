@@ -12,8 +12,8 @@
  */
 export function computeMenuPosition(input) {
     const padding = Math.max(0, input.padding);
-    const left = resolveAxisPosition(input.preferredLeft, input.width, input.viewportWidth, padding);
-    const top = resolveAxisPosition(input.preferredTop, input.height, input.viewportHeight, padding);
+    const left = resolveAxisPosition(input.preferredLeft, input.width, input.viewportWidth, padding, input.fallbackLeft);
+    const top = resolveAxisPosition(input.preferredTop, input.height, input.viewportHeight, padding, input.fallbackTop);
     if (input.strategy === "absolute") {
         return {
             left: left + (input.scrollX ?? 0),
@@ -29,9 +29,15 @@ export function computeMenuPosition(input) {
  * overflow and there is room before the pointer, it flips to the opposite side;
  * otherwise it clamps within the padded viewport.
  */
-export function resolveAxisPosition(preferredStart, size, viewportSize, padding) {
+export function resolveAxisPosition(preferredStart, size, viewportSize, padding, fallbackStart) {
     const min = padding;
     const max = Math.max(padding, viewportSize - padding - size);
+    if (fallbackStart !== undefined && preferredStart + size > viewportSize - padding && fallbackStart >= padding) {
+        return Math.min(fallbackStart, max);
+    }
+    if (fallbackStart !== undefined && preferredStart < padding && fallbackStart + size <= viewportSize - padding) {
+        return Math.max(fallbackStart, min);
+    }
     if (preferredStart + size > viewportSize - padding && preferredStart - size >= padding) {
         return preferredStart - size;
     }

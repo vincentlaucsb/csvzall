@@ -95,7 +95,6 @@ html, body {
 .search {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
   flex: 0 1 20rem;
   color: var(--csvzall-text-muted);
   font-size: 0.78rem;
@@ -155,6 +154,15 @@ html, body {
 
 .edit-toolbar button:disabled {
   opacity: 0.55;
+}
+
+.edit-toolbar button[aria-haspopup="menu"] .action-content {
+  gap: 0.3rem;
+}
+
+.dropdown-chevron {
+  width: 14px;
+  height: 14px;
 }
 
 .csvzall-dialog {
@@ -429,6 +437,10 @@ html, body {
   outline: none;
   user-select: none;
   z-index: var(--popright-z-index);
+}
+
+[data-popright-menu-type="dropdown"] {
+  min-width: var(--popright-dropdown-min-width, 180px);
 }
 
 [data-popright-item] {

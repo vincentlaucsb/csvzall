@@ -1,6 +1,8 @@
 export interface MenuPositionInput {
     preferredLeft: number;
     preferredTop: number;
+    fallbackLeft?: number;
+    fallbackTop?: number;
     width: number;
     height: number;
     viewportWidth: number;
@@ -29,5 +31,5 @@ export declare function computeMenuPosition(input: MenuPositionInput): MenuPosit
  * overflow and there is room before the pointer, it flips to the opposite side;
  * otherwise it clamps within the padded viewport.
  */
-export declare function resolveAxisPosition(preferredStart: number, size: number, viewportSize: number, padding: number): number;
+export declare function resolveAxisPosition(preferredStart: number, size: number, viewportSize: number, padding: number, fallbackStart?: number): number;
 //# sourceMappingURL=positioning.d.ts.map

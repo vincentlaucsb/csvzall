@@ -17,6 +17,14 @@ include(FetchContent)
 include(GNUInstallDirs)
 include(CTest)
 
+find_package(Doxygen QUIET)
+if(DOXYGEN_FOUND)
+  add_custom_target(docs
+    COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Generate Doxygen API documentation")
+endif()
+
 option(CSVZALL_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(CSVZALL_ENABLE_POSTGRESQL "Enable PostgreSQL export support" ON)
 option(CSVZALL_FETCH_LIBPQXX "Fetch libpqxx from GitHub when not found on system" ON)
@@ -611,10 +619,15 @@ set(CSVZALL_VIEWER_ASSET_INPUTS
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-theme-alpine.css"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/constants.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/ContextMenu.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/DropdownMenu.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/index.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/MenuController.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/positioning.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render/items.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render/root.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render/types.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/dropdown.css"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/styles.css"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/theme-utils.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/theme.js"

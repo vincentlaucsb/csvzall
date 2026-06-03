@@ -4,6 +4,7 @@
  * Released under the MIT License.
  */
 import { ContextMenu } from "./ContextMenu.js";
+import { DropdownMenu } from "./DropdownMenu.js";
 import { MenuController } from "./MenuController.js";
 import { contextMenuTheme } from "./ThemeStore.js";
 const defaultController = new MenuController();
@@ -12,6 +13,32 @@ export function createContextMenu(targetOrOptions, maybeOptions) {
     const target = hasTarget ? targetOrOptions : null;
     const options = hasTarget ? maybeOptions : targetOrOptions;
     const menu = new ContextMenu(defaultController, target, options);
+    return {
+        open(input = {}) {
+            menu.requestOpen(input);
+        },
+        close(reason = "manual") {
+            menu.close(reason);
+        },
+        update(options) {
+            menu.update(options);
+        },
+        destroy() {
+            menu.destroy();
+        },
+        get isOpen() {
+            return menu.isOpen;
+        },
+        get root() {
+            return menu.root;
+        }
+    };
+}
+export function createDropdownMenu(targetOrOptions, maybeOptions) {
+    const hasTarget = maybeOptions !== undefined;
+    const target = hasTarget ? targetOrOptions : null;
+    const options = hasTarget ? maybeOptions : targetOrOptions;
+    const menu = new DropdownMenu(defaultController, target, options);
     return {
         open(input = {}) {
             menu.requestOpen(input);

@@ -1,0 +1,21 @@
+:root {
+  --popright-bg: #ffffff;
+  --popright-color: #111827;
+  --popright-border: #d4d4d4;
+  --popright-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
+  --popright-radius: 6px;
+  --popright-padding: 4px;
+  --popright-item-height: 28px;
+  --popright-item-gap: 24px;
+  --popright-item-cursor: pointer;
+  --popright-item-disabled-cursor: not-allowed;
+  --popright-icon-size: 16px;
+  --popright-active-bg: #f4f4f5;
+  --popright-disabled-color: #71717a;
+  --popright-danger-color: #dc2626;
+  --popright-z-index: 1000;
+}
+
+[data-popright-menu-type="dropdown"] {
+  min-width: var(--popright-dropdown-min-width, 180px);
+}

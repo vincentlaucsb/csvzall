@@ -18,7 +18,7 @@ export const DEFAULT_CLASSES = {
     submenuTrigger: "popright-submenu-trigger"
 };
 export const BUILT_IN_THEME = {
-    mode: "system",
+    mode: "automatic",
     classes: DEFAULT_CLASSES,
     tokens: {}
 };

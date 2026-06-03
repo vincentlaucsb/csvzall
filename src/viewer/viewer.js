@@ -2,6 +2,7 @@ const TABLER_ICON_PATHS = {
   'arrow-down': ['M12 5l0 14', 'M18 13l-6 6', 'M6 13l6 6'],
   'arrow-up': ['M12 5l0 14', 'M18 11l-6 -6', 'M6 11l6 -6'],
   'chart-bar': ['M3 12m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z', 'M9 8m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z', 'M15 4m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z', 'M4 20l14 0'],
+  'chevron-down': ['M6 9l6 6l6 -6'],
   'column-insert-right': ['M4 6a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-4a2 2 0 0 1 -2 -2z', 'M16 12h6', 'M19 9v6'],
   'column-remove': ['M4 6a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-4a2 2 0 0 1 -2 -2z', 'M16 12h6'],
   'device-floppy': ['M6 4h10l4 4v10a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2', 'M12 14m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0', 'M14 4l0 4l-6 0l0 -4'],
@@ -46,6 +47,17 @@ function actionContent(iconName, label) {
 function decorateButton(button, iconName, label = button.textContent.trim()) {
   button.replaceChildren(actionContent(iconName, label));
   button.setAttribute('aria-label', label);
+  button.title = label;
+}
+
+function decorateMenuButton(button, iconName, label = button.textContent.trim()) {
+  const content = actionContent(iconName, label);
+  const chevron = createTablerIcon('chevron-down');
+  chevron.classList.add('dropdown-chevron');
+  content.append(chevron);
+  button.replaceChildren(content);
+  button.setAttribute('aria-label', label);
+  button.setAttribute('aria-haspopup', 'menu');
   button.title = label;
 }
 
@@ -242,13 +254,13 @@ function createFallbackContextMenu(options) {
 }
 
 async function csvzallViewBootstrap(dependencies = {}) {
-  const { createContextMenu } = dependencies;
+  const { createContextMenu, createDropdownMenu } = dependencies;
   const statusNode = document.getElementById('status');
   const summaryNode = document.getElementById('summary');
   const recordCountNode = document.getElementById('record-count');
   const fileNode = document.getElementById('file-name');
-  const modeNode = document.getElementById('mode-label');
   const quickFilterNode = document.getElementById('quick-filter');
+  const searchNode = quickFilterNode.closest('.search');
   const token = new URLSearchParams(window.location.search).get('token');
 
   if (!token) {
@@ -378,10 +390,8 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const editable = schema.editable === true;
     const editToolbar = document.getElementById('edit-toolbar');
     const addChartButton = document.getElementById('add-chart');
-    const insertButton = document.getElementById('insert-row');
-    const deleteButton = document.getElementById('delete-row');
-    const insertColumnButton = document.getElementById('insert-column');
-    const deleteColumnButton = document.getElementById('delete-column');
+    const insertMenuButton = document.getElementById('insert-menu');
+    const deleteMenuButton = document.getElementById('delete-menu');
     const resetButton = document.getElementById('reset');
     const saveButton = document.getElementById('save');
     const insertColumnDialog = document.getElementById('insert-column-dialog');
@@ -429,10 +439,8 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const chartError = document.getElementById('chart-error');
     const cancelChart = document.getElementById('cancel-chart');
     decorateButton(addChartButton, 'chart-bar', 'Add chart');
-    decorateButton(insertButton, 'row-insert-bottom', 'Insert row');
-    decorateButton(deleteButton, 'row-remove', 'Delete row');
-    decorateButton(insertColumnButton, 'column-insert-right', 'Insert column');
-    decorateButton(deleteColumnButton, 'column-remove', 'Delete column');
+    decorateMenuButton(insertMenuButton, 'plus', 'Insert');
+    decorateMenuButton(deleteMenuButton, 'trash', 'Delete');
     decorateButton(resetButton, 'restore', 'Reset');
     decorateButton(saveButton, 'device-floppy', 'Save');
     decorateButton(cancelInsertColumn, 'x', 'Cancel');
@@ -441,9 +449,9 @@ async function csvzallViewBootstrap(dependencies = {}) {
     decorateButton(cancelChart, 'x', 'Cancel');
     decorateButton(generateChartButton, 'chart-bar', 'Create chart');
     decorateButton(chartForm.querySelector('button[type="submit"]'), 'device-floppy', 'Save chart');
-    modeNode.textContent = materialized ? 'Client-side' : 'Paged';
     quickFilterNode.hidden = !materialized;
     quickFilterNode.disabled = !materialized;
+    searchNode.hidden = !materialized;
     editToolbar.hidden = !editable;
     addChartButton.hidden = false;
 
@@ -918,6 +926,23 @@ async function csvzallViewBootstrap(dependencies = {}) {
           refreshRows();
           markDataDirty();
         };
+        const insertRowAtSelected = async () => {
+          const row = selectedSourceRow();
+          const values = schema.columns.map(() => '');
+          try {
+            await postJson('/api/insert-row', { row, values });
+            const inserted = { _csvzallRowId: row };
+            schema.columns.forEach((column) => {
+              inserted[column] = '';
+            });
+            allRows.splice(row, 0, inserted);
+            renumberRows(allRows);
+            refreshRows();
+            markDataDirty();
+          } catch (error) {
+            statusNode.textContent = error instanceof Error ? error.message : 'Insert failed';
+          }
+        };
         const deleteRowAt = async (row) => {
           if (row >= allRows.length) {
             statusNode.textContent = 'Select a row to delete.';
@@ -971,6 +996,43 @@ async function csvzallViewBootstrap(dependencies = {}) {
           } catch (error) {
             statusNode.textContent = error instanceof Error ? error.message : 'Column delete failed';
           }
+        };
+        const showInsertColumnDialog = () => {
+          const focused = focusedColumnName();
+          const focusedIndex = schema.columns.indexOf(focused);
+          pendingInsertColumn = focusedIndex >= 0 ? focusedIndex : schema.columns.length;
+          insertColumnName.value = '';
+          clearColumnError();
+          insertColumnDialog.showModal();
+          insertColumnName.focus();
+        };
+        const createToolbarDropdown = (button, items, onSelect) => {
+          if (typeof createDropdownMenu === 'function') {
+            return createDropdownMenu(button, {
+              items,
+              theme: 'system',
+              onSelect,
+            });
+          }
+          if (typeof createContextMenu !== 'function') {
+            return null;
+          }
+          const menu = createContextMenu({
+            trigger: 'manual',
+            theme: 'system',
+            items,
+            onSelect,
+          });
+          button.addEventListener('click', (event) => {
+            const rect = button.getBoundingClientRect();
+            menu.open({
+              x: rect.left,
+              y: rect.bottom + 4,
+              target: button,
+              triggerEvent: event,
+            });
+          });
+          return menu;
         };
         gridOptions.onCellValueChanged = async (event) => {
           if (!event.colDef.field || event.colDef.field === '_csvzallRowId') {
@@ -1058,34 +1120,16 @@ async function csvzallViewBootstrap(dependencies = {}) {
             api.setGridOption('onCellContextMenu', gridOptions.onCellContextMenu);
           }
         }
-        deleteButton.addEventListener('click', async () => {
-          await deleteRowAt(selectedSourceRow());
-        });
-        insertButton.addEventListener('click', async () => {
-          const row = selectedSourceRow();
-          const values = schema.columns.map(() => '');
-          try {
-            await postJson('/api/insert-row', { row, values });
-            const inserted = { _csvzallRowId: row };
-            schema.columns.forEach((column) => {
-              inserted[column] = '';
-            });
-            allRows.splice(row, 0, inserted);
-            renumberRows(allRows);
-            refreshRows();
-            markDataDirty();
-          } catch (error) {
-            statusNode.textContent = error instanceof Error ? error.message : 'Insert failed';
+        createToolbarDropdown(insertMenuButton, [
+          { id: 'insert-row', label: 'Row', icon: () => createTablerIcon('row-insert-bottom') },
+          { id: 'insert-column', label: 'Column', icon: () => createTablerIcon('column-insert-right') },
+        ], (event) => {
+          if (event.id === 'insert-row') {
+            void insertRowAtSelected();
           }
-        });
-        insertColumnButton.addEventListener('click', async () => {
-          const focused = focusedColumnName();
-          const focusedIndex = schema.columns.indexOf(focused);
-          pendingInsertColumn = focusedIndex >= 0 ? focusedIndex : schema.columns.length;
-          insertColumnName.value = '';
-          clearColumnError();
-          insertColumnDialog.showModal();
-          insertColumnName.focus();
+          if (event.id === 'insert-column') {
+            showInsertColumnDialog();
+          }
         });
         insertColumnForm.addEventListener('submit', async (event) => {
           event.preventDefault();
@@ -1110,8 +1154,16 @@ async function csvzallViewBootstrap(dependencies = {}) {
         cancelInsertColumn.addEventListener('click', () => {
           insertColumnDialog.close('cancel');
         });
-        deleteColumnButton.addEventListener('click', async () => {
-          await deleteColumnByName(focusedColumnName());
+        createToolbarDropdown(deleteMenuButton, [
+          { id: 'delete-row', label: 'Row', icon: () => createTablerIcon('row-remove'), variant: 'danger' },
+          { id: 'delete-column', label: 'Column', icon: () => createTablerIcon('column-remove'), variant: 'danger' },
+        ], (event) => {
+          if (event.id === 'delete-row') {
+            void deleteRowAt(selectedSourceRow());
+          }
+          if (event.id === 'delete-column') {
+            void deleteColumnByName(focusedColumnName());
+          }
         });
         resetButton.addEventListener('click', async () => {
           try {
@@ -1186,24 +1238,27 @@ async function csvzallViewBootstrap(dependencies = {}) {
   }
 }
 
-async function loadContextMenuFactory() {
+async function loadMenuFactories() {
   try {
     const response = await fetch('/assets/popright/index.js', {
       cache: 'force-cache',
       credentials: 'same-origin',
     });
     if (!response.ok) {
-      return createFallbackContextMenu;
+      return { createContextMenu: createFallbackContextMenu, createDropdownMenu: null };
     }
     const popright = await import('/assets/popright/index.js');
-    return popright.createContextMenu;
+    return {
+      createContextMenu: popright.createContextMenu,
+      createDropdownMenu: popright.createDropdownMenu ?? null,
+    };
   } catch (error) {
-    return createFallbackContextMenu;
+    return { createContextMenu: createFallbackContextMenu, createDropdownMenu: null };
   }
 }
 
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  loadContextMenuFactory().then((createContextMenu) => {
-    void csvzallViewBootstrap({ createContextMenu });
+  loadMenuFactories().then((menuFactories) => {
+    void csvzallViewBootstrap(menuFactories);
   });
 }
