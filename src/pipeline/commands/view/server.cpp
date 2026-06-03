@@ -369,6 +369,25 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        }
                      });
 
+  impl_->server.Post("/api/rename-column",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data.rename_column(
+                             JsonStringField(request.body, "column"),
+                             JsonStringField(request.body, "name"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     });
+
   impl_->server.Post("/api/reset",
                      [this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {

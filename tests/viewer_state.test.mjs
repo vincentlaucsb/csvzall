@@ -78,6 +78,13 @@ test('currentGridColumns falls back to column state for older AG Grid APIs', () 
     ['note', 'value']);
 });
 
+test('rowInsertionIndex preserves before-first-row insertion', () => {
+  assert.equal(internals.rowInsertionIndex(0, 3, 0), 0);
+  assert.equal(internals.rowInsertionIndex(0, 3, 1), 1);
+  assert.equal(internals.rowInsertionIndex(2, 3, 1), 3);
+  assert.equal(internals.rowInsertionIndex(undefined, 3, 0), 3);
+});
+
 test('saveViewerState sends an empty save payload for data-only edits', async () => {
   const store = internals.createViewStateStore();
   store.markDataDirty();

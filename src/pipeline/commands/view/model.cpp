@@ -410,6 +410,40 @@ void CsvViewData::insert_column(const std::uint64_t column,
   materialized->frame->insert_column(static_cast<std::size_t>(column), name, value);
 }
 
+void CsvViewData::rename_column(const std::string& column, const std::string& name) {
+  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
+  if (!materialized) {
+    throw std::runtime_error("editing requires materialized view mode");
+  }
+  if (name.empty()) {
+    throw std::runtime_error("column name is required");
+  }
+  if (!materialized->frame->has_column(column)) {
+    throw std::runtime_error("unknown column: " + column);
+  }
+  if (column == name) {
+    return;
+  }
+  if (materialized->frame->has_column(name)) {
+    throw std::runtime_error("column already exists: " + name);
+  }
+
+  const auto column_index = static_cast<std::size_t>(materialized->frame->index_of(column));
+  std::vector<std::string> values;
+  values.reserve(materialized->frame->n_rows());
+  for (std::size_t row = 0; row < materialized->frame->n_rows(); ++row) {
+    values.emplace_back(materialized->frame->at(row)[column]);
+  }
+
+  materialized->frame->insert_column(column_index, name, "");
+  for (std::size_t row = 0; row < materialized->frame->n_rows(); ++row) {
+    materialized->frame->at(row)[name] = values[row];
+  }
+  if (!materialized->frame->column_view(column).erase()) {
+    throw std::runtime_error("failed to rename column: " + column);
+  }
+}
+
 void CsvViewData::delete_column(const std::string& column) {
   auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
   if (!materialized) {

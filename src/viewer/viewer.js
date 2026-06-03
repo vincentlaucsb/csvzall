@@ -6,6 +6,7 @@ const TABLER_ICON_PATHS = {
   'column-insert-right': ['M4 6a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-4a2 2 0 0 1 -2 -2z', 'M16 12h6', 'M19 9v6'],
   'column-remove': ['M4 6a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-4a2 2 0 0 1 -2 -2z', 'M16 12h6'],
   'device-floppy': ['M6 4h10l4 4v10a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2', 'M12 14m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0', 'M14 4l0 4l-6 0l0 -4'],
+  'pencil': ['M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4', 'M13.5 6.5l4 4'],
   'plus': ['M12 5l0 14', 'M5 12l14 0'],
   'restore': ['M3.06 13a9 9 0 1 0 3.59 -7.36', 'M3 4v6h6'],
   'row-insert-bottom': ['M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z', 'M12 15v6', 'M9 18h6'],
@@ -102,6 +103,15 @@ function currentGridColumns(api, columns) {
   return columnIds.filter((column) => knownColumns.has(column));
 }
 
+function rowInsertionIndex(anchorRow, rowCount, offset) {
+  const count = Number.isInteger(rowCount) && rowCount > 0 ? rowCount : 0;
+  if (!Number.isInteger(anchorRow)) {
+    return count;
+  }
+  const clampedAnchor = Math.max(0, Math.min(anchorRow, count));
+  return Math.max(0, Math.min(clampedAnchor + offset, count));
+}
+
 function buildSavePayload(viewState, getColumns) {
   if (!viewState.columnOrderDirty) {
     return {};
@@ -120,6 +130,7 @@ if (typeof globalThis !== 'undefined') {
   globalThis.csvzallViewerInternals = {
     createViewStateStore,
     currentGridColumns,
+    rowInsertionIndex,
     buildSavePayload,
     saveViewerState,
   };
@@ -399,6 +410,11 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const insertColumnName = document.getElementById('insert-column-name');
     const insertColumnError = document.getElementById('insert-column-error');
     const cancelInsertColumn = document.getElementById('cancel-insert-column');
+    const renameColumnDialog = document.getElementById('rename-column-dialog');
+    const renameColumnForm = document.getElementById('rename-column-form');
+    const renameColumnName = document.getElementById('rename-column-name');
+    const renameColumnError = document.getElementById('rename-column-error');
+    const cancelRenameColumn = document.getElementById('cancel-rename-column');
     const chartDialog = document.getElementById('heatmap-chart-dialog');
     const chartForm = document.getElementById('heatmap-chart-form');
     const chartList = document.getElementById('chart-list');
@@ -445,6 +461,8 @@ async function csvzallViewBootstrap(dependencies = {}) {
     decorateButton(saveButton, 'device-floppy', 'Save');
     decorateButton(cancelInsertColumn, 'x', 'Cancel');
     decorateButton(insertColumnForm.querySelector('button[type="submit"]'), 'plus', 'Insert');
+    decorateButton(cancelRenameColumn, 'x', 'Cancel');
+    decorateButton(renameColumnForm.querySelector('button[type="submit"]'), 'pencil', 'Rename');
     decorateButton(newChartButton, 'plus', 'New');
     decorateButton(cancelChart, 'x', 'Cancel');
     decorateButton(generateChartButton, 'chart-bar', 'Create chart');
@@ -897,7 +915,17 @@ async function csvzallViewBootstrap(dependencies = {}) {
         };
         const selectedSourceRow = () => {
           const selected = api.getSelectedRows ? api.getSelectedRows() : [];
-          return selected.length > 0 ? selected[0]._csvzallRowId : allRows.length;
+          if (Number.isInteger(selected[0]?._csvzallRowId)) {
+            return selected[0]._csvzallRowId;
+          }
+          const focused = api.getFocusedCell ? api.getFocusedCell() : null;
+          if (focused && Number.isInteger(focused.rowIndex) && typeof api.getDisplayedRowAtIndex === 'function') {
+            const focusedNode = api.getDisplayedRowAtIndex(focused.rowIndex);
+            if (Number.isInteger(focusedNode?.data?._csvzallRowId)) {
+              return focusedNode.data._csvzallRowId;
+            }
+          }
+          return allRows.length;
         };
         const focusedColumnName = () => {
           const focused = api.getFocusedCell ? api.getFocusedCell() : null;
@@ -908,6 +936,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
           return column.getColId ? column.getColId() : (column.colId || '');
         };
         let pendingInsertColumn = schema.columns.length;
+        let pendingRenameColumn = '';
         const showColumnError = (message) => {
           insertColumnError.textContent = message;
           insertColumnError.hidden = false;
@@ -915,6 +944,14 @@ async function csvzallViewBootstrap(dependencies = {}) {
         const clearColumnError = () => {
           insertColumnError.textContent = '';
           insertColumnError.hidden = true;
+        };
+        const showRenameColumnError = (message) => {
+          renameColumnError.textContent = message;
+          renameColumnError.hidden = false;
+        };
+        const clearRenameColumnError = () => {
+          renameColumnError.textContent = '';
+          renameColumnError.hidden = true;
         };
         const insertColumnAt = async (column, name) => {
           await postJson('/api/insert-column', { column, name, value: '' });
@@ -926,8 +963,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
           refreshRows();
           markDataDirty();
         };
-        const insertRowAtSelected = async () => {
-          const row = selectedSourceRow();
+        const insertRowAt = async (row) => {
           const values = schema.columns.map(() => '');
           try {
             await postJson('/api/insert-row', { row, values });
@@ -942,6 +978,9 @@ async function csvzallViewBootstrap(dependencies = {}) {
           } catch (error) {
             statusNode.textContent = error instanceof Error ? error.message : 'Insert failed';
           }
+        };
+        const insertRowRelativeToSelection = async (offset) => {
+          await insertRowAt(rowInsertionIndex(selectedSourceRow(), allRows.length, offset));
         };
         const deleteRowAt = async (row) => {
           if (row >= allRows.length) {
@@ -997,14 +1036,47 @@ async function csvzallViewBootstrap(dependencies = {}) {
             statusNode.textContent = error instanceof Error ? error.message : 'Column delete failed';
           }
         };
-        const showInsertColumnDialog = () => {
-          const focused = focusedColumnName();
-          const focusedIndex = schema.columns.indexOf(focused);
-          pendingInsertColumn = focusedIndex >= 0 ? focusedIndex : schema.columns.length;
+        const renameColumnByName = async (column, name) => {
+          try {
+            await postJson('/api/rename-column', { column, name });
+            const columnIndex = schema.columns.indexOf(column);
+            if (columnIndex >= 0) {
+              schema.columns[columnIndex] = name;
+            }
+            allRows.forEach((row) => {
+              row[name] = row[column] ?? '';
+              delete row[column];
+            });
+            refreshColumns();
+            refreshRows();
+            markDataDirty();
+          } catch (error) {
+            throw new Error(error instanceof Error ? error.message : 'Column rename failed');
+          }
+        };
+        const columnIndexFor = (column) => {
+          const columnIndex = schema.columns.indexOf(column || focusedColumnName());
+          return columnIndex >= 0 ? columnIndex : schema.columns.length;
+        };
+        const showInsertColumnDialog = (column = '', offset = 0) => {
+          const columnIndex = columnIndexFor(column);
+          pendingInsertColumn = Math.min(columnIndex + offset, schema.columns.length);
           insertColumnName.value = '';
           clearColumnError();
           insertColumnDialog.showModal();
           insertColumnName.focus();
+        };
+        const showRenameColumnDialog = (column) => {
+          if (!column || !schema.columns.includes(column)) {
+            statusNode.textContent = 'Choose a column to rename.';
+            return;
+          }
+          pendingRenameColumn = column;
+          renameColumnName.value = column;
+          clearRenameColumnError();
+          renameColumnDialog.showModal();
+          renameColumnName.focus();
+          renameColumnName.select();
         };
         const createToolbarDropdown = (button, items, onSelect) => {
           if (typeof createDropdownMenu === 'function') {
@@ -1078,6 +1150,9 @@ async function csvzallViewBootstrap(dependencies = {}) {
                 { id: 'move-up', label: 'Move Up', icon: () => createTablerIcon('arrow-up'), disabled: !Number.isInteger(row) || row <= 0 },
                 { id: 'move-down', label: 'Move Down', icon: () => createTablerIcon('arrow-down'), disabled: !Number.isInteger(row) || row >= allRows.length - 1 },
                 { type: 'separator' },
+                { id: 'insert-row-before', label: 'Insert Row Before', icon: () => createTablerIcon('row-insert-bottom') },
+                { id: 'insert-row-after', label: 'Insert Row After', icon: () => createTablerIcon('row-insert-bottom') },
+                { type: 'separator' },
                 { id: 'delete-row', label: 'Delete Row', icon: () => createTablerIcon('trash'), variant: 'danger' },
                 { id: 'delete-column', label: 'Delete Column', icon: () => createTablerIcon('column-remove'), variant: 'danger' },
               ];
@@ -1090,6 +1165,12 @@ async function csvzallViewBootstrap(dependencies = {}) {
               }
               if (event.id === 'move-down' && Number.isInteger(row)) {
                 void moveRowBy(row, 1);
+              }
+              if (event.id === 'insert-row-before' && Number.isInteger(row)) {
+                void insertRowAt(rowInsertionIndex(row, allRows.length, 0));
+              }
+              if (event.id === 'insert-row-after' && Number.isInteger(row)) {
+                void insertRowAt(rowInsertionIndex(row, allRows.length, 1));
               }
               if (event.id === 'delete-row' && Number.isInteger(row)) {
                 void deleteRowAt(row);
@@ -1119,16 +1200,58 @@ async function csvzallViewBootstrap(dependencies = {}) {
           if (api.setGridOption) {
             api.setGridOption('onCellContextMenu', gridOptions.onCellContextMenu);
           }
+          const columnMenu = createContextMenu({
+            trigger: 'manual',
+            theme: 'system',
+            items: [
+              { id: 'rename-column', label: 'Rename Column', icon: () => createTablerIcon('pencil') },
+              { type: 'separator' },
+              { id: 'delete-column', label: 'Delete Column', icon: () => createTablerIcon('column-remove'), variant: 'danger' },
+            ],
+            onSelect(event) {
+              const column = event.context.data?.column;
+              if (event.id === 'rename-column' && typeof column === 'string') {
+                showRenameColumnDialog(column);
+              }
+              if (event.id === 'delete-column' && typeof column === 'string') {
+                void deleteColumnByName(column);
+              }
+            },
+          });
+          gridElement.addEventListener('contextmenu', (event) => {
+            const headerCell = event.target?.closest?.('.ag-header-cell[col-id]');
+            const column = headerCell?.getAttribute('col-id') ?? '';
+            if (!column || !schema.columns.includes(column)) {
+              return;
+            }
+            event.preventDefault();
+            columnMenu.open({
+              x: event.clientX,
+              y: event.clientY,
+              target: headerCell,
+              triggerEvent: event,
+              context: { column },
+            });
+          });
         }
         createToolbarDropdown(insertMenuButton, [
-          { id: 'insert-row', label: 'Row', icon: () => createTablerIcon('row-insert-bottom') },
-          { id: 'insert-column', label: 'Column', icon: () => createTablerIcon('column-insert-right') },
+          { id: 'insert-row-before', label: 'Row Before', icon: () => createTablerIcon('row-insert-bottom') },
+          { id: 'insert-row-after', label: 'Row After', icon: () => createTablerIcon('row-insert-bottom') },
+          { type: 'separator' },
+          { id: 'insert-column-before', label: 'Column Before', icon: () => createTablerIcon('column-insert-right') },
+          { id: 'insert-column-after', label: 'Column After', icon: () => createTablerIcon('column-insert-right') },
         ], (event) => {
-          if (event.id === 'insert-row') {
-            void insertRowAtSelected();
+          if (event.id === 'insert-row-before') {
+            void insertRowRelativeToSelection(0);
           }
-          if (event.id === 'insert-column') {
-            showInsertColumnDialog();
+          if (event.id === 'insert-row-after') {
+            void insertRowRelativeToSelection(1);
+          }
+          if (event.id === 'insert-column-before') {
+            showInsertColumnDialog('', 0);
+          }
+          if (event.id === 'insert-column-after') {
+            showInsertColumnDialog('', 1);
           }
         });
         insertColumnForm.addEventListener('submit', async (event) => {
@@ -1153,6 +1276,33 @@ async function csvzallViewBootstrap(dependencies = {}) {
         });
         cancelInsertColumn.addEventListener('click', () => {
           insertColumnDialog.close('cancel');
+        });
+        renameColumnForm.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const name = renameColumnName.value.trim();
+          if (!name) {
+            showRenameColumnError('Enter a column name.');
+            renameColumnName.focus();
+            return;
+          }
+          if (name === pendingRenameColumn) {
+            renameColumnDialog.close('rename');
+            return;
+          }
+          if (name !== pendingRenameColumn && schema.columns.includes(name)) {
+            showRenameColumnError(`Column already exists: ${name}`);
+            renameColumnName.focus();
+            return;
+          }
+          try {
+            await renameColumnByName(pendingRenameColumn, name);
+            renameColumnDialog.close('rename');
+          } catch (error) {
+            showRenameColumnError(error instanceof Error ? error.message : 'Column rename failed');
+          }
+        });
+        cancelRenameColumn.addEventListener('click', () => {
+          renameColumnDialog.close('cancel');
         });
         createToolbarDropdown(deleteMenuButton, [
           { id: 'delete-row', label: 'Row', icon: () => createTablerIcon('row-remove'), variant: 'danger' },

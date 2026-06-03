@@ -50,6 +50,20 @@
       </div>
     </form>
   </dialog>
+  <dialog id="rename-column-dialog" class="csvzall-dialog">
+    <form id="rename-column-form" class="dialog-form">
+      <h2>Rename column</h2>
+      <label>
+        <span>Column name</span>
+        <input id="rename-column-name" type="text" autocomplete="off" required>
+      </label>
+      <p id="rename-column-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancel-rename-column" type="button">Cancel</button>
+        <button type="submit">Rename</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="heatmap-chart-dialog" class="csvzall-dialog chart-dialog">
     <form id="heatmap-chart-form" class="dialog-form" novalidate>
       <div class="chart-dialog-layout">
