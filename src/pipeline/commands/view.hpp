@@ -83,6 +83,7 @@ class CsvViewData {
   void insert_column(std::uint64_t column, const std::string& name, const std::string& value);
   void rename_column(const std::string& column, const std::string& name);
   void delete_column(const std::string& column);
+  bool recover_renamed_source();
   void reset();
   void save(const std::vector<std::string>& columns = {});
 

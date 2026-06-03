@@ -56,6 +56,62 @@ std::filesystem::file_time_type GetFileMtime(const std::string& input_path) {
   return mtime;
 }
 
+bool FileExists(const std::string& input_path) {
+  std::error_code ec;
+  return std::filesystem::exists(input_path, ec);
+}
+
+bool RecoverRenamedMaterializedSource(CsvMaterializedFile& materialized) {
+  if (FileExists(materialized.input_path)) {
+    return false;
+  }
+
+  const auto original = std::filesystem::path(materialized.input_path);
+  auto parent = original.parent_path();
+  if (parent.empty()) {
+    parent = ".";
+  }
+
+  std::error_code ec;
+  if (!std::filesystem::exists(parent, ec)) {
+    throw std::runtime_error("source file no longer exists: " + materialized.input_path);
+  }
+
+  std::vector<std::filesystem::path> matches;
+  std::filesystem::directory_iterator entries(parent, ec);
+  if (ec) {
+    throw std::runtime_error("unable to scan source directory after rename: " + parent.string());
+  }
+
+  for (const auto& entry : entries) {
+    std::error_code entry_ec;
+    if (!entry.is_regular_file(entry_ec) || entry_ec) {
+      continue;
+    }
+    const auto size = entry.file_size(entry_ec);
+    if (entry_ec || static_cast<std::uint64_t>(size) != materialized.source_size) {
+      continue;
+    }
+    const auto mtime = entry.last_write_time(entry_ec);
+    if (entry_ec || mtime != materialized.source_mtime) {
+      continue;
+    }
+    matches.push_back(entry.path());
+  }
+
+  if (matches.empty()) {
+    throw std::runtime_error("source file no longer exists: " + materialized.input_path);
+  }
+  if (matches.size() > 1) {
+    throw std::runtime_error(
+        "source file was renamed, but the new path is ambiguous; reopen the viewer");
+  }
+
+  materialized.input_path = matches.front().string();
+  materialized.file_name = matches.front().filename().string();
+  return true;
+}
+
 void RequireNonEmptyCsvFile(const std::uint64_t file_size) {
   if (file_size == 0) {
     throw std::runtime_error(
@@ -460,11 +516,20 @@ void CsvViewData::delete_column(const std::string& column) {
   }
 }
 
+bool CsvViewData::recover_renamed_source() {
+  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
+  if (!materialized) {
+    return false;
+  }
+  return RecoverRenamedMaterializedSource(*materialized);
+}
+
 void CsvViewData::reset() {
   auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
   if (!materialized) {
     throw std::runtime_error("reset requires materialized view mode");
   }
+  RecoverRenamedMaterializedSource(*materialized);
   ReloadMaterializedFile(*materialized);
 }
 
@@ -475,6 +540,7 @@ void CsvViewData::save(const std::vector<std::string>& columns) {
   }
   ValidateColumnOrder(*materialized->frame, columns);
 
+  RecoverRenamedMaterializedSource(*materialized);
   if (GetFileSize(materialized->input_path) != materialized->source_size ||
       GetFileMtime(materialized->input_path) != materialized->source_mtime) {
     throw std::runtime_error("source file changed externally; reload before saving");

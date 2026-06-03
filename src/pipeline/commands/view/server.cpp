@@ -217,8 +217,15 @@ int ViewServer::Start(const ViewServerOptions& options) {
                         impl_->RejectUnauthorized(response);
                         return;
                       }
-                      response.set_content(BuildSchemaJson(impl_->data, impl_->editable),
-                                           "application/json; charset=utf-8");
+                      try {
+                        impl_->data.recover_renamed_source();
+                        response.set_content(BuildSchemaJson(impl_->data, impl_->editable),
+                                             "application/json; charset=utf-8");
+                      } catch (const std::exception& ex) {
+                        response.status = 409;
+                        response.set_content(std::string(ex.what()) + "\n",
+                                             "text/plain; charset=utf-8");
+                      }
                       impl_->MaybeStopAfterRequest();
                     });
 

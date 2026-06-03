@@ -956,6 +956,51 @@ TEST_CASE("view edit: cell edits persist through save") {
   std::filesystem::remove(path);
 }
 
+TEST_CASE("view edit: save follows a source file renamed on disk") {
+  const auto dir = TempDir("csvzall_view_edit_renamed_source");
+  const auto path = dir / "before.csv";
+  const auto renamed = dir / "after.csv";
+  {
+    std::ofstream output(path, std::ios::binary);
+    output << tests::MakeTestCsv({"name", "value"}, {{"alice", "10"}, {"bob", "20"}});
+  }
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_edit = true;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, true, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  std::filesystem::rename(path, renamed);
+
+  const auto schema = client.Get("/api/schema", headers);
+  REQUIRE(schema);
+  REQUIRE(schema->status == 200);
+  REQUIRE(
+      schema->body ==
+      R"({"file":"after.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2})");
+
+  const auto edit = client.Post(
+      "/api/edit-cell", headers, R"({"row":1,"column":"value","value":"25"})",
+      "application/json");
+  REQUIRE(edit);
+  REQUIRE(edit->status == 200);
+  const auto save = client.Post("/api/save", headers, "{}", "application/json");
+  REQUIRE(save);
+  REQUIRE(save->status == 200);
+  server.Stop();
+
+  REQUIRE_FALSE(std::filesystem::exists(path));
+  REQUIRE(ReadAllRows(renamed) == std::vector<std::vector<std::string>>{{"alice", "10"}, {"bob", "25"}});
+  std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("view edit: row deletion persists through save") {
   const auto csv = tests::MakeTestCsv(
       {"name", "value"},
