@@ -33,6 +33,28 @@ std::string ReadDevViewerAsset(const std::filesystem::path& path) {
   return buffer.str();
 }
 
+bool IsSafeViewerModuleRoute(std::string_view route) {
+  constexpr std::string_view prefix = "/assets/modules/";
+  if (!route.starts_with(prefix) || (!route.ends_with(".js") && !route.ends_with(".mjs"))) {
+    return false;
+  }
+  const auto name = route.substr(prefix.size());
+  if (name.empty()) {
+    return false;
+  }
+  for (const char ch : name) {
+    const bool allowed =
+        (ch >= 'A' && ch <= 'Z') ||
+        (ch >= 'a' && ch <= 'z') ||
+        (ch >= '0' && ch <= '9') ||
+        ch == '.' || ch == '_' || ch == '-';
+    if (!allowed) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool HasDevViewerAssets(const std::filesystem::path& dir) {
   return std::filesystem::exists(dir / "index.html") &&
       std::filesystem::exists(dir / "viewer.css") &&
@@ -84,6 +106,14 @@ std::optional<std::filesystem::path> DevViewerAssetPath(
   }
   if (route == "/assets/viewer.js") {
     return asset_dir / "viewer.js";
+  }
+  if (IsSafeViewerModuleRoute(route)) {
+    constexpr std::string_view prefix = "/assets/modules/";
+    const auto path = asset_dir / "modules" / std::string(route.substr(prefix.size()));
+    std::error_code ec;
+    if (std::filesystem::exists(path, ec)) {
+      return path;
+    }
   }
   return std::nullopt;
 }

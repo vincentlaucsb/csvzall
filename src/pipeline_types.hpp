@@ -54,8 +54,8 @@ struct RunOptions {
   // materialized local-file data so save can rewrite the CSV deterministically.
   bool view_edit = false;
   // Optional development override for first-party viewer assets. When set,
-  // view serves index.html, viewer.css, and viewer.js from this directory on
-  // each request instead of using embedded copies.
+  // view serves index.html, viewer.css, viewer.js, and viewer modules from this
+  // directory on each request instead of using embedded copies.
   std::string view_asset_dir;
 };
 

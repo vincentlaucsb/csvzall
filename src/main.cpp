@@ -595,9 +595,9 @@ Output shape:
   atomically rewriting the source CSV after checking that size and mtime did not
   change externally.
   --viewer-assets <dir> is a developer override that serves index.html,
-  viewer.css, and viewer.js from disk on every request; embedded assets remain
-  the default. CSVZALL_VIEWER_ASSETS provides the same override. AG Grid and
-  Popright vendor files remain embedded.
+  viewer.css, viewer.js, and viewer modules from disk on every request;
+  embedded assets remain the default. CSVZALL_VIEWER_ASSETS provides the same
+  override. AG Grid and Popright vendor files remain embedded.
   Auto mode materializes files at or below --materialize-threshold-mb for
   client-side sorting/filtering and uses indexed /api/rows paging for larger
   files. Paged mode disables global sort/search/filter until server-side
@@ -647,7 +647,7 @@ Related:
       .default_value(false)
       .implicit_value(true);
   view_cmd.add_argument("--viewer-assets")
-      .help("Developer mode: serve index.html, viewer.css, and viewer.js from this directory instead of embedded copies")
+      .help("Developer mode: serve first-party viewer assets from this directory instead of embedded copies")
       .default_value(std::string{""});
   view_cmd.add_argument("--no-open")
       .help("Print the URL without opening a browser automatically")

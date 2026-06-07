@@ -54,6 +54,11 @@ std::filesystem::path WriteTempViewerAssets(const std::string& name) {
     std::ofstream output(dir / "viewer.js", std::ios::binary);
     output << "window.csvzallDevViewer = true;";
   }
+  std::filesystem::create_directories(dir / "modules");
+  {
+    std::ofstream output(dir / "modules" / "sql.mjs", std::ios::binary);
+    output << "export const csvzallDevSqlModule = true;";
+  }
   return dir;
 }
 
@@ -314,6 +319,7 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer->body.find("id=\"chart-date-column\" required") == std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-output\" type=\"text\" autocomplete=\"off\" required") ==
           std::string::npos);
+  REQUIRE(viewer->body.find("type=\"module\" src=\"/assets/viewer.js\"") != std::string::npos);
 
   const auto viewer_js = client.Get("/assets/viewer.js");
   REQUIRE(viewer_js);
@@ -338,6 +344,12 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer_js->body.find("dirty-state") != std::string::npos);
   REQUIRE(viewer_js->body.find("await loadChartList();\n        clearChartError();") !=
           std::string::npos);
+
+  const auto sql_module = client.Get("/assets/modules/sql.mjs");
+  REQUIRE(sql_module);
+  REQUIRE(sql_module->status == 200);
+  REQUIRE(sql_module->body.find("VIEWER_SQL_TABLE_NAME") != std::string::npos);
+  REQUIRE(sql_module->body.find("defaultSqlQuery") != std::string::npos);
 
   const auto ag_grid_css = client.Get("/assets/ag-grid.css");
   REQUIRE(ag_grid_css);
@@ -884,6 +896,11 @@ TEST_CASE("view: developer asset directory overrides first-party embedded viewer
   REQUIRE(viewer_js);
   REQUIRE(viewer_js->status == 200);
   REQUIRE(viewer_js->body.find("csvzallDevViewer") != std::string::npos);
+
+  const auto sql_module = client.Get("/assets/modules/sql.mjs");
+  REQUIRE(sql_module);
+  REQUIRE(sql_module->status == 200);
+  REQUIRE(sql_module->body.find("csvzallDevSqlModule") != std::string::npos);
 
   const auto ag_grid_css = client.Get("/assets/ag-grid.css");
   REQUIRE(ag_grid_css);

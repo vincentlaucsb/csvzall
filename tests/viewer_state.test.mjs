@@ -1,17 +1,32 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
-import vm from 'node:vm';
+import {
+  createDirtyStateEmitter,
+  dirtyStateMessage,
+  handleUnsavedBeforeUnload,
+  installUnsavedChangesBeforeUnload,
+  postDirtyState,
+} from '../src/viewer/modules/dirty-state.mjs';
+import { currentGridColumns, rowInsertionIndex } from '../src/viewer/modules/grid.mjs';
+import { rowsToMarkdownTable } from '../src/viewer/modules/markdown.mjs';
+import { buildSavePayload, saveViewerState } from '../src/viewer/modules/save.mjs';
+import { createViewStateStore } from '../src/viewer/modules/state.mjs';
+import { defaultSqlQuery } from '../src/viewer/modules/sql.mjs';
 
-function loadViewerInternals() {
-  const viewerPath = fileURLToPath(new URL('../src/viewer/viewer.js', import.meta.url));
-  const context = vm.createContext({ console, URL, URLSearchParams });
-  vm.runInContext(readFileSync(viewerPath, 'utf8'), context, { filename: viewerPath });
-  return context.csvzallViewerInternals;
-}
-
-const internals = loadViewerInternals();
+const internals = {
+  buildSavePayload,
+  createDirtyStateEmitter,
+  createViewStateStore,
+  currentGridColumns,
+  defaultSqlQuery,
+  dirtyStateMessage,
+  handleUnsavedBeforeUnload,
+  installUnsavedChangesBeforeUnload,
+  postDirtyState,
+  rowsToMarkdownTable,
+  rowInsertionIndex,
+  saveViewerState,
+};
 
 function sameJson(value) {
   return JSON.parse(JSON.stringify(value));

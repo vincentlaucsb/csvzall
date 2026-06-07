@@ -181,6 +181,19 @@ int ViewServer::Start(const ViewServerOptions& options) {
                                              "text/plain; charset=utf-8");
                       }
                     });
+  impl_->server.Get(R"(/assets/modules/([A-Za-z0-9._-]+\.m?js))",
+                    [this](const httplib::Request& request, httplib::Response& response) {
+                      const auto route = std::string("/assets/modules/") + request.matches[1].str();
+                      try {
+                        if (!ServeViewerAsset(impl_->viewer_asset_dir, route, response)) {
+                          response.status = 404;
+                        }
+                      } catch (const std::exception& ex) {
+                        response.status = 500;
+                        response.set_content(std::string(ex.what()) + "\n",
+                                             "text/plain; charset=utf-8");
+                      }
+                    });
   impl_->server.Get("/assets/ag-grid-community.min.js",
                     [this](const httplib::Request&, httplib::Response& response) {
                       if (!ServeEmbeddedViewerAsset("/assets/ag-grid-community.min.js", response)) {

@@ -93,6 +93,7 @@ html, body {
 }
 
 .query-control {
+  --query-mode-toggle-width: 8.4rem;
   flex: 1 1 30rem;
   min-width: 14rem;
   max-width: 48rem;
@@ -110,7 +111,7 @@ html, body {
 
 .query-mode-toggle {
   display: inline-flex;
-  flex: 0 0 auto;
+  flex: 0 0 var(--query-mode-toggle-width);
 }
 
 .query-mode-toggle button,
@@ -125,7 +126,8 @@ html, body {
 }
 
 .query-mode-toggle button {
-  min-width: 4.2rem;
+  flex: 1 1 0;
+  min-width: 0;
   height: 28px;
   padding: 0 0.55rem;
   border-right: 0;
@@ -191,7 +193,7 @@ html, body {
 }
 
 .sql-error {
-  margin: 0;
+  margin: 0 0 0 var(--query-mode-toggle-width);
   color: var(--text-error, #dc2626);
   font-size: 0.76rem;
   line-height: 1.3;
