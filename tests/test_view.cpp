@@ -282,6 +282,11 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer);
   REQUIRE(viewer->status == 200);
   REQUIRE(viewer->body.find("csvzall view") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"query-mode-search\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"query-mode-sql\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"clear-query\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"sql-error\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"sql-toolbar\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"add-chart\"") != std::string::npos);
   REQUIRE(viewer->body.find(">Charts</button>") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"heatmap-chart-dialog\"") != std::string::npos);
@@ -315,6 +320,8 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer_js->status == 200);
   REQUIRE(viewer_js->body.find("csvzallViewBootstrap") != std::string::npos);
   REQUIRE(viewer_js->body.find("/api/chart-config/heatmap") != std::string::npos);
+  REQUIRE(viewer_js->body.find("/api/sql-query") != std::string::npos);
+  REQUIRE(viewer_js->body.find("VIEWER_SQL_TABLE_NAME") != std::string::npos);
   REQUIRE(viewer_js->body.find("chartType.value") != std::string::npos);
   REQUIRE(viewer_js->body.find("markdown-table") != std::string::npos);
   REQUIRE(viewer_js->body.find("selectedMarkdownColumns") != std::string::npos);
@@ -358,7 +365,7 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_server.csv","columns":["name","value"],"readOnly":true,"editable":false,"mode":"paged","totalRows":3})");
+      R"({"file":"csvzall_view_server.csv","columns":["name","value"],"readOnly":true,"editable":false,"mode":"paged","totalRows":3,"sqlTableName":"data"})");
 
   const auto rows = client.Get("/api/rows?offset=1&limit=1", headers);
   REQUIRE(rows);
@@ -377,6 +384,28 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   const auto invalid_rows = client.Get("/api/rows?offset=-1&limit=1", headers);
   REQUIRE(invalid_rows);
   REQUIRE(invalid_rows->status == 400);
+
+  const auto sql = client.Post(
+      "/api/sql-query",
+      headers,
+      R"({"sql":"SELECT name AS person, value + 5 AS adjusted FROM data WHERE value >= 20 ORDER BY adjusted DESC"})",
+      "application/json");
+  REQUIRE(sql);
+  REQUIRE(sql->status == 200);
+  REQUIRE(sql->body.find("\"columns\":[\"person\",\"adjusted\"]") != std::string::npos);
+  REQUIRE(sql->body.find("\"rows\":[[\"charlie\",\"35\"],[\"bob\",\"25\"]]") != std::string::npos);
+
+  const auto empty_sql = client.Post("/api/sql-query", headers, R"({"sql":""})", "application/json");
+  REQUIRE(empty_sql);
+  REQUIRE(empty_sql->status == 200);
+  REQUIRE(empty_sql->body.find("\"columns\":[\"name\",\"value\"]") != std::string::npos);
+  REQUIRE(empty_sql->body.find("\"totalRows\":3") != std::string::npos);
+
+  const auto bad_sql = client.Post(
+      "/api/sql-query", headers, R"({"sql":"SELECT missing FROM data"})", "application/json");
+  REQUIRE(bad_sql);
+  REQUIRE(bad_sql->status == 400);
+  REQUIRE(bad_sql->body.find("no such column") != std::string::npos);
 
   const auto health = client.Get("/api/health", headers);
   REQUIRE(health);
@@ -995,7 +1024,7 @@ TEST_CASE("view edit: save follows a source file renamed on disk") {
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"after.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2})");
+      R"({"file":"after.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2,"sqlTableName":"data"})");
 
   const auto edit = client.Post(
       "/api/edit-cell", headers, R"({"row":1,"column":"value","value":"25"})",
@@ -1243,7 +1272,7 @@ TEST_CASE("view edit: save applies column order with pending edits atomically") 
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_edit_reorder_column.csv","columns":["value","name","note"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2})");
+      R"({"file":"csvzall_view_edit_reorder_column.csv","columns":["value","name","note"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2,"sqlTableName":"data"})");
 
   const auto rows = client.Get("/api/rows?offset=0&limit=2", headers);
   REQUIRE(rows);
@@ -1296,7 +1325,7 @@ TEST_CASE("view edit: reset reloads source from disk and discards unsaved change
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_edit_reset.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2})");
+      R"({"file":"csvzall_view_edit_reset.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2,"sqlTableName":"data"})");
 
   const auto rows = client.Get("/api/rows?offset=0&limit=2", headers);
   REQUIRE(rows);

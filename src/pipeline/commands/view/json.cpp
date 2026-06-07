@@ -1,5 +1,7 @@
 #include "json.hpp"
 
+#include "sql.hpp"
+
 #include <nlohmann/json.hpp>
 
 #include <stdexcept>
@@ -56,6 +58,7 @@ std::string BuildSchemaJson(const CsvViewData& data, bool editable) {
   json["editable"] = editable;
   json["mode"] = std::string(data.mode_name());
   json["totalRows"] = data.row_count();
+  json["sqlTableName"] = kViewerSqlTableName;
   return json.dump();
 }
 

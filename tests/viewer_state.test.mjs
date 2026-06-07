@@ -85,6 +85,19 @@ test('rowInsertionIndex preserves before-first-row insertion', () => {
   assert.equal(internals.rowInsertionIndex(undefined, 3, 0), 3);
 });
 
+test('default SQL query uses the viewer table name', () => {
+  assert.equal(internals.defaultSqlQuery(), 'SELECT *\nFROM data\nLIMIT 100;');
+  assert.equal(internals.defaultSqlQuery('loaded'), 'SELECT *\nFROM loaded\nLIMIT 100;');
+});
+
+test('rowsToMarkdownTable escapes table cell separators and line breaks', () => {
+  assert.equal(
+    internals.rowsToMarkdownTable(
+      ['name', 'note'],
+      [{ name: 'Alice|Bob', note: 'one\ntwo' }]),
+    '| name | note |\n| --- | --- |\n| Alice\\|Bob | one<br>two |');
+});
+
 test('saveViewerState sends an empty save payload for data-only edits', async () => {
   const store = internals.createViewStateStore();
   store.markDataDirty();

@@ -5,8 +5,10 @@ const TABLER_ICON_PATHS = {
   'chevron-down': ['M6 9l6 6l6 -6'],
   'column-insert-right': ['M4 6a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-4a2 2 0 0 1 -2 -2z', 'M16 12h6', 'M19 9v6'],
   'column-remove': ['M4 6a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-4a2 2 0 0 1 -2 -2z', 'M16 12h6'],
+  'copy': ['M8 8m0 2a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z', 'M16 8v-2a2 2 0 0 0 -2 -2h-8a2 2 0 0 0 -2 2v8a2 2 0 0 0 2 2h2'],
   'device-floppy': ['M6 4h10l4 4v10a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2', 'M12 14m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0', 'M14 4l0 4l-6 0l0 -4'],
   'pencil': ['M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4', 'M13.5 6.5l4 4'],
+  'player-play': ['M7 4v16l13 -8z'],
   'plus': ['M12 5l0 14', 'M5 12l14 0'],
   'restore': ['M3.06 13a9 9 0 1 0 3.59 -7.36', 'M3 4v6h6'],
   'row-insert-bottom': ['M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z', 'M12 15v6', 'M9 18h6'],
@@ -14,6 +16,30 @@ const TABLER_ICON_PATHS = {
   'trash': ['M4 7h16', 'M10 11v6', 'M14 11v6', 'M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12', 'M9 7v-3h6v3'],
   'x': ['M18 6l-12 12', 'M6 6l12 12'],
 };
+
+const VIEWER_SQL_TABLE_NAME = 'data';
+
+function defaultSqlQuery(tableName = VIEWER_SQL_TABLE_NAME) {
+  return `SELECT *\nFROM ${tableName}\nLIMIT 100;`;
+}
+
+function markdownCell(value) {
+  return String(value ?? '')
+    .replace(/\|/g, '\\|')
+    .replace(/\r?\n/g, '<br>');
+}
+
+function rowsToMarkdownTable(columns, rows) {
+  const safeColumns = Array.isArray(columns) ? columns : [];
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const header = `| ${safeColumns.map(markdownCell).join(' | ')} |`;
+  const divider = `| ${safeColumns.map(() => '---').join(' | ')} |`;
+  const body = safeRows.map((row) => {
+    const values = safeColumns.map((column) => markdownCell(row?.[column] ?? ''));
+    return `| ${values.join(' | ')} |`;
+  });
+  return [header, divider, ...body].join('\n');
+}
 
 function createTablerIcon(name) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -47,6 +73,12 @@ function actionContent(iconName, label) {
 
 function decorateButton(button, iconName, label = button.textContent.trim()) {
   button.replaceChildren(actionContent(iconName, label));
+  button.setAttribute('aria-label', label);
+  button.title = label;
+}
+
+function decorateIconButton(button, iconName, label) {
+  button.replaceChildren(createTablerIcon(iconName));
   button.setAttribute('aria-label', label);
   button.title = label;
 }
@@ -180,7 +212,9 @@ if (typeof globalThis !== 'undefined') {
   globalThis.csvzallViewerInternals = {
     createViewStateStore,
     currentGridColumns,
+    defaultSqlQuery,
     rowInsertionIndex,
+    rowsToMarkdownTable,
     buildSavePayload,
     saveViewerState,
     dirtyStateMessage,
@@ -326,7 +360,14 @@ async function csvzallViewBootstrap(dependencies = {}) {
   const recordCountNode = document.getElementById('record-count');
   const fileNode = document.getElementById('file-name');
   const quickFilterNode = document.getElementById('quick-filter');
-  const searchNode = quickFilterNode.closest('.search');
+  const queryControl = document.getElementById('query-control');
+  const searchModeButton = document.getElementById('query-mode-search');
+  const sqlModeButton = document.getElementById('query-mode-sql');
+  const clearQueryButton = document.getElementById('clear-query');
+  const sqlErrorNode = document.getElementById('sql-error');
+  const sqlToolbar = document.getElementById('sql-toolbar');
+  const runSqlButton = document.getElementById('run-sql');
+  const copyMarkdownButton = document.getElementById('copy-markdown');
   const token = new URLSearchParams(window.location.search).get('token');
 
   if (!token) {
@@ -376,6 +417,47 @@ async function csvzallViewBootstrap(dependencies = {}) {
       return;
     }
     api.setQuickFilter(value);
+  }
+
+  function setGridRowData(api, rows) {
+    if (api.setGridOption) {
+      api.setGridOption('rowData', rows);
+      return;
+    }
+    api.setRowData(rows);
+  }
+
+  function setGridColumnDefs(api, columns, options = {}) {
+    const columnDefs = columns.map((column) => ({
+      headerName: column,
+      field: column,
+      sortable: options.sortable === true,
+      filter: options.filter === true,
+      editable: options.editable === true,
+      resizable: true,
+      minWidth: 140,
+      flex: 1,
+    }));
+    if (api.setGridOption) {
+      api.setGridOption('columnDefs', columnDefs);
+      return;
+    }
+    api.setColumnDefs(columnDefs);
+  }
+
+  function autoResizeQueryInput() {
+    quickFilterNode.style.height = 'auto';
+    quickFilterNode.style.height = `${Math.min(quickFilterNode.scrollHeight, 144)}px`;
+  }
+
+  function showSqlError(message) {
+    sqlErrorNode.textContent = message;
+    sqlErrorNode.hidden = false;
+  }
+
+  function clearSqlError() {
+    sqlErrorNode.textContent = '';
+    sqlErrorNode.hidden = true;
   }
 
   function rowsToObjects(columns, rows) {
@@ -517,6 +599,9 @@ async function csvzallViewBootstrap(dependencies = {}) {
     decorateMenuButton(deleteMenuButton, 'trash', 'Delete');
     decorateButton(resetButton, 'restore', 'Reset');
     decorateButton(saveButton, 'device-floppy', 'Save');
+    decorateIconButton(clearQueryButton, 'x', 'Clear filter');
+    decorateButton(runSqlButton, 'player-play', 'Run');
+    decorateButton(copyMarkdownButton, 'copy', 'Copy Markdown');
     decorateButton(cancelInsertColumn, 'x', 'Cancel');
     decorateButton(insertColumnForm.querySelector('button[type="submit"]'), 'plus', 'Insert');
     decorateButton(cancelRenameColumn, 'x', 'Cancel');
@@ -525,14 +610,16 @@ async function csvzallViewBootstrap(dependencies = {}) {
     decorateButton(cancelChart, 'x', 'Cancel');
     decorateButton(generateChartButton, 'chart-bar', 'Create chart');
     decorateButton(chartForm.querySelector('button[type="submit"]'), 'device-floppy', 'Save chart');
-    quickFilterNode.hidden = !materialized;
+    queryControl.hidden = !materialized;
     quickFilterNode.disabled = !materialized;
-    searchNode.hidden = !materialized;
     editToolbar.hidden = !editable;
     addChartButton.hidden = false;
 
     const baseName = stripCsvExtension(schema.file);
     const baseSlug = slugify(baseName);
+    const sqlTableName = schema.sqlTableName || VIEWER_SQL_TABLE_NAME;
+    const sqlDefaultQuery = defaultSqlQuery(sqlTableName);
+    chartMarkdownSql.placeholder = `SELECT * FROM ${sqlTableName}`;
     const guessedDateColumn = guessColumn(schema.columns, ['date', 'day', 'attendance_date']);
     const guessedValueColumn = guessColumn(schema.columns, ['count', 'value', 'total']);
     const guessedLabelColumn = guessColumn(schema.columns, ['content', 'label', 'note', 'description']);
@@ -960,9 +1047,88 @@ async function csvzallViewBootstrap(dependencies = {}) {
       const allRows = schema.totalRows === 0
         ? []
         : rowsToObjects(schema.columns, (await fetchJson('/api/rows', { offset: 0, limit: schema.totalRows })).rows);
+      let queryMode = 'search';
+      let searchText = '';
+      let sqlText = '';
+      let sqlResultColumns = [];
+      let sqlResultRows = [];
+      const refreshToolbarForMode = () => {
+        const sqlMode = queryMode === 'sql';
+        queryControl.classList.toggle('sql-mode', sqlMode);
+        searchModeButton.classList.toggle('active', !sqlMode);
+        sqlModeButton.classList.toggle('active', sqlMode);
+        searchModeButton.setAttribute('aria-pressed', String(!sqlMode));
+        sqlModeButton.setAttribute('aria-pressed', String(sqlMode));
+        sqlToolbar.hidden = !sqlMode;
+        editToolbar.hidden = sqlMode || !editable;
+        addChartButton.hidden = sqlMode;
+        quickFilterNode.placeholder = sqlMode
+          ? `SELECT * FROM ${sqlTableName}`
+          : 'Type to filter loaded table...';
+        clearQueryButton.title = sqlMode ? 'Clear query' : 'Clear filter';
+        clearQueryButton.setAttribute('aria-label', sqlMode ? 'Clear query' : 'Clear filter');
+      };
+      const applySearchMode = () => {
+        queryMode = 'search';
+        quickFilterNode.value = searchText;
+        clearSqlError();
+        refreshToolbarForMode();
+        setGridColumnDefs(api, schema.columns, { sortable: true, filter: true, editable });
+        setGridRowData(api, allRows);
+        setQuickFilter(api, searchText);
+        recordCountNode.textContent = `${schema.totalRows.toLocaleString()} rows, ${schema.columns.length.toLocaleString()} columns`;
+        autoResizeQueryInput();
+        refreshDirtyUi();
+      };
+      const applySqlResult = (result) => {
+        sqlResultColumns = Array.isArray(result.columns) ? result.columns : [];
+        sqlResultRows = rowsToObjects(sqlResultColumns, Array.isArray(result.rows) ? result.rows : []);
+        setQuickFilter(api, '');
+        setGridColumnDefs(api, sqlResultColumns, { sortable: true, filter: false, editable: false });
+        setGridRowData(api, sqlResultRows);
+        copyMarkdownButton.disabled = sqlResultColumns.length === 0;
+        recordCountNode.textContent =
+          `${sqlResultRows.length.toLocaleString()} SQL result row${sqlResultRows.length === 1 ? '' : 's'}, ${sqlResultColumns.length.toLocaleString()} columns`;
+        statusNode.textContent = `SQL result: ${sqlResultRows.length.toLocaleString()} row${sqlResultRows.length === 1 ? '' : 's'}.`;
+        api.sizeColumnsToFit?.();
+      };
+      const runSqlQuery = async () => {
+        if (queryMode !== 'sql') {
+          return;
+        }
+        runSqlButton.disabled = true;
+        copyMarkdownButton.disabled = true;
+        statusNode.textContent = 'Running SQL...';
+        try {
+          const result = await postJson('/api/sql-query', { sql: quickFilterNode.value });
+          sqlText = quickFilterNode.value;
+          clearSqlError();
+          applySqlResult(result);
+        } catch (error) {
+          copyMarkdownButton.disabled = sqlResultColumns.length === 0;
+          showSqlError(error instanceof Error ? error.message : 'SQL query failed');
+          statusNode.textContent = 'SQL query failed.';
+        } finally {
+          runSqlButton.disabled = false;
+        }
+      };
+      const applySqlMode = () => {
+        queryMode = 'sql';
+        searchText = searchText || '';
+        if (!sqlText) {
+          sqlText = sqlDefaultQuery;
+        }
+        quickFilterNode.value = sqlText;
+        refreshToolbarForMode();
+        autoResizeQueryInput();
+        void runSqlQuery();
+      };
       const refreshDirtyUi = () => {
         saveButton.disabled = !viewState.dirty;
         resetButton.disabled = !viewState.dirty;
+        if (queryMode === 'sql') {
+          return;
+        }
         statusNode.textContent = viewState.dirty
           ? 'Unsaved changes.'
           : `Loaded ${allRows.length.toLocaleString()} rows for ${editable ? 'editing' : 'client-side sort/filter'}.`;
@@ -972,26 +1138,56 @@ async function csvzallViewBootstrap(dependencies = {}) {
         viewState.markDataDirty();
         refreshDirtyUi();
       };
-      if (api.setGridOption) {
-        api.setGridOption('rowData', allRows);
-      } else {
-        api.setRowData(allRows);
-      }
-      quickFilterNode.addEventListener('input', () => setQuickFilter(api, quickFilterNode.value));
+      setGridRowData(api, allRows);
+      quickFilterNode.addEventListener('input', () => {
+        autoResizeQueryInput();
+        if (queryMode === 'search') {
+          searchText = quickFilterNode.value;
+          setQuickFilter(api, searchText);
+          return;
+        }
+        clearSqlError();
+      });
+      quickFilterNode.addEventListener('keydown', (event) => {
+        if (queryMode === 'sql' && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+          event.preventDefault();
+          void runSqlQuery();
+        }
+      });
+      searchModeButton.addEventListener('click', applySearchMode);
+      sqlModeButton.addEventListener('click', applySqlMode);
+      clearQueryButton.addEventListener('click', () => {
+        quickFilterNode.value = '';
+        autoResizeQueryInput();
+        if (queryMode === 'search') {
+          searchText = '';
+          setQuickFilter(api, '');
+          quickFilterNode.focus();
+          return;
+        }
+        sqlText = '';
+        void runSqlQuery();
+        quickFilterNode.focus();
+      });
+      runSqlButton.addEventListener('click', () => {
+        void runSqlQuery();
+      });
+      copyMarkdownButton.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(rowsToMarkdownTable(sqlResultColumns, sqlResultRows));
+          statusNode.textContent = 'Copied Markdown table.';
+        } catch (error) {
+          statusNode.textContent = error instanceof Error ? error.message : 'Copy failed';
+        }
+      });
+      refreshToolbarForMode();
+      autoResizeQueryInput();
       if (editable) {
         const refreshRows = () => {
-          if (api.setGridOption) {
-            api.setGridOption('rowData', allRows);
-          } else {
-            api.setRowData(allRows);
-          }
+          setGridRowData(api, allRows);
         };
         const refreshColumns = () => {
-          if (api.setGridOption) {
-            api.setGridOption('columnDefs', makeColumnDefs());
-          } else {
-            api.setColumnDefs(makeColumnDefs());
-          }
+          setGridColumnDefs(api, schema.columns, { sortable: true, filter: true, editable });
         };
         const selectedSourceRow = () => {
           const selected = api.getSelectedRows ? api.getSelectedRows() : [];
@@ -1187,6 +1383,9 @@ async function csvzallViewBootstrap(dependencies = {}) {
           return menu;
         };
         gridOptions.onCellValueChanged = async (event) => {
+          if (queryMode === 'sql') {
+            return;
+          }
           if (!event.colDef.field || event.colDef.field === '_csvzallRowId') {
             return;
           }
@@ -1261,6 +1460,9 @@ async function csvzallViewBootstrap(dependencies = {}) {
             },
           });
           gridOptions.onCellContextMenu = (event) => {
+            if (queryMode === 'sql') {
+              return;
+            }
             const nativeEvent = event.event;
             const row = event.data?._csvzallRowId;
             const column = event.colDef?.field;
@@ -1299,6 +1501,9 @@ async function csvzallViewBootstrap(dependencies = {}) {
             },
           });
           gridElement.addEventListener('contextmenu', (event) => {
+            if (queryMode === 'sql') {
+              return;
+            }
             const headerCell = event.target?.closest?.('.ag-header-cell[col-id]');
             const column = headerCell?.getAttribute('col-id') ?? '';
             if (!column || !schema.columns.includes(column)) {

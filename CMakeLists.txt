@@ -691,6 +691,7 @@ set(CSVZALL_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/json.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/model.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/server.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/sql.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/support.cpp)
 
 if(CSVZALL_HAVE_SVGPLOT)

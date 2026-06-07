@@ -3,6 +3,7 @@
 #include "assets.hpp"
 #include "charts.hpp"
 #include "json.hpp"
+#include "sql.hpp"
 #include "support.hpp"
 
 #include <algorithm>
@@ -26,11 +27,13 @@ using view_internal::BuildChartConfigListJson;
 using view_internal::BuildHealthJson;
 using view_internal::BuildRowsJson;
 using view_internal::BuildSchemaJson;
+using view_internal::BuildSqlQueryResultJson;
 using view_internal::GenerateCurrentCsvChart;
 using view_internal::GenerateSessionToken;
 using view_internal::JsonStringArrayField;
 using view_internal::JsonStringArrayFieldOr;
 using view_internal::JsonStringField;
+using view_internal::JsonStringFieldOr;
 using view_internal::JsonUintField;
 using view_internal::RenderRunOnSaveChartsForCurrentCsv;
 using view_internal::ResolveDevViewerAssetDir;
@@ -263,6 +266,23 @@ int ViewServer::Start(const ViewServerOptions& options) {
                       }
                       impl_->MaybeStopAfterRequest();
                     });
+
+  impl_->server.Post("/api/sql-query",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       try {
+                         response.set_content(
+                             BuildSqlQueryResultJson(
+                                 impl_->data,
+                                 JsonStringFieldOr(request.body, "sql", "")),
+                             "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     });
 
   impl_->server.Post("/api/edit-cell",
                      [this](const httplib::Request& request, httplib::Response& response) {

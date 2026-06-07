@@ -15,11 +15,25 @@
         <h1 id="file-name">Loading…</h1>
         <span id="summary" class="summary" aria-hidden="true"></span>
       </div>
-      <label class="search">
-        <input id="quick-filter" type="search" placeholder="Type to filter loaded table...">
-      </label>
+      <div class="query-control" id="query-control">
+        <div class="query-input-row">
+          <div class="query-mode-toggle" role="group" aria-label="Filter mode">
+            <button id="query-mode-search" type="button" class="active" aria-pressed="true">Search</button>
+            <button id="query-mode-sql" type="button" aria-pressed="false">SQL</button>
+          </div>
+          <div class="query-input-shell">
+            <textarea id="quick-filter" rows="1" autocomplete="off" spellcheck="false" placeholder="Type to filter loaded table..."></textarea>
+            <button id="clear-query" type="button" aria-label="Clear filter" title="Clear filter">Clear</button>
+          </div>
+        </div>
+        <p id="sql-error" class="sql-error" hidden></p>
+      </div>
       <div class="chart-toolbar">
         <button id="add-chart" type="button" hidden>Charts</button>
+      </div>
+      <div id="sql-toolbar" class="sql-toolbar" hidden>
+        <button id="run-sql" type="button">Run</button>
+        <button id="copy-markdown" type="button" disabled>Copy Markdown</button>
       </div>
       <div id="edit-toolbar" class="edit-toolbar" hidden>
         <button id="insert-menu" type="button">Insert</button>
