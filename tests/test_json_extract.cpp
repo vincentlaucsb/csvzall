@@ -53,6 +53,49 @@ TEST_CASE("JSON extract: basic and nested fields") {
                       {"2", "Run", ""}});
 }
 
+TEST_CASE("JSON extract: accepts UTF-8 BOM input") {
+  std::ostringstream output;
+  std::string json = "\xEF\xBB\xBF";
+  json += R"({"results":[{"id":1,"content":"Gym"}]})";
+
+  const int rc = RunJsonExtractForText(
+      json,
+      R"({"rows":"$.results[*]","columns":{"id":"$.id","content":"$.content"}})",
+      output);
+
+  REQUIRE(rc == 0);
+  const auto rows = tests::ParseCsv(output.str());
+  REQUIRE(rows == std::vector<std::vector<std::string>>{
+                      {"id", "content"},
+                      {"1", "Gym"}});
+}
+
+TEST_CASE("JSON extract: reports UTF-16 input clearly") {
+  const auto json_path = TempPath("utf16_input.json");
+  const auto map_path = TempPath("utf16_map.json");
+  std::string json = "\xFF\xFE";
+  for (const char ch : std::string(R"({"results":[{"id":1}]})")) {
+    json.push_back(ch);
+    json.push_back('\0');
+  }
+  WriteText(json_path, json);
+  WriteText(map_path, R"({"rows":"$.results[*]","columns":{"id":"$.id"}})");
+
+  std::ostringstream output;
+  std::string error;
+  pipeline::LoggerCallbacks logger = tests::MakeNullLogger();
+  logger.error = [&error](const std::string& message) {
+    error = message;
+  };
+  pipeline::RunStats stats;
+
+  const int rc = pipeline::RunJsonExtract(
+      json_path.string(), map_path.string(), output, logger, stats);
+
+  REQUIRE(rc == 1);
+  REQUIRE(error.find("UTF-16") != std::string::npos);
+}
+
 TEST_CASE("JSON extract: quoted field names and array indexes") {
   std::ostringstream output;
   const int rc = RunJsonExtractForText(

@@ -311,6 +311,8 @@ regenerate the artifact when the source CSV changes.
 
 If neither `sql` nor `columns` is provided, `markdown-table` exports all CSV
 columns. Pass `--validate` to check selected configs without writing output.
+Use `csvzall charts schema` for the full generated config reference, including
+per-chart option keys and accepted value forms such as heatmap `lookback`.
 
 ### `append <existing.csv> <incoming.csv> [--in-place]`
 

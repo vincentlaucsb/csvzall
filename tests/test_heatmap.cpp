@@ -230,6 +230,18 @@ TEST_CASE("charts config accepts grouped bar presentation") {
   CHECK(config.charts.front().bar.presentation == "grouped");
 }
 
+TEST_CASE("charts config accepts multi-value color schemes") {
+  const auto root = TempDir("csvzall_chart_color_scheme_config");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"bar","type":"bar","input":"training.csv","output":"bar.svg","options":{"label":"date","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}],"colorScheme":"diverging"}},{"id":"line","type":"line","input":"training.csv","output":"line.svg","options":{"x":"day","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}],"colorScheme":"sequential"}}]})");
+
+  const auto config = csvzall::pipeline::common::LoadChartConfig(root / "config.json");
+
+  REQUIRE(config.charts.size() == 2);
+  CHECK(config.charts[0].bar.color_scheme == "diverging");
+  CHECK(config.charts[1].line.color_scheme == "sequential");
+}
+
 TEST_CASE("heatmap chart specs from direct args and JSON config match") {
   const auto root = TempDir("csvzall_chart_spec_match");
   WriteText(root / ".csvzall" / "charts.json",
@@ -391,6 +403,27 @@ TEST_CASE("charts run renders configured multi-value heatmap bar and line output
   CHECK(ReadText(root / "grouped-bar.svg").find("class=\"bar bar-grouped") != std::string::npos);
   CHECK(ReadText(root / "line.svg").find(">Gym</text>") != std::string::npos);
   CHECK(ReadText(root / "line.svg").find(">Bike</text>") != std::string::npos);
+}
+
+TEST_CASE("charts run applies generated color schemes and preserves explicit colors") {
+  const auto root = TempDir("csvzall_charts_color_scheme_render");
+  WriteText(root / "training.csv",
+            "date,day,gym,bike\n"
+            "2026-01-01,1,1,0\n"
+            "2026-01-02,2,0,1\n");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"heatmap","type":"heatmap","input":"training.csv","output":"heatmap.svg","options":{"date":"date","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}],"start":"2026-01-01","end":"2026-01-07"}},{"id":"bar","type":"bar","input":"training.csv","output":"bar.svg","options":{"label":"date","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike","color":"#123456"}],"colorScheme":"diverging"}},{"id":"line","type":"line","input":"training.csv","output":"line.svg","options":{"x":"day","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}],"colorScheme":"sequential"}}]})");
+
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  const auto rc = csvzall::pipeline::RunCharts((root / "config.json").string(),
+                                               "", false, options, SilentLogger(), stats);
+
+  CHECK(rc == 0);
+  CHECK(ReadText(root / "heatmap.svg").find("#ea580c") != std::string::npos);
+  CHECK(ReadText(root / "bar.svg").find("#123456") != std::string::npos);
+  CHECK(ReadText(root / "bar.svg").find("#2563eb") != std::string::npos);
+  CHECK(ReadText(root / "line.svg").find("#1e40af") != std::string::npos);
 }
 
 TEST_CASE("charts run renders configured Markdown table output") {

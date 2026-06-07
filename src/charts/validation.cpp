@@ -1,4 +1,5 @@
 #include "csv_chart.hpp"
+#include "csv_chart_common.hpp"
 
 #include <exception>
 
@@ -36,6 +37,7 @@ std::optional<std::string> ValidateChartSpecFields(const ChartSpec& spec) {
     }
     try {
       (void)IsGroupedBarPresentation(spec.bar.presentation);
+      (void)NormalizeChartColorScheme(spec.bar.color_scheme);
     } catch (const std::exception& ex) {
       return std::string("bar: ") + ex.what();
     }
@@ -50,6 +52,11 @@ std::optional<std::string> ValidateChartSpecFields(const ChartSpec& spec) {
     }
     if (spec.line.values.size() > 1 && !spec.line.series_column.empty()) {
       return "line: series column cannot be combined with multiple value columns";
+    }
+    try {
+      (void)NormalizeChartColorScheme(spec.line.color_scheme);
+    } catch (const std::exception& ex) {
+      return std::string("line: ") + ex.what();
     }
     return std::nullopt;
   }

@@ -125,3 +125,131 @@ test('saveViewerState sends current column order and requests reload for column 
   assert.equal(saved.reloadAfterSave, true);
   assert.equal(store.dirty, false);
 });
+
+test('dirty state messages use the iframe host contract', () => {
+  assert.deepEqual(sameJson(internals.dirtyStateMessage(true)), {
+    source: 'csvzall-viewer',
+    type: 'dirty-state',
+    dirty: true,
+  });
+  assert.deepEqual(sameJson(internals.dirtyStateMessage(false)), {
+    source: 'csvzall-viewer',
+    type: 'dirty-state',
+    dirty: false,
+  });
+});
+
+test('postDirtyState sends dirty state to a target window', () => {
+  const messages = [];
+  const targetWindow = {
+    postMessage(message, origin) {
+      messages.push({ message, origin });
+    },
+  };
+
+  assert.equal(internals.postDirtyState(true, targetWindow, 'app://obsidian.md'), true);
+  assert.deepEqual(sameJson(messages), [{
+    message: {
+      source: 'csvzall-viewer',
+      type: 'dirty-state',
+      dirty: true,
+    },
+    origin: 'app://obsidian.md',
+  }]);
+  assert.equal(internals.postDirtyState(false, null), false);
+});
+
+test('dirty state emitter posts only when dirty state changes', () => {
+  const store = internals.createViewStateStore();
+  const messages = [];
+  const targetWindow = {
+    postMessage(message, origin) {
+      messages.push({ message, origin });
+    },
+  };
+  const emit = internals.createDirtyStateEmitter(store, targetWindow, '*');
+
+  assert.equal(emit(), true);
+  assert.equal(emit(), false);
+
+  store.markDataDirty();
+  assert.equal(emit(), true);
+  assert.equal(emit(), false);
+
+  store.markClean();
+  assert.equal(emit(), true);
+
+  assert.deepEqual(sameJson(messages), [
+    {
+      message: {
+        source: 'csvzall-viewer',
+        type: 'dirty-state',
+        dirty: false,
+      },
+      origin: '*',
+    },
+    {
+      message: {
+        source: 'csvzall-viewer',
+        type: 'dirty-state',
+        dirty: true,
+      },
+      origin: '*',
+    },
+    {
+      message: {
+        source: 'csvzall-viewer',
+        type: 'dirty-state',
+        dirty: false,
+      },
+      origin: '*',
+    },
+  ]);
+});
+
+test('unsaved changes beforeunload guard only blocks while dirty', () => {
+  const store = internals.createViewStateStore();
+  let prevented = false;
+  const cleanEvent = {
+    preventDefault() {
+      prevented = true;
+    },
+  };
+
+  assert.equal(internals.handleUnsavedBeforeUnload(store, cleanEvent), undefined);
+  assert.equal(prevented, false);
+  assert.equal('returnValue' in cleanEvent, false);
+
+  store.markDataDirty();
+  const dirtyEvent = {
+    preventDefault() {
+      prevented = true;
+    },
+  };
+  assert.equal(internals.handleUnsavedBeforeUnload(store, dirtyEvent), '');
+  assert.equal(prevented, true);
+  assert.equal(dirtyEvent.returnValue, '');
+});
+
+test('unsaved changes beforeunload guard can be removed', () => {
+  const store = internals.createViewStateStore();
+  const listeners = [];
+  const fakeWindow = {
+    addEventListener(type, listener) {
+      listeners.push({ type, listener });
+    },
+    removeEventListener(type, listener) {
+      const index = listeners.findIndex((entry) => entry.type === type && entry.listener === listener);
+      if (index >= 0) {
+        listeners.splice(index, 1);
+      }
+    },
+  };
+
+  const removeGuard = internals.installUnsavedChangesBeforeUnload(store, fakeWindow);
+  assert.equal(listeners.length, 1);
+  assert.equal(listeners[0].type, 'beforeunload');
+
+  removeGuard();
+  assert.equal(listeners.length, 0);
+});

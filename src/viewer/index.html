@@ -19,7 +19,7 @@
         <input id="quick-filter" type="search" placeholder="Type to filter loaded table...">
       </label>
       <div class="chart-toolbar">
-        <button id="add-chart" type="button" hidden>Add chart</button>
+        <button id="add-chart" type="button" hidden>Charts</button>
       </div>
       <div id="edit-toolbar" class="edit-toolbar" hidden>
         <button id="insert-menu" type="button">Insert</button>
@@ -123,8 +123,8 @@
             </label>
             <p class="field-help">Use table name <code>data</code> in SQL queries.</p>
           </fieldset>
-          <fieldset id="chart-range-section" class="chart-range">
-            <legend>Range</legend>
+          <fieldset id="chart-layout-section" class="chart-range">
+            <legend>Layout</legend>
             <label>
               <span>Orientation</span>
               <select id="chart-orientation">
@@ -132,6 +132,9 @@
                 <option value="months-vertical">Months down</option>
               </select>
             </label>
+          </fieldset>
+          <fieldset id="chart-range-section" class="chart-range">
+            <legend>Range</legend>
             <label class="toggle-row">
               <input id="chart-range-fixed" type="radio" name="chart-range-mode" value="fixed" checked>
               <span>Fixed dates</span>
@@ -169,6 +172,13 @@
             <select id="chart-presentation">
               <option value="stacked">Stacked</option>
               <option value="grouped">Grouped</option>
+            </select>
+          </label>
+          <label id="chart-color-scheme-field">
+            <span>Color scheme</span>
+            <select id="chart-color-scheme">
+              <option value="sequential">Sequential</option>
+              <option value="diverging">Diverging</option>
             </select>
           </label>
           <label>

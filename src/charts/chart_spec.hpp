@@ -29,6 +29,7 @@ struct BarSpec {
   std::string label_column;
   std::string value_column;
   std::vector<ChartValueSpec> values;
+  std::string color_scheme = "sequential";
   std::string title;
   std::string x_label;
   std::string y_label;
@@ -39,6 +40,7 @@ struct LineSpec {
   std::string x_column;
   std::string y_column;
   std::vector<ChartValueSpec> values;
+  std::string color_scheme = "sequential";
   std::string series_column;
   std::string title;
   std::string x_label;

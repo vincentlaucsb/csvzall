@@ -23,5 +23,9 @@ std::vector<ChartValueSpec> EffectiveValues(const std::vector<ChartValueSpec>& v
                                             const std::string& legacy_column);
 std::string ValueLabel(const ChartValueSpec& spec);
 std::string ValueColor(const ChartValueSpec& spec, std::size_t index);
+std::string ValueColor(const ChartValueSpec& spec,
+                       std::size_t index,
+                       std::string_view color_scheme);
+std::string NormalizeChartColorScheme(std::string_view raw);
 
 }  // namespace csvzall::charts

@@ -65,7 +65,10 @@ CsvChartResult RenderLineCsv(csv::CSVReader& reader,
       std::sort(points.begin(), points.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.x < rhs.x;
       });
-      series.push_back({ValueLabel(value_specs[i]), std::move(points), ValueColor(value_specs[i], i)});
+      series.push_back({
+          ValueLabel(value_specs[i]),
+          std::move(points),
+          ValueColor(value_specs[i], i, spec.color_scheme)});
     }
 
     svgplot::ChartOptions chart_options;

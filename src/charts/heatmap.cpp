@@ -252,7 +252,7 @@ CsvChartResult RenderHeatmapCsv(csv::CSVReader& reader,
       chart_options.categories.push_back({
           value_specs[i].column,
           ValueLabel(value_specs[i]),
-          ValueColor(value_specs[i], i)});
+          ValueColor(value_specs[i], i, "diverging")});
     }
   }
   result.svg = svgplot::heatmap_chart(cells, chart_options).str();

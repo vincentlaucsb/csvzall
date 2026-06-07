@@ -3,6 +3,7 @@
 #include <svgplot/svgplot.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <stdexcept>
@@ -27,6 +28,46 @@ std::string ToLowerAscii(std::string_view text) {
     lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
   }
   return lower;
+}
+
+std::string CompactSchemeName(std::string_view text) {
+  std::string normalized;
+  normalized.reserve(text.size());
+  for (const unsigned char ch : text) {
+    if (ch == '_' || ch == '-' || std::isspace(ch) != 0) {
+      continue;
+    }
+    normalized.push_back(static_cast<char>(std::tolower(ch)));
+  }
+  return normalized;
+}
+
+std::string SequentialColor(std::size_t index) {
+  static constexpr std::array<std::string_view, 8> colors{
+      "#1e40af",
+      "#2563eb",
+      "#3b82f6",
+      "#60a5fa",
+      "#0891b2",
+      "#0e7490",
+      "#0369a1",
+      "#075985",
+  };
+  return std::string(colors[index % colors.size()]);
+}
+
+std::string DivergingColor(std::size_t index) {
+  static constexpr std::array<std::string_view, 8> colors{
+      "#2563eb",
+      "#ea580c",
+      "#059669",
+      "#dc2626",
+      "#7c3aed",
+      "#be123c",
+      "#0891b2",
+      "#4b5563",
+  };
+  return std::string(colors[index % colors.size()]);
 }
 
 }  // namespace
@@ -91,6 +132,28 @@ std::string ValueLabel(const ChartValueSpec& spec) {
 
 std::string ValueColor(const ChartValueSpec& spec, std::size_t index) {
   return spec.color.empty() ? svgplot::default_series_color(index) : spec.color;
+}
+
+std::string ValueColor(const ChartValueSpec& spec,
+                       std::size_t index,
+                       std::string_view color_scheme) {
+  if (!spec.color.empty()) {
+    return spec.color;
+  }
+  const auto normalized = NormalizeChartColorScheme(color_scheme);
+  return normalized == "diverging" ? DivergingColor(index) : SequentialColor(index);
+}
+
+std::string NormalizeChartColorScheme(std::string_view raw) {
+  const auto normalized = CompactSchemeName(raw);
+  if (normalized.empty() || normalized == "sequential") {
+    return "sequential";
+  }
+  if (normalized == "diverging") {
+    return "diverging";
+  }
+  throw std::runtime_error("colorScheme must be sequential or diverging: " +
+                           std::string(raw));
 }
 
 }  // namespace csvzall::charts

@@ -124,7 +124,7 @@ CsvChartResult RenderBarCsv(csv::CSVReader& reader,
       segments.push_back({
           ValueLabel(value_specs[i]),
           totals[label][i],
-          ValueColor(value_specs[i], i)});
+          ValueColor(value_specs[i], i, spec.color_scheme)});
     }
     if (grouped) {
       chart.grouped_bar(label, std::move(segments));

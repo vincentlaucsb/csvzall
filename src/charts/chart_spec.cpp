@@ -1,9 +1,11 @@
 #include "chart_spec.hpp"
+#include "chart_schema.hpp"
 
 #include <simdjson.h>
 
 #include <array>
 #include <fstream>
+#include <span>
 #include <set>
 #include <stdexcept>
 #include <string_view>
@@ -16,9 +18,29 @@ bool Contains(const std::set<std::string_view>& values, std::string_view value) 
   return values.find(value) != values.end();
 }
 
+bool Contains(std::span<const ChartOptionDoc> values, std::string_view value) {
+  for (const auto& option : values) {
+    if (option.name == value) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void RejectUnknownKeys(simdjson::dom::object object,
                        const std::set<std::string_view>& allowed,
                        const std::string& context) {
+  for (auto field : object) {
+    const std::string_view key = field.key;
+    if (!Contains(allowed, key)) {
+      throw std::runtime_error(context + ": unknown key '" + std::string(key) + "'");
+    }
+  }
+}
+
+void RejectUnknownOptionKeys(simdjson::dom::object object,
+                             std::span<const ChartOptionDoc> allowed,
+                             const std::string& context) {
   for (auto field : object) {
     const std::string_view key = field.key;
     if (!Contains(allowed, key)) {
@@ -116,8 +138,7 @@ ChartValueSpec ParseChartValue(simdjson::dom::element value,
   }
 
   const auto object = RequireObject(value, key, context);
-  static const std::set<std::string_view> kAllowed{"column", "label", "color"};
-  RejectUnknownKeys(object, kAllowed, context);
+  RejectUnknownOptionKeys(object, ChartValueObjectOptionDocs(), context);
 
   ChartValueSpec spec;
   spec.column = RequireString(object, "column", context);
@@ -202,10 +223,8 @@ simdjson::dom::object RequireObject(simdjson::dom::element value,
 
 HeatmapSpec ParseHeatmapOptions(simdjson::dom::object options,
                                 const std::string& context) {
-  static const std::set<std::string_view> kAllowed{
-      "date", "value", "values", "label", "start", "end", "lookback", "title",
-      "orientation"};
-  RejectUnknownKeys(options, kAllowed, context + ".options");
+  RejectUnknownOptionKeys(options, ChartOptionDocsForType("heatmap"),
+                          context + ".options");
 
   HeatmapSpec spec;
   spec.date_column = OptionalString(options, "date", "date", context + ".options");
@@ -229,14 +248,15 @@ HeatmapSpec ParseHeatmapOptions(simdjson::dom::object options,
 
 BarSpec ParseBarOptions(simdjson::dom::object options,
                         const std::string& context) {
-  static const std::set<std::string_view> kAllowed{
-      "label", "value", "values", "title", "xLabel", "yLabel", "presentation"};
-  RejectUnknownKeys(options, kAllowed, context + ".options");
+  RejectUnknownOptionKeys(options, ChartOptionDocsForType("bar"),
+                          context + ".options");
 
   BarSpec spec;
   spec.label_column = RequireString(options, "label", context + ".options");
   spec.value_column = OptionalString(options, "value", "", context + ".options");
   spec.values = OptionalValues(options, "values", context + ".options");
+  spec.color_scheme = OptionalString(options, "colorScheme", "sequential",
+                                     context + ".options");
   spec.title = OptionalString(options, "title", "", context + ".options");
   spec.x_label = OptionalString(options, "xLabel", "", context + ".options");
   spec.y_label = OptionalString(options, "yLabel", "", context + ".options");
@@ -246,14 +266,15 @@ BarSpec ParseBarOptions(simdjson::dom::object options,
 
 LineSpec ParseLineOptions(simdjson::dom::object options,
                           const std::string& context) {
-  static const std::set<std::string_view> kAllowed{
-      "x", "y", "values", "series", "title", "xLabel", "yLabel"};
-  RejectUnknownKeys(options, kAllowed, context + ".options");
+  RejectUnknownOptionKeys(options, ChartOptionDocsForType("line"),
+                          context + ".options");
 
   LineSpec spec;
   spec.x_column = RequireString(options, "x", context + ".options");
   spec.y_column = OptionalString(options, "y", "", context + ".options");
   spec.values = OptionalValues(options, "values", context + ".options");
+  spec.color_scheme = OptionalString(options, "colorScheme", "sequential",
+                                     context + ".options");
   spec.series_column = OptionalString(options, "series", "", context + ".options");
   spec.title = OptionalString(options, "title", "", context + ".options");
   spec.x_label = OptionalString(options, "xLabel", "", context + ".options");
@@ -263,8 +284,8 @@ LineSpec ParseLineOptions(simdjson::dom::object options,
 
 MarkdownTableSpec ParseMarkdownTableOptions(simdjson::dom::object options,
                                             const std::string& context) {
-  static const std::set<std::string_view> kAllowed{"sql", "columns"};
-  RejectUnknownKeys(options, kAllowed, context + ".options");
+  RejectUnknownOptionKeys(options, ChartOptionDocsForType("markdown-table"),
+                          context + ".options");
 
   MarkdownTableSpec spec;
   spec.sql = OptionalString(options, "sql", "", context + ".options");
@@ -410,8 +431,7 @@ ChartConfig LoadChartConfig(const std::filesystem::path& config_path) {
 
     const auto id = RequireString(chart_object, "id", context);
     const auto type = RequireString(chart_object, "type", context);
-    if (type != "heatmap" && type != "bar" && type != "line" &&
-        type != "markdown-table") {
+    if (!IsKnownChartType(type)) {
       throw std::runtime_error(context + ": unknown chart type '" + type + "'");
     }
 

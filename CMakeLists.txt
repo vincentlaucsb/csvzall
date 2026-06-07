@@ -664,6 +664,7 @@ set(CSVZALL_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/credentials.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/util.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/transform_pipeline.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/chart_schema.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/chart_spec.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/column_lookup.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/gzip_stream.cpp

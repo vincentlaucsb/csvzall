@@ -39,6 +39,8 @@ public:
   explicit JsonParser(std::string_view text) : text_(text) {}
 
   JsonValue parse() {
+    reject_unsupported_encoding();
+    skip_utf8_bom();
     skip_ws();
     auto value = parse_value();
     skip_ws();
@@ -51,6 +53,26 @@ public:
 private:
   [[noreturn]] void fail(const std::string& message) const {
     throw std::runtime_error(message + " at byte " + std::to_string(pos_));
+  }
+
+  void reject_unsupported_encoding() const {
+    if (text_.size() >= 2) {
+      const auto first = static_cast<unsigned char>(text_[0]);
+      const auto second = static_cast<unsigned char>(text_[1]);
+      if ((first == 0xFF && second == 0xFE) || (first == 0xFE && second == 0xFF)) {
+        throw std::runtime_error(
+            "JSON input appears to be UTF-16; write JSON files as UTF-8");
+      }
+    }
+  }
+
+  void skip_utf8_bom() {
+    if (text_.size() >= 3 &&
+        static_cast<unsigned char>(text_[0]) == 0xEF &&
+        static_cast<unsigned char>(text_[1]) == 0xBB &&
+        static_cast<unsigned char>(text_[2]) == 0xBF) {
+      pos_ = 3;
+    }
   }
 
   void skip_ws() {

@@ -283,11 +283,20 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer->status == 200);
   REQUIRE(viewer->body.find("csvzall view") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"add-chart\"") != std::string::npos);
+  REQUIRE(viewer->body.find(">Charts</button>") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"heatmap-chart-dialog\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"heatmap-chart-form\" class=\"dialog-form\" novalidate") !=
           std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-type\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-orientation\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"chart-color-scheme\"") != std::string::npos);
+  const auto chart_layout_pos = viewer->body.find("id=\"chart-layout-section\"");
+  const auto chart_range_pos = viewer->body.find("id=\"chart-range-section\"");
+  const auto chart_orientation_pos = viewer->body.find("id=\"chart-orientation\"");
+  REQUIRE(chart_layout_pos != std::string::npos);
+  REQUIRE(chart_range_pos != std::string::npos);
+  REQUIRE(chart_layout_pos < chart_orientation_pos);
+  REQUIRE(chart_orientation_pos < chart_range_pos);
   REQUIRE(viewer->body.find("id=\"chart-presentation\"") != std::string::npos);
   REQUIRE(viewer->body.find("value=\"markdown-table\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-markdown-columns\"") != std::string::npos);
@@ -319,6 +328,7 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer_js->body.find("Insert Row After") != std::string::npos);
   REQUIRE(viewer_js->body.find("Column After") != std::string::npos);
   REQUIRE(viewer_js->body.find("Rename Column") != std::string::npos);
+  REQUIRE(viewer_js->body.find("dirty-state") != std::string::npos);
   REQUIRE(viewer_js->body.find("await loadChartList();\n        clearChartError();") !=
           std::string::npos);
 
@@ -675,7 +685,7 @@ TEST_CASE("view: Add chart endpoint creates bar chart configs") {
   const auto response = client.Post(
       "/api/chart-config/heatmap",
       headers,
-      R"({"type":"bar","id":"volume-bar","label":"week","values":["volume","cardio"],"presentation":"grouped","title":"Volume","output":"charts/volume.svg","runOnSave":true})",
+      R"({"type":"bar","id":"volume-bar","label":"week","values":["volume","cardio"],"colorScheme":"diverging","presentation":"grouped","title":"Volume","output":"charts/volume.svg","runOnSave":true})",
       "application/json");
   REQUIRE(response);
   REQUIRE(response->status == 200);
@@ -685,6 +695,7 @@ TEST_CASE("view: Add chart endpoint creates bar chart configs") {
   CHECK(config_text.find("\"label\": \"week\"") != std::string::npos);
   CHECK(config_text.find("\"column\": \"volume\"") != std::string::npos);
   CHECK(config_text.find("\"column\": \"cardio\"") != std::string::npos);
+  CHECK(config_text.find("\"colorScheme\": \"diverging\"") != std::string::npos);
   CHECK(config_text.find("\"presentation\": \"grouped\"") != std::string::npos);
   CHECK(ReadTextFile(dir / "charts" / "volume.svg").find("class=\"bar bar-grouped") != std::string::npos);
 

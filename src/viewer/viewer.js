@@ -126,6 +126,56 @@ async function saveViewerState({ viewState, postJson, getColumns }) {
   return { result, reloadAfterSave };
 }
 
+function defaultParentWindow() {
+  if (typeof window === 'undefined' || window.parent === window) {
+    return null;
+  }
+  return window.parent;
+}
+
+function dirtyStateMessage(dirty) {
+  return {
+    source: 'csvzall-viewer',
+    type: 'dirty-state',
+    dirty: dirty === true,
+  };
+}
+
+function postDirtyState(dirty, targetWindow = defaultParentWindow(), targetOrigin = '*') {
+  if (!targetWindow || typeof targetWindow.postMessage !== 'function') {
+    return false;
+  }
+  targetWindow.postMessage(dirtyStateMessage(dirty), targetOrigin);
+  return true;
+}
+
+function createDirtyStateEmitter(viewState, targetWindow = defaultParentWindow(), targetOrigin = '*') {
+  let lastDirty;
+  return () => {
+    const dirty = viewState.dirty;
+    if (dirty === lastDirty) {
+      return false;
+    }
+    lastDirty = dirty;
+    return postDirtyState(dirty, targetWindow, targetOrigin);
+  };
+}
+
+function handleUnsavedBeforeUnload(viewState, event) {
+  if (!viewState.dirty) {
+    return undefined;
+  }
+  event.preventDefault();
+  event.returnValue = '';
+  return '';
+}
+
+function installUnsavedChangesBeforeUnload(viewState, win = window) {
+  const listener = (event) => handleUnsavedBeforeUnload(viewState, event);
+  win.addEventListener('beforeunload', listener);
+  return () => win.removeEventListener('beforeunload', listener);
+}
+
 if (typeof globalThis !== 'undefined') {
   globalThis.csvzallViewerInternals = {
     createViewStateStore,
@@ -133,6 +183,11 @@ if (typeof globalThis !== 'undefined') {
     rowInsertionIndex,
     buildSavePayload,
     saveViewerState,
+    dirtyStateMessage,
+    postDirtyState,
+    createDirtyStateEmitter,
+    handleUnsavedBeforeUnload,
+    installUnsavedChangesBeforeUnload,
   };
 }
 
@@ -435,6 +490,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const chartValueColumn = document.getElementById('chart-value-column');
     const chartValueColumn2 = document.getElementById('chart-value-column-2');
     const chartLabelColumn = document.getElementById('chart-label-column');
+    const chartLayoutSection = document.getElementById('chart-layout-section');
     const chartRangeSection = document.getElementById('chart-range-section');
     const chartRangeFixed = document.getElementById('chart-range-fixed');
     const chartRangeRolling = document.getElementById('chart-range-rolling');
@@ -443,6 +499,8 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const chartOrientation = document.getElementById('chart-orientation');
     const chartPresentationField = document.getElementById('chart-presentation-field');
     const chartPresentation = document.getElementById('chart-presentation');
+    const chartColorSchemeField = document.getElementById('chart-color-scheme-field');
+    const chartColorScheme = document.getElementById('chart-color-scheme');
     const chartMarkdownTableSection = document.getElementById('chart-markdown-table-section');
     const chartMarkdownColumns = document.getElementById('chart-markdown-columns');
     const chartMarkdownSql = document.getElementById('chart-markdown-sql');
@@ -454,7 +512,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const chartRunOnSave = document.getElementById('chart-run-on-save');
     const chartError = document.getElementById('chart-error');
     const cancelChart = document.getElementById('cancel-chart');
-    decorateButton(addChartButton, 'chart-bar', 'Add chart');
+    decorateButton(addChartButton, 'chart-bar', 'Charts');
     decorateMenuButton(insertMenuButton, 'plus', 'Insert');
     decorateMenuButton(deleteMenuButton, 'trash', 'Delete');
     decorateButton(resetButton, 'restore', 'Reset');
@@ -495,6 +553,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartLabelColumn,
       chartOrientation,
       chartPresentation,
+      chartColorScheme,
       chartMarkdownColumns,
       chartMarkdownSql,
       chartStart,
@@ -521,6 +580,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
       if (message.includes('bar: label column')) return [chartDateColumn];
       if (message.includes('bar: value column')) return [chartValueColumn];
       if (message.includes('presentation')) return [chartPresentation];
+      if (message.includes('colorScheme')) return [chartColorScheme];
       if (message.includes('line: x column')) return [chartDateColumn];
       if (message.includes('line: y column')) return [chartValueColumn];
       if (message.includes('series column cannot be combined')) {
@@ -579,6 +639,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
         label: guessedLabelColumn,
         orientation: 'months-horizontal',
         presentation: 'stacked',
+        colorScheme: 'sequential',
         start: '',
         end: '',
         lookback: markdown ? '' : '1y',
@@ -615,8 +676,10 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartTitleField.hidden = markdown;
       chartColumnGrid.hidden = markdown;
       chartMarkdownTableSection.hidden = !markdown;
+      chartLayoutSection.hidden = type !== 'heatmap';
       chartRangeSection.hidden = type !== 'heatmap';
       chartPresentationField.hidden = type !== 'bar';
+      chartColorSchemeField.hidden = true;
       chartLabelColumn.closest('label').hidden = type === 'bar';
       if (markdown) {
         return;
@@ -651,6 +714,11 @@ async function csvzallViewBootstrap(dependencies = {}) {
       return [chartValueColumn.value, chartValueColumn2.value].filter(Boolean);
     };
 
+    const updateColorSchemeVisibility = () => {
+      const supportsColorScheme = chartType.value === 'bar' || chartType.value === 'line';
+      chartColorSchemeField.hidden = !supportsColorScheme || selectedValueColumns().length <= 1;
+    };
+
     const selectedMarkdownColumns = () => {
       return Array.from(chartMarkdownColumns.selectedOptions).map((option) => option.value);
     };
@@ -662,9 +730,11 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartDateColumn.value = values.date ?? '';
       chartValueColumn.value = values.value ?? '';
       chartValueColumn2.value = values.value2 ?? '';
+      updateColorSchemeVisibility();
       chartLabelColumn.value = values.label ?? '';
       chartOrientation.value = values.orientation ?? 'months-horizontal';
       chartPresentation.value = values.presentation ?? 'stacked';
+      chartColorScheme.value = values.colorScheme ?? 'sequential';
       populateColumnMultiSelect(chartMarkdownColumns, schema.columns, values.columns ?? []);
       chartMarkdownSql.value = values.sql ?? '';
       chartStart.value = values.start ?? '';
@@ -692,6 +762,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
         label: chart.options?.label ?? chart.options?.series ?? '',
         orientation: chart.options?.orientation ?? 'months-horizontal',
         presentation: chart.options?.presentation ?? 'stacked',
+        colorScheme: chart.options?.colorScheme ?? 'sequential',
         columns: Array.isArray(chart.options?.columns) ? chart.options.columns : [],
         sql: chart.options?.sql ?? '',
         start: chart.options?.start ?? '',
@@ -781,6 +852,8 @@ async function csvzallViewBootstrap(dependencies = {}) {
     });
     chartRangeFixed.addEventListener('change', () => setRangeMode('fixed'));
     chartRangeRolling.addEventListener('change', () => setRangeMode('rolling'));
+    chartValueColumn.addEventListener('change', updateColorSchemeVisibility);
+    chartValueColumn2.addEventListener('change', updateColorSchemeVisibility);
     cancelChart.addEventListener('click', () => {
       chartDialog.close('cancel');
     });
@@ -814,6 +887,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
         series: chartType.value === 'line' && valueColumns.length <= 1 ? chartLabelColumn.value : '',
         orientation: chartType.value === 'heatmap' ? chartOrientation.value : '',
         presentation: chartType.value === 'bar' ? chartPresentation.value : '',
+        colorScheme: (chartType.value === 'bar' || chartType.value === 'line') ? chartColorScheme.value : '',
         columns: chartType.value === 'markdown-table' && !markdownSql ? selectedMarkdownColumns() : [],
         sql: chartType.value === 'markdown-table' ? markdownSql : '',
         start: chartRangeRolling.checked ? '' : chartStart.value,
@@ -878,6 +952,11 @@ async function csvzallViewBootstrap(dependencies = {}) {
     if (materialized) {
       statusNode.textContent = `Loading ${schema.totalRows.toLocaleString()} rows for client-side sort/filter…`;
       const viewState = createViewStateStore();
+      if (editable) {
+        installUnsavedChangesBeforeUnload(viewState);
+      }
+      const emitDirtyState = editable ? createDirtyStateEmitter(viewState) : () => false;
+      emitDirtyState();
       const allRows = schema.totalRows === 0
         ? []
         : rowsToObjects(schema.columns, (await fetchJson('/api/rows', { offset: 0, limit: schema.totalRows })).rows);
@@ -887,6 +966,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
         statusNode.textContent = viewState.dirty
           ? 'Unsaved changes.'
           : `Loaded ${allRows.length.toLocaleString()} rows for ${editable ? 'editing' : 'client-side sort/filter'}.`;
+        emitDirtyState();
       };
       const markDataDirty = () => {
         viewState.markDataDirty();
@@ -1321,6 +1401,8 @@ async function csvzallViewBootstrap(dependencies = {}) {
             saveButton.disabled = true;
             statusNode.textContent = 'Resetting…';
             await postJson('/api/reset');
+            viewState.markClean();
+            emitDirtyState();
             window.location.reload();
           } catch (error) {
             resetButton.disabled = !viewState.dirty;
