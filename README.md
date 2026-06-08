@@ -1,6 +1,6 @@
 # csvzall
 
-<img src="assets/csvzall-logo.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
+<img src="assets/csvzall-logo-theme-safe.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
 
 A fast, single-binary CSV transformation CLI for Unix-style pipelines. Pipe CSVs through `filter`, `derive`, `summarize`, and `head` — each command reads stdin, writes stdout, logs to stderr.
 For local inspection workflows, `csvzall view <file.csv>` starts a read-only browser table view backed by the same CSV parser.
