@@ -310,7 +310,10 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer->body.find("id=\"chart-presentation\"") != std::string::npos);
   REQUIRE(viewer->body.find("value=\"markdown-table\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-markdown-columns\"") != std::string::npos);
+  REQUIRE(viewer->body.find("aria-label=\"Markdown table columns\"") != std::string::npos);
+  REQUIRE(viewer->body.find("multiple size=\"6\"") == std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-markdown-sql\"") != std::string::npos);
+  REQUIRE(viewer->body.find("aria-disabled=\"true\"") == std::string::npos);
   REQUIRE(viewer->body.find("Weight column") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"rename-column-dialog\"") != std::string::npos);
   REQUIRE(viewer->body.find(">Bar</option>") != std::string::npos);
@@ -330,6 +333,9 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer_js->body.find("VIEWER_SQL_TABLE_NAME") != std::string::npos);
   REQUIRE(viewer_js->body.find("chartType.value") != std::string::npos);
   REQUIRE(viewer_js->body.find("markdown-table") != std::string::npos);
+  REQUIRE(viewer_js->body.find("populateColumnChecklist") != std::string::npos);
+  REQUIRE(viewer_js->body.find("updateMarkdownColumnsAvailability") != std::string::npos);
+  REQUIRE(viewer_js->body.find("input.disabled = disabled") != std::string::npos);
   REQUIRE(viewer_js->body.find("selectedMarkdownColumns") != std::string::npos);
   REQUIRE(viewer_js->body.find("missingChartFields") == std::string::npos);
   REQUIRE(viewer_js->body.find("Complete the required fields") == std::string::npos);

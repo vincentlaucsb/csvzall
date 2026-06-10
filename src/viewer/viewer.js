@@ -188,15 +188,17 @@ async function csvzallViewBootstrap(dependencies = {}) {
     }
   }
 
-  function populateColumnMultiSelect(select, columns, selectedColumns = []) {
+  function populateColumnChecklist(container, columns, selectedColumns = []) {
     const selected = new Set(selectedColumns);
-    select.textContent = '';
+    container.textContent = '';
     columns.forEach((column) => {
-      const option = document.createElement('option');
-      option.value = column;
-      option.textContent = column;
-      option.selected = selected.size === 0 || selected.has(column);
-      select.append(option);
+      const label = document.createElement('label');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = column;
+      checkbox.checked = selected.size === 0 || selected.has(column);
+      label.append(checkbox, document.createTextNode(column));
+      container.append(label);
     });
   }
 
@@ -311,7 +313,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
     populateColumnSelect(chartValueColumn, schema.columns, { optional: true, preferred: guessedValueColumn });
     populateColumnSelect(chartValueColumn2, schema.columns, { optional: true });
     populateColumnSelect(chartLabelColumn, schema.columns, { optional: true, preferred: guessedLabelColumn });
-    populateColumnMultiSelect(chartMarkdownColumns, schema.columns);
+    populateColumnChecklist(chartMarkdownColumns, schema.columns);
 
     const chartValidationFields = [
       chartType,
@@ -356,7 +358,9 @@ async function csvzallViewBootstrap(dependencies = {}) {
         return [chartLabelColumn, chartValueColumn, chartValueColumn2];
       }
       if (message.includes('markdown-table')) return [chartMarkdownSql, chartMarkdownColumns];
-      if (message.includes('no such column')) return [chartMarkdownColumns, chartMarkdownSql];
+      if (message.includes('no such column')) {
+        return chartMarkdownSql.value.trim() ? [chartMarkdownSql] : [chartMarkdownColumns, chartMarkdownSql];
+      }
       return [];
     };
     const markChartFieldsForError = (message) => {
@@ -489,7 +493,16 @@ async function csvzallViewBootstrap(dependencies = {}) {
     };
 
     const selectedMarkdownColumns = () => {
-      return Array.from(chartMarkdownColumns.selectedOptions).map((option) => option.value);
+      return Array.from(chartMarkdownColumns.querySelectorAll('input[type="checkbox"]:checked'))
+        .map((input) => input.value);
+    };
+
+    const updateMarkdownColumnsAvailability = () => {
+      const disabled = chartMarkdownSql.value.trim().length > 0;
+      chartMarkdownColumns.setAttribute('aria-disabled', String(disabled));
+      chartMarkdownColumns.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+        input.disabled = disabled;
+      });
     };
 
     const applyChartValues = (values) => {
@@ -504,8 +517,9 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartOrientation.value = values.orientation ?? 'months-horizontal';
       chartPresentation.value = values.presentation ?? 'stacked';
       chartColorScheme.value = values.colorScheme ?? 'sequential';
-      populateColumnMultiSelect(chartMarkdownColumns, schema.columns, values.columns ?? []);
+      populateColumnChecklist(chartMarkdownColumns, schema.columns, values.columns ?? []);
       chartMarkdownSql.value = values.sql ?? '';
+      updateMarkdownColumnsAvailability();
       chartStart.value = values.start ?? '';
       chartEnd.value = values.end ?? '';
       const lookback = values.lookback ?? '';
@@ -623,6 +637,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
     chartRangeRolling.addEventListener('change', () => setRangeMode('rolling'));
     chartValueColumn.addEventListener('change', updateColorSchemeVisibility);
     chartValueColumn2.addEventListener('change', updateColorSchemeVisibility);
+    chartMarkdownSql.addEventListener('input', updateMarkdownColumnsAvailability);
     cancelChart.addEventListener('click', () => {
       chartDialog.close('cancel');
     });
