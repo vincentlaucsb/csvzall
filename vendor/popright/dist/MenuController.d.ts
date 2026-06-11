@@ -1,5 +1,24 @@
-import type { ContextMenu } from "./ContextMenu.js";
 import type { CloseReason, OpenInput } from "./types.js";
+/**
+ * Root menu behavior owned by `MenuController`.
+ *
+ * The controller deliberately depends on this narrow contract rather than a
+ * concrete class so context menus, dropdowns, and future menu surfaces can
+ * share the same active-menu invariant without forcing a fixed inheritance
+ * tree.
+ */
+export interface ControlledMenu {
+    /** The rendered root is not used by the controller, but is useful for tests and diagnostics. */
+    readonly root: HTMLElement | null;
+    /** Assigned by the controller and used for same-depth native-event tie-breaking. */
+    registeredAt: number;
+    openNow(input: OpenInput): void;
+    close(reason?: CloseReason, nativeEvent?: Event): void;
+    getTargetDepth(target: EventTarget | null): number;
+    hasTargets(): boolean;
+    canOpenFromNativeEvent(event: Event): boolean;
+    getClosestTarget(target: EventTarget | null): Element | undefined;
+}
 /**
  * Coordinates all root context menus that share a document-level interaction space.
  *
@@ -10,12 +29,12 @@ import type { CloseReason, OpenInput } from "./types.js";
  */
 export declare class MenuController {
     #private;
-    register(menu: ContextMenu): void;
-    unregister(menu: ContextMenu): void;
-    requestOpen(menu: ContextMenu, input: OpenInput): void;
+    register(menu: ControlledMenu): void;
+    unregister(menu: ControlledMenu): void;
+    requestOpen(menu: ControlledMenu, input: OpenInput): void;
     closeActive(reason?: CloseReason, nativeEvent?: Event): void;
-    setActive(menu: ContextMenu): void;
-    clearActive(menu: ContextMenu): void;
-    get activeMenu(): ContextMenu | null;
+    setActive(menu: ControlledMenu): void;
+    clearActive(menu: ControlledMenu): void;
+    get activeMenu(): ControlledMenu | null;
 }
 //# sourceMappingURL=MenuController.d.ts.map

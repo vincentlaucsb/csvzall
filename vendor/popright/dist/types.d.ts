@@ -48,6 +48,10 @@ export interface ContextMenuOptions {
     /** Native target event. `contextmenu` is default; `click` is opt-in. */
     trigger?: "contextmenu" | "click" | "manual";
     placement?: "cursor" | "target";
+    side?: "top" | "right" | "bottom" | "left";
+    align?: "start" | "center" | "end";
+    sideOffset?: number;
+    alignOffset?: number;
     strategy?: "fixed" | "absolute";
     closeOnSelect?: boolean;
     closeOnBlur?: boolean;
@@ -67,9 +71,14 @@ export interface ContextMenuOptions {
     theme?: ContextMenuThemeInput;
     portal?: Element | false;
     dir?: "ltr" | "rtl";
+    menuType?: "context" | "dropdown";
+}
+export interface DropdownMenuOptions extends Omit<ContextMenuOptions, "trigger" | "placement" | "menuType"> {
+    trigger?: "click" | "manual";
+    placement?: "target";
 }
 /** Internal option shape after defaults have been applied. */
-export type NormalizedContextMenuOptions = Required<Pick<ContextMenuOptions, "trigger" | "placement" | "strategy" | "closeOnSelect" | "closeOnBlur" | "closeOnEscape" | "closeOnScroll" | "closeOnResize" | "modal" | "collisionPadding">> & Omit<ContextMenuOptions, "trigger" | "placement" | "strategy" | "closeOnSelect" | "closeOnBlur" | "closeOnEscape" | "closeOnScroll" | "closeOnResize" | "modal" | "collisionPadding">;
+export type NormalizedContextMenuOptions = Required<Pick<ContextMenuOptions, "trigger" | "placement" | "strategy" | "side" | "align" | "sideOffset" | "alignOffset" | "closeOnSelect" | "closeOnBlur" | "closeOnEscape" | "closeOnScroll" | "closeOnResize" | "modal" | "collisionPadding">> & Omit<ContextMenuOptions, "trigger" | "placement" | "strategy" | "side" | "align" | "sideOffset" | "alignOffset" | "closeOnSelect" | "closeOnBlur" | "closeOnEscape" | "closeOnScroll" | "closeOnResize" | "modal" | "collisionPadding">;
 /** Optional class hooks composed with Popright's structural classes. */
 export interface ContextMenuClassNames {
     menu?: string;
@@ -99,10 +108,10 @@ export interface ContextMenuStyles {
     shortcut?: Partial<CSSStyleDeclaration>;
 }
 /** Accepted theme inputs for global or per-menu theming. */
-export type ContextMenuThemeInput = "light" | "dark" | "system" | ContextMenuTheme | ContextMenuThemeStore;
+export type ContextMenuThemeInput = "automatic" | "light" | "dark" | "system" | ContextMenuTheme | ContextMenuThemeStore;
 /** Normalized theme object consumed by `ThemeStore` and menu roots. */
 export interface ContextMenuTheme {
-    mode: "light" | "dark" | "system";
+    mode: "automatic" | "light" | "dark" | "system";
     className?: string;
     classes?: ContextMenuClassNames;
     styles?: ContextMenuStyles;
@@ -131,6 +140,17 @@ export interface ContextMenuThemeStore {
 }
 /** Menu data can be static or derived synchronously from open-time context. */
 export type MenuItemsInput = MenuItem[] | ((context: MenuContext) => MenuItem[]);
+/** Stable string constants for menu item variants. */
+export declare const MenuItemType: {
+    readonly Item: "item";
+    readonly Separator: "separator";
+    readonly Header: "header";
+    readonly Label: "label";
+    readonly Checkbox: "checkbox";
+    readonly Radio: "radio";
+    readonly Submenu: "submenu";
+};
+export type MenuItemType = (typeof MenuItemType)[keyof typeof MenuItemType];
 /** All supported menu item variants in the data-driven model. */
 export type MenuItem = MenuActionItem | MenuSeparatorItem | MenuHeaderItem | MenuLabelItem | MenuCheckboxItem | MenuRadioItem | MenuSubmenuItem;
 /** Items that can represent an actionable user choice. */
@@ -141,7 +161,7 @@ export type MenuChildItem = MenuActionItem | MenuSeparatorItem | MenuHeaderItem 
 export type MenuChildItemsInput = MenuChildItem[] | ((context: MenuContext) => MenuChildItem[]);
 /** Standard selectable command row. */
 export interface MenuActionItem {
-    type?: "item";
+    type?: typeof MenuItemType.Item;
     id: string;
     label: string;
     disabled?: boolean;
@@ -158,12 +178,12 @@ export interface MenuActionItem {
 }
 /** Visual divider that is never focusable or selectable. */
 export interface MenuSeparatorItem {
-    type: "separator";
+    type: typeof MenuItemType.Separator;
     hidden?: boolean;
 }
 /** Non-selectable title row for menus that need a contextual heading. */
 export interface MenuHeaderItem {
-    type: "header";
+    type: typeof MenuItemType.Header;
     label: string;
     align?: "left" | "right" | "items";
     hidden?: boolean;
@@ -172,13 +192,13 @@ export interface MenuHeaderItem {
 }
 /** Non-selectable group label. */
 export interface MenuLabelItem {
-    type: "label";
+    type: typeof MenuItemType.Label;
     label: string;
     hidden?: boolean;
 }
 /** Reserved checkbox shape; full checkbox behavior is a later phase. */
 export interface MenuCheckboxItem {
-    type: "checkbox";
+    type: typeof MenuItemType.Checkbox;
     id: string;
     label: string;
     checked: boolean;
@@ -188,7 +208,7 @@ export interface MenuCheckboxItem {
 }
 /** Reserved radio shape; full radio behavior is a later phase. */
 export interface MenuRadioItem {
-    type: "radio";
+    type: typeof MenuItemType.Radio;
     id: string;
     label: string;
     name: string;
@@ -198,7 +218,7 @@ export interface MenuRadioItem {
 }
 /** Selectable row that opens a child menu branch instead of firing selection. */
 export interface MenuSubmenuItem {
-    type: "submenu";
+    type: typeof MenuItemType.Submenu;
     id: string;
     label: string;
     disabled?: boolean;

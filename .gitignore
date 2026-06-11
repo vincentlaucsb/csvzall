@@ -2,6 +2,7 @@
 build/
 build_*/
 out/
+docs/doxygen/
 Debug/
 Release/
 RelWithDebInfo/

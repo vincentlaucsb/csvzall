@@ -9,10 +9,12 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <ranges>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -54,6 +56,62 @@ std::filesystem::file_time_type GetFileMtime(const std::string& input_path) {
   return mtime;
 }
 
+bool FileExists(const std::string& input_path) {
+  std::error_code ec;
+  return std::filesystem::exists(input_path, ec);
+}
+
+bool RecoverRenamedMaterializedSource(CsvMaterializedFile& materialized) {
+  if (FileExists(materialized.input_path)) {
+    return false;
+  }
+
+  const auto original = std::filesystem::path(materialized.input_path);
+  auto parent = original.parent_path();
+  if (parent.empty()) {
+    parent = ".";
+  }
+
+  std::error_code ec;
+  if (!std::filesystem::exists(parent, ec)) {
+    throw std::runtime_error("source file no longer exists: " + materialized.input_path);
+  }
+
+  std::vector<std::filesystem::path> matches;
+  std::filesystem::directory_iterator entries(parent, ec);
+  if (ec) {
+    throw std::runtime_error("unable to scan source directory after rename: " + parent.string());
+  }
+
+  for (const auto& entry : entries) {
+    std::error_code entry_ec;
+    if (!entry.is_regular_file(entry_ec) || entry_ec) {
+      continue;
+    }
+    const auto size = entry.file_size(entry_ec);
+    if (entry_ec || static_cast<std::uint64_t>(size) != materialized.source_size) {
+      continue;
+    }
+    const auto mtime = entry.last_write_time(entry_ec);
+    if (entry_ec || mtime != materialized.source_mtime) {
+      continue;
+    }
+    matches.push_back(entry.path());
+  }
+
+  if (matches.empty()) {
+    throw std::runtime_error("source file no longer exists: " + materialized.input_path);
+  }
+  if (matches.size() > 1) {
+    throw std::runtime_error(
+        "source file was renamed, but the new path is ambiguous; reopen the viewer");
+  }
+
+  materialized.input_path = matches.front().string();
+  materialized.file_name = matches.front().filename().string();
+  return true;
+}
+
 void RequireNonEmptyCsvFile(const std::uint64_t file_size) {
   if (file_size == 0) {
     throw std::runtime_error(
@@ -67,6 +125,46 @@ std::uint64_t ThresholdBytes(std::size_t threshold_mb) {
     return max;
   }
   return static_cast<std::uint64_t>(threshold_mb) * kBytesPerMiB;
+}
+
+void ValidateColumnOrder(const csv::DataFrame<>& frame,
+                         const std::vector<std::string>& columns) {
+  if (columns.empty()) {
+    return;
+  }
+  if (columns.size() != frame.n_cols()) {
+    throw std::runtime_error("column order must include every column exactly once");
+  }
+
+  std::unordered_map<std::string, std::size_t> counts;
+  for (const auto& column : frame.columns()) {
+    ++counts[column];
+  }
+  for (const auto& column : columns) {
+    const auto iter = counts.find(column);
+    if (iter == counts.end() || iter->second == 0) {
+      throw std::runtime_error("unknown column: " + column);
+    }
+    --iter->second;
+  }
+  for (const auto& [column, count] : counts) {
+    if (count != 0) {
+      throw std::runtime_error("missing column: " + column);
+    }
+  }
+}
+
+void ReloadMaterializedFile(CsvMaterializedFile& materialized) {
+  const auto file_size = GetFileSize(materialized.input_path);
+  csv::CSVReader reader(materialized.input_path, materialized.format);
+  auto frame = std::make_shared<csv::DataFrame<>>(reader);
+  if (frame->columns().empty()) {
+    throw std::runtime_error("input appears to have no header row");
+  }
+
+  materialized.frame = std::move(frame);
+  materialized.source_size = file_size;
+  materialized.source_mtime = GetFileMtime(materialized.input_path);
 }
 
 CsvMaterializedFile OpenMaterializedFile(const std::string& input_path,
@@ -368,6 +466,40 @@ void CsvViewData::insert_column(const std::uint64_t column,
   materialized->frame->insert_column(static_cast<std::size_t>(column), name, value);
 }
 
+void CsvViewData::rename_column(const std::string& column, const std::string& name) {
+  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
+  if (!materialized) {
+    throw std::runtime_error("editing requires materialized view mode");
+  }
+  if (name.empty()) {
+    throw std::runtime_error("column name is required");
+  }
+  if (!materialized->frame->has_column(column)) {
+    throw std::runtime_error("unknown column: " + column);
+  }
+  if (column == name) {
+    return;
+  }
+  if (materialized->frame->has_column(name)) {
+    throw std::runtime_error("column already exists: " + name);
+  }
+
+  const auto column_index = static_cast<std::size_t>(materialized->frame->index_of(column));
+  std::vector<std::string> values;
+  values.reserve(materialized->frame->n_rows());
+  for (std::size_t row = 0; row < materialized->frame->n_rows(); ++row) {
+    values.emplace_back(materialized->frame->at(row)[column]);
+  }
+
+  materialized->frame->insert_column(column_index, name, "");
+  for (std::size_t row = 0; row < materialized->frame->n_rows(); ++row) {
+    materialized->frame->at(row)[name] = values[row];
+  }
+  if (!materialized->frame->column_view(column).erase()) {
+    throw std::runtime_error("failed to rename column: " + column);
+  }
+}
+
 void CsvViewData::delete_column(const std::string& column) {
   auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
   if (!materialized) {
@@ -384,30 +516,31 @@ void CsvViewData::delete_column(const std::string& column) {
   }
 }
 
+bool CsvViewData::recover_renamed_source() {
+  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
+  if (!materialized) {
+    return false;
+  }
+  return RecoverRenamedMaterializedSource(*materialized);
+}
+
 void CsvViewData::reset() {
   auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
   if (!materialized) {
     throw std::runtime_error("reset requires materialized view mode");
   }
-
-  const auto file_size = GetFileSize(materialized->input_path);
-  csv::CSVReader reader(materialized->input_path, materialized->format);
-  auto frame = std::make_shared<csv::DataFrame<>>(reader);
-  if (frame->columns().empty()) {
-    throw std::runtime_error("input appears to have no header row");
-  }
-
-  materialized->frame = std::move(frame);
-  materialized->source_size = file_size;
-  materialized->source_mtime = GetFileMtime(materialized->input_path);
+  RecoverRenamedMaterializedSource(*materialized);
+  ReloadMaterializedFile(*materialized);
 }
 
-void CsvViewData::save() {
+void CsvViewData::save(const std::vector<std::string>& columns) {
   auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
   if (!materialized) {
     throw std::runtime_error("saving requires materialized view mode");
   }
+  ValidateColumnOrder(*materialized->frame, columns);
 
+  RecoverRenamedMaterializedSource(*materialized);
   if (GetFileSize(materialized->input_path) != materialized->source_size ||
       GetFileMtime(materialized->input_path) != materialized->source_mtime) {
     throw std::runtime_error("source file changed externally; reload before saving");
@@ -423,9 +556,17 @@ void CsvViewData::save() {
         throw std::runtime_error("unable to open temporary save file: " + temp.string());
       }
       auto writer = csv::make_csv_writer(output).set_auto_flush(false);
-      writer << materialized->frame->columns();
+      const auto& save_columns = columns.empty() ? materialized->frame->columns() : columns;
+      writer << save_columns;
       for (const auto& row : *materialized->frame) {
-        writer << std::vector<std::string>(row);
+        if (columns.empty()) {
+          writer << row;
+        } else {
+          auto reordered = save_columns | std::views::transform([&row](const std::string& column) {
+            return row[column];
+          });
+          writer << reordered;
+        }
       }
       writer.flush();
       output.close();
@@ -444,8 +585,12 @@ void CsvViewData::save() {
 #else
     std::filesystem::rename(temp, target);
 #endif
-    materialized->source_size = GetFileSize(materialized->input_path);
-    materialized->source_mtime = GetFileMtime(materialized->input_path);
+    if (columns.empty()) {
+      materialized->source_size = GetFileSize(materialized->input_path);
+      materialized->source_mtime = GetFileMtime(materialized->input_path);
+    } else {
+      ReloadMaterializedFile(*materialized);
+    }
   } catch (...) {
     std::error_code ec;
     std::filesystem::remove(temp, ec);

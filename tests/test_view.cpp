@@ -54,6 +54,11 @@ std::filesystem::path WriteTempViewerAssets(const std::string& name) {
     std::ofstream output(dir / "viewer.js", std::ios::binary);
     output << "window.csvzallDevViewer = true;";
   }
+  std::filesystem::create_directories(dir / "modules");
+  {
+    std::ofstream output(dir / "modules" / "sql.mjs", std::ios::binary);
+    output << "export const csvzallDevSqlModule = true;";
+  }
   return dir;
 }
 
@@ -282,39 +287,75 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer);
   REQUIRE(viewer->status == 200);
   REQUIRE(viewer->body.find("csvzall view") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"query-mode-search\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"query-mode-sql\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"clear-query\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"sql-error\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"sql-toolbar\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"add-chart\"") != std::string::npos);
+  REQUIRE(viewer->body.find(">Charts</button>") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"heatmap-chart-dialog\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"heatmap-chart-form\" class=\"dialog-form\" novalidate") !=
           std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-type\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-orientation\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"chart-color-scheme\"") != std::string::npos);
+  const auto chart_layout_pos = viewer->body.find("id=\"chart-layout-section\"");
+  const auto chart_range_pos = viewer->body.find("id=\"chart-range-section\"");
+  const auto chart_orientation_pos = viewer->body.find("id=\"chart-orientation\"");
+  REQUIRE(chart_layout_pos != std::string::npos);
+  REQUIRE(chart_range_pos != std::string::npos);
+  REQUIRE(chart_layout_pos < chart_orientation_pos);
+  REQUIRE(chart_orientation_pos < chart_range_pos);
   REQUIRE(viewer->body.find("id=\"chart-presentation\"") != std::string::npos);
   REQUIRE(viewer->body.find("value=\"markdown-table\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-markdown-columns\"") != std::string::npos);
+  REQUIRE(viewer->body.find("aria-label=\"Markdown table columns\"") != std::string::npos);
+  REQUIRE(viewer->body.find("multiple size=\"6\"") == std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-markdown-sql\"") != std::string::npos);
+  REQUIRE(viewer->body.find("aria-disabled=\"true\"") == std::string::npos);
   REQUIRE(viewer->body.find("Weight column") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"rename-column-dialog\"") != std::string::npos);
   REQUIRE(viewer->body.find(">Bar</option>") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-id\" type=\"text\" autocomplete=\"off\" required") ==
           std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-date-column\" required") == std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-output\" type=\"text\" autocomplete=\"off\" required") ==
           std::string::npos);
+  REQUIRE(viewer->body.find("type=\"module\" src=\"/assets/viewer.js\"") != std::string::npos);
 
   const auto viewer_js = client.Get("/assets/viewer.js");
   REQUIRE(viewer_js);
   REQUIRE(viewer_js->status == 200);
   REQUIRE(viewer_js->body.find("csvzallViewBootstrap") != std::string::npos);
   REQUIRE(viewer_js->body.find("/api/chart-config/heatmap") != std::string::npos);
+  REQUIRE(viewer_js->body.find("/api/sql-query") != std::string::npos);
+  REQUIRE(viewer_js->body.find("VIEWER_SQL_TABLE_NAME") != std::string::npos);
   REQUIRE(viewer_js->body.find("chartType.value") != std::string::npos);
   REQUIRE(viewer_js->body.find("markdown-table") != std::string::npos);
+  REQUIRE(viewer_js->body.find("populateColumnChecklist") != std::string::npos);
+  REQUIRE(viewer_js->body.find("updateMarkdownColumnsAvailability") != std::string::npos);
+  REQUIRE(viewer_js->body.find("input.disabled = disabled") != std::string::npos);
   REQUIRE(viewer_js->body.find("selectedMarkdownColumns") != std::string::npos);
   REQUIRE(viewer_js->body.find("missingChartFields") == std::string::npos);
   REQUIRE(viewer_js->body.find("Complete the required fields") == std::string::npos);
   REQUIRE(viewer_js->body.find(".required") == std::string::npos);
   REQUIRE(viewer_js->body.find("checkValidity") == std::string::npos);
   REQUIRE(viewer_js->body.find("aria-invalid") != std::string::npos);
+  REQUIRE(viewer_js->body.find("Row Before") != std::string::npos);
+  REQUIRE(viewer_js->body.find("Insert Row Before") != std::string::npos);
+  REQUIRE(viewer_js->body.find("Insert Row After") != std::string::npos);
+  REQUIRE(viewer_js->body.find("Column After") != std::string::npos);
+  REQUIRE(viewer_js->body.find("Rename Column") != std::string::npos);
+  REQUIRE(viewer_js->body.find("dirty-state") != std::string::npos);
   REQUIRE(viewer_js->body.find("await loadChartList();\n        clearChartError();") !=
           std::string::npos);
+
+  const auto sql_module = client.Get("/assets/modules/sql.mjs");
+  REQUIRE(sql_module);
+  REQUIRE(sql_module->status == 200);
+  REQUIRE(sql_module->body.find("VIEWER_SQL_TABLE_NAME") != std::string::npos);
+  REQUIRE(sql_module->body.find("defaultSqlQuery") != std::string::npos);
 
   const auto ag_grid_css = client.Get("/assets/ag-grid.css");
   REQUIRE(ag_grid_css);
@@ -330,13 +371,19 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(popright_js);
   REQUIRE(popright_js->status == 200);
   REQUIRE(popright_js->body.find("createContextMenu") != std::string::npos);
+  REQUIRE(popright_js->body.find("createDropdownMenu") != std::string::npos);
+
+  const auto popright_render_js = client.Get("/assets/popright/render/root.js");
+  REQUIRE(popright_render_js);
+  REQUIRE(popright_render_js->status == 200);
+  REQUIRE(popright_render_js->body.find("createMenuRoot") != std::string::npos);
 
   const auto schema = client.Get("/api/schema", headers);
   REQUIRE(schema);
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_server.csv","columns":["name","value"],"readOnly":true,"editable":false,"mode":"paged","totalRows":3})");
+      R"({"file":"csvzall_view_server.csv","columns":["name","value"],"readOnly":true,"editable":false,"mode":"paged","totalRows":3,"sqlTableName":"data"})");
 
   const auto rows = client.Get("/api/rows?offset=1&limit=1", headers);
   REQUIRE(rows);
@@ -355,6 +402,28 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   const auto invalid_rows = client.Get("/api/rows?offset=-1&limit=1", headers);
   REQUIRE(invalid_rows);
   REQUIRE(invalid_rows->status == 400);
+
+  const auto sql = client.Post(
+      "/api/sql-query",
+      headers,
+      R"({"sql":"SELECT name AS person, value + 5 AS adjusted FROM data WHERE value >= 20 ORDER BY adjusted DESC"})",
+      "application/json");
+  REQUIRE(sql);
+  REQUIRE(sql->status == 200);
+  REQUIRE(sql->body.find("\"columns\":[\"person\",\"adjusted\"]") != std::string::npos);
+  REQUIRE(sql->body.find("\"rows\":[[\"charlie\",\"35\"],[\"bob\",\"25\"]]") != std::string::npos);
+
+  const auto empty_sql = client.Post("/api/sql-query", headers, R"({"sql":""})", "application/json");
+  REQUIRE(empty_sql);
+  REQUIRE(empty_sql->status == 200);
+  REQUIRE(empty_sql->body.find("\"columns\":[\"name\",\"value\"]") != std::string::npos);
+  REQUIRE(empty_sql->body.find("\"totalRows\":3") != std::string::npos);
+
+  const auto bad_sql = client.Post(
+      "/api/sql-query", headers, R"({"sql":"SELECT missing FROM data"})", "application/json");
+  REQUIRE(bad_sql);
+  REQUIRE(bad_sql->status == 400);
+  REQUIRE(bad_sql->body.find("no such column") != std::string::npos);
 
   const auto health = client.Get("/api/health", headers);
   REQUIRE(health);
@@ -663,7 +732,7 @@ TEST_CASE("view: Add chart endpoint creates bar chart configs") {
   const auto response = client.Post(
       "/api/chart-config/heatmap",
       headers,
-      R"({"type":"bar","id":"volume-bar","label":"week","values":["volume","cardio"],"presentation":"grouped","title":"Volume","output":"charts/volume.svg","runOnSave":true})",
+      R"({"type":"bar","id":"volume-bar","label":"week","values":["volume","cardio"],"colorScheme":"diverging","presentation":"grouped","title":"Volume","output":"charts/volume.svg","runOnSave":true})",
       "application/json");
   REQUIRE(response);
   REQUIRE(response->status == 200);
@@ -673,6 +742,7 @@ TEST_CASE("view: Add chart endpoint creates bar chart configs") {
   CHECK(config_text.find("\"label\": \"week\"") != std::string::npos);
   CHECK(config_text.find("\"column\": \"volume\"") != std::string::npos);
   CHECK(config_text.find("\"column\": \"cardio\"") != std::string::npos);
+  CHECK(config_text.find("\"colorScheme\": \"diverging\"") != std::string::npos);
   CHECK(config_text.find("\"presentation\": \"grouped\"") != std::string::npos);
   CHECK(ReadTextFile(dir / "charts" / "volume.svg").find("class=\"bar bar-grouped") != std::string::npos);
 
@@ -833,6 +903,11 @@ TEST_CASE("view: developer asset directory overrides first-party embedded viewer
   REQUIRE(viewer_js->status == 200);
   REQUIRE(viewer_js->body.find("csvzallDevViewer") != std::string::npos);
 
+  const auto sql_module = client.Get("/assets/modules/sql.mjs");
+  REQUIRE(sql_module);
+  REQUIRE(sql_module->status == 200);
+  REQUIRE(sql_module->body.find("csvzallDevSqlModule") != std::string::npos);
+
   const auto ag_grid_css = client.Get("/assets/ag-grid.css");
   REQUIRE(ag_grid_css);
   REQUIRE(ag_grid_css->status == 200);
@@ -942,6 +1017,51 @@ TEST_CASE("view edit: cell edits persist through save") {
 
   REQUIRE(ReadAllRows(path) == std::vector<std::vector<std::string>>{{"alice", "10"}, {"bob", "25"}});
   std::filesystem::remove(path);
+}
+
+TEST_CASE("view edit: save follows a source file renamed on disk") {
+  const auto dir = TempDir("csvzall_view_edit_renamed_source");
+  const auto path = dir / "before.csv";
+  const auto renamed = dir / "after.csv";
+  {
+    std::ofstream output(path, std::ios::binary);
+    output << tests::MakeTestCsv({"name", "value"}, {{"alice", "10"}, {"bob", "20"}});
+  }
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_edit = true;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, true, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  std::filesystem::rename(path, renamed);
+
+  const auto schema = client.Get("/api/schema", headers);
+  REQUIRE(schema);
+  REQUIRE(schema->status == 200);
+  REQUIRE(
+      schema->body ==
+      R"({"file":"after.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2,"sqlTableName":"data"})");
+
+  const auto edit = client.Post(
+      "/api/edit-cell", headers, R"({"row":1,"column":"value","value":"25"})",
+      "application/json");
+  REQUIRE(edit);
+  REQUIRE(edit->status == 200);
+  const auto save = client.Post("/api/save", headers, "{}", "application/json");
+  REQUIRE(save);
+  REQUIRE(save->status == 200);
+  server.Stop();
+
+  REQUIRE_FALSE(std::filesystem::exists(path));
+  REQUIRE(ReadAllRows(renamed) == std::vector<std::vector<std::string>>{{"alice", "10"}, {"bob", "25"}});
+  std::filesystem::remove_all(dir);
 }
 
 TEST_CASE("view edit: row deletion persists through save") {
@@ -1107,6 +1227,89 @@ TEST_CASE("view edit: column deletion persists through save") {
   std::filesystem::remove(path);
 }
 
+TEST_CASE("view edit: column rename persists through save") {
+  const auto csv = tests::MakeTestCsv(
+      {"name", "note", "value"},
+      {{"alice", "x", "10"}, {"bob", "y", "20"}});
+  const auto path = WriteTempCsv(csv, "csvzall_view_edit_rename_column.csv");
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_edit = true;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, true, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto rename = client.Post(
+      "/api/rename-column", headers, R"({"column":"note","name":"status"})",
+      "application/json");
+  REQUIRE(rename);
+  REQUIRE(rename->status == 200);
+  const auto save = client.Post("/api/save", headers, "{}", "application/json");
+  REQUIRE(save);
+  REQUIRE(save->status == 200);
+  server.Stop();
+
+  REQUIRE(ReadHeaders(path) == std::vector<std::string>{"name", "status", "value"});
+  REQUIRE(ReadAllRows(path) == std::vector<std::vector<std::string>>{
+      {"alice", "x", "10"}, {"bob", "y", "20"}});
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("view edit: save applies column order with pending edits atomically") {
+  const auto csv = tests::MakeTestCsv(
+      {"name", "note", "value"},
+      {{"alice", "x", "10"}, {"bob", "y", "20"}});
+  const auto path = WriteTempCsv(csv, "csvzall_view_edit_reorder_column.csv");
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_edit = true;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, true, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto edit = client.Post(
+      "/api/edit-cell", headers, R"({"row":1,"column":"note","value":"edited"})",
+      "application/json");
+  REQUIRE(edit);
+  REQUIRE(edit->status == 200);
+  const auto save = client.Post(
+      "/api/save", headers, R"({"columns":["value","name","note"]})",
+      "application/json");
+  REQUIRE(save);
+  REQUIRE(save->status == 200);
+
+  const auto schema = client.Get("/api/schema", headers);
+  REQUIRE(schema);
+  REQUIRE(schema->status == 200);
+  REQUIRE(
+      schema->body ==
+      R"({"file":"csvzall_view_edit_reorder_column.csv","columns":["value","name","note"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2,"sqlTableName":"data"})");
+
+  const auto rows = client.Get("/api/rows?offset=0&limit=2", headers);
+  REQUIRE(rows);
+  REQUIRE(rows->status == 200);
+  REQUIRE(rows->body.find("\"rows\":[[\"10\",\"alice\",\"x\"],[\"20\",\"bob\",\"edited\"]]") !=
+          std::string::npos);
+  server.Stop();
+
+  REQUIRE(ReadHeaders(path) == std::vector<std::string>{"value", "name", "note"});
+  REQUIRE(ReadAllRows(path) == std::vector<std::vector<std::string>>{
+      {"10", "alice", "x"}, {"20", "bob", "edited"}});
+  std::filesystem::remove(path);
+}
+
 TEST_CASE("view edit: reset reloads source from disk and discards unsaved changes") {
   const auto csv = tests::MakeTestCsv(
       {"name", "value"},
@@ -1145,7 +1348,7 @@ TEST_CASE("view edit: reset reloads source from disk and discards unsaved change
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_edit_reset.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2})");
+      R"({"file":"csvzall_view_edit_reset.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2,"sqlTableName":"data"})");
 
   const auto rows = client.Get("/api/rows?offset=0&limit=2", headers);
   REQUIRE(rows);

@@ -1,6 +1,6 @@
 {
   "name": "popright",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "A tiny, typed, data-driven context menu primitive for modern web apps.",
   "type": "module",
   "homepage": "https://github.com/vincentlaucsb/popright#readme",
@@ -21,17 +21,22 @@
     "typescript",
     "headless-ui"
   ],
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "sideEffects": [
-    "./styles.css"
+    "./styles.css",
+    "./dropdown.css"
   ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
       "default": "./dist/index.js"
     },
-    "./styles.css": "./dist/styles.css"
+    "./styles.css": "./dist/styles.css",
+    "./dropdown.css": "./dist/dropdown.css"
   },
   "files": [
     "dist"

@@ -7,6 +7,10 @@ export function normalizeOptions(options) {
     return {
         trigger: "contextmenu",
         placement: "cursor",
+        side: "bottom",
+        align: "start",
+        sideOffset: 0,
+        alignOffset: 0,
         strategy: "fixed",
         closeOnSelect: true,
         closeOnBlur: true,
@@ -15,6 +19,7 @@ export function normalizeOptions(options) {
         closeOnResize: true,
         modal: false,
         collisionPadding: 8,
+        menuType: "context",
         ...options
     };
 }

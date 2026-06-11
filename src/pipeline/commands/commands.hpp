@@ -8,17 +8,13 @@
 #include <string>
 #include <vector>
 
+#include "../../charts/chart_spec.hpp"
 #include "../../pipeline_types.hpp"
 #include "view.hpp"
 
 // Forward declarations for PostgreSQL types
-namespace csvzall::pipeline::postgres {
+namespace csvzall::postgres {
 struct ConnectionConfig;
-}
-
-namespace csvzall::pipeline::common {
-struct ChartSpec;
-struct HeatmapSpec;
 }
 
 namespace csvzall::pipeline::commands {
@@ -161,6 +157,18 @@ int RunHeatmap(const common::HeatmapSpec& spec,
                const RunOptions& options,
                const LoggerCallbacks& logger,
                RunStats& stats);
+int RunBar(const ::csvzall::charts::BarSpec& spec,
+           std::istream& input,
+           std::ostream& output,
+           const RunOptions& options,
+           const LoggerCallbacks& logger,
+           RunStats& stats);
+int RunLine(const ::csvzall::charts::LineSpec& spec,
+            std::istream& input,
+            std::ostream& output,
+            const RunOptions& options,
+            const LoggerCallbacks& logger,
+            RunStats& stats);
 int RunChart(const common::ChartSpec& spec,
              const RunOptions& options,
              const LoggerCallbacks& logger,
@@ -234,7 +242,7 @@ int RunPostgresExport(std::istream& input,
                       const RunOptions& options,
                       const LoggerCallbacks& logger,
                       RunStats& stats,
-                      const postgres::ConnectionConfig& pg_config,
+                      const ::csvzall::postgres::ConnectionConfig& pg_config,
                       const std::string& table_name,
                       const std::string& if_exists_mode);
 

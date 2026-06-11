@@ -8,8 +8,18 @@ This file mirrors [AGENTS.md](AGENTS.md).
 
 - Keep pipeline orchestration in `src/transform_pipeline.*`.
 - Keep shared helpers in `src/pipeline/common/`.
-- Keep SQLite integration (CSV loader, query execution, memory strategy) in `src/pipeline/sqlite/`.
+- Keep reusable CSV-to-chart config and rendering helpers in `src/charts/`; SVGPlot remains the general-purpose chart drawing library.
+- Keep reusable SQLite integration (CSV loader, query execution, memory strategy) in `src/sqlite/`.
+- Keep reusable PostgreSQL integration (connection, schema inference, row loading, export orchestration) in `src/postgres/`.
 - Keep command implementations in `src/pipeline/commands/`.
+
+## Library refactor status
+
+- csvzall is being refactored toward a reusable C++ library plus thin CLI orchestration. This split is not complete yet.
+- Prefer moving code that is useful outside the CLI into top-level module folders and non-`pipeline` namespaces such as `src/sqlite` + `csvzall::sqlite` or `src/postgres` + `csvzall::postgres`.
+- Keep `*Command` classes and `Run*` command entry points as thin adapters: parse command-level choices, adapt `RunOptions`/`LoggerCallbacks`, call reusable library functions, and map results back to `RunStats`/return codes.
+- Keep temporary compatibility aliases when useful, for example `namespace csvzall::pipeline { namespace postgres = ::csvzall::postgres; }`, so the public pipeline API can remain stable while internals move.
+- Do not change CLI behavior, endpoint behavior, file formats, or diagnostics just because code moved layers.
 
 ## Command categories
 
@@ -37,7 +47,7 @@ This file mirrors [AGENTS.md](AGENTS.md).
 - Do not store `std::string_view` in persistent structures.
 - Keep stdout for data and stderr for diagnostics.
 - Keep `RunOptions` as the shared cross-command behavior point (including SQLite threshold).
-- Avoid duplicating logic. Move shared helpers to `src/pipeline/common/` (general) or `src/pipeline/sqlite/` (SQLite-specific). If no clean home exists, add a `// TODO(dedup):` comment rather than copying.
+- Avoid duplicating logic. Move shared helpers to `src/pipeline/common/` (general), `src/sqlite/` (SQLite-specific), or another top-level reusable module when appropriate. If no clean home exists, add a `// TODO(dedup):` comment rather than copying.
 
 ## CLI help quality
 

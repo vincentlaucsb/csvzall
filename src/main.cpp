@@ -3,14 +3,15 @@
 #include <indicators/progress_spinner.hpp>
 #include "credentials.hpp"
 #include "head.hpp"
+#include "charts/chart_schema.hpp"
 #include "pipeline/common/chart_spec.hpp"
 #include "pipeline/common/markdown_calendar.hpp"
 #include "transform_pipeline.hpp"
 #include "util.hpp"
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
-#include "pipeline/postgres/postgres_connection.hpp"
-#include "pipeline/postgres/row_loader.hpp"
+#include "postgres/postgres_connection.hpp"
+#include "postgres/row_loader.hpp"
 #endif
 
 #include <algorithm>
@@ -187,7 +188,7 @@ std::optional<std::string> ReadEnvironmentVariable(const std::string& name) {
 #ifdef CSVZALL_HAVE_POSTGRESQL
 bool ApplyPasswordSources(argparse::ArgumentParser& cmd,
                           Logger& logger,
-                          csvzall::pipeline::postgres::ConnectionConfig& pg_config,
+                          csvzall::postgres::ConnectionConfig& pg_config,
                           const csvzall::CredentialTarget& credential_target,
                           const bool allow_prompt) {
   if (cmd.is_used("--password")) {
@@ -594,9 +595,9 @@ Output shape:
   atomically rewriting the source CSV after checking that size and mtime did not
   change externally.
   --viewer-assets <dir> is a developer override that serves index.html,
-  viewer.css, and viewer.js from disk on every request; embedded assets remain
-  the default. CSVZALL_VIEWER_ASSETS provides the same override. AG Grid and
-  Popright vendor files remain embedded.
+  viewer.css, viewer.js, and viewer modules from disk on every request;
+  embedded assets remain the default. CSVZALL_VIEWER_ASSETS provides the same
+  override. AG Grid and Popright vendor files remain embedded.
   Auto mode materializes files at or below --materialize-threshold-mb for
   client-side sorting/filtering and uses indexed /api/rows paging for larger
   files. Paged mode disables global sort/search/filter until server-side
@@ -646,7 +647,7 @@ Related:
       .default_value(false)
       .implicit_value(true);
   view_cmd.add_argument("--viewer-assets")
-      .help("Developer mode: serve index.html, viewer.css, and viewer.js from this directory instead of embedded copies")
+      .help("Developer mode: serve first-party viewer assets from this directory instead of embedded copies")
       .default_value(std::string{""});
   view_cmd.add_argument("--no-open")
       .help("Print the URL without opening a browser automatically")
@@ -755,42 +756,37 @@ Examples:
   argparse::ArgumentParser charts_cmd("charts");
   charts_cmd.add_description(
       "Run configured CSV-to-chart rendering from .csvzall/charts.json.");
-  charts_cmd.add_epilog(R"(charts run contract:
-  Loads JSON chart objects from .csvzall/charts.json by default:
-  {"charts":[{"id":"gym","type":"heatmap","input":"gym.csv","output":"gym.svg","options":{"date":"date","lookback":"1y"}}]}
-  Supported chart types: heatmap, bar, line, markdown-table.
-  Bar, line, and heatmap options accept either legacy "value"/"y" keys or a
-  multi-dataset "values" array such as [{"column":"gym","label":"Gym"}].
-  Multi-dataset bar charts can set "presentation" to "stacked" or "grouped".
-  Heatmap options can set "orientation" to "months-horizontal" or
-  "months-vertical".
-  Markdown-table options accept "sql" for a custom SELECT, "columns" for a
-  simple SELECT column list, or neither to export all CSV columns. Markdown
-  table outputs are Obsidian-friendly generated notes that can be embedded with
-  ![[path/to/output]].
-  Use --config <path> to choose another chart config.
-  Relative input and output paths resolve against the config root.
-  Configured charts require explicit output paths and overwrite existing outputs.
-  Missing inputs, unknown chart types, invalid options, missing columns, and
-  write failures produce stderr diagnostics and a non-zero exit.
-  --validate loads the config and checks inputs, columns, dates, and numeric
-  values without writing outputs. It is useful for LLM-generated configs.
+  charts_cmd.add_epilog(R"(charts quick start:
+  Runs chart artifacts configured in .csvzall/charts.json by default.
+  Use --config <path> to choose another config file.
+
+Minimal config:
+  {"charts":[{"id":"gym","type":"heatmap","input":"gym.csv","output":"charts/gym.svg","options":{"date":"date","lookback":"1y"}}]}
+
+Supported chart types:
+  heatmap, bar, line, markdown-table
+
+Use `csvzall charts schema` for the full config reference, including option
+value grammar such as heatmap lookback values.
 
 Examples:
   csvzall charts run
   csvzall charts run gym-attendance-heatmap
   csvzall charts run --config .csvzall/charts.json
   csvzall charts run --validate --config .csvzall/charts.json
+  csvzall charts schema
 
 Related:
   Use heatmap for direct one-off SVG rendering to stdout or --output.
 )");
   charts_cmd.add_argument("mode")
-      .help("Charts mode: run")
+      .help("Charts mode: run or schema")
+      .metavar("[run|schema]")
       .default_value(std::string{"run"})
       .nargs(argparse::nargs_pattern::optional);
   charts_cmd.add_argument("id")
-      .help("Optional chart id to run")
+      .help("Optional chart id for run mode")
+      .metavar("[id]")
       .default_value(std::string{})
       .nargs(argparse::nargs_pattern::optional);
   charts_cmd.add_argument("--config")
@@ -1389,8 +1385,17 @@ Examples:
   if (program.is_subcommand_used("charts")) {
     Logger logger(charts_cmd.get<bool>("--verbose"), charts_cmd.get<bool>("--quiet"));
     const auto mode = charts_cmd.get<std::string>("mode");
+    const auto chart_id = charts_cmd.get<std::string>("id");
+    if (mode == "schema") {
+      if (!chart_id.empty()) {
+        logger.Error("charts schema: chart id is not accepted.");
+        return 1;
+      }
+      std::cout << csvzall::charts::BuildChartSchemaReference();
+      return 0;
+    }
     if (mode != "run") {
-      logger.Error("charts: mode must be 'run'.");
+      logger.Error("charts: mode must be 'run' or 'schema'.");
       return 1;
     }
 
@@ -1398,7 +1403,7 @@ Examples:
     csvzall::pipeline::RunStats ps;
     const auto rc = csvzall::pipeline::RunCharts(
         charts_cmd.get<std::string>("--config"),
-        charts_cmd.get<std::string>("id"),
+        chart_id,
         charts_cmd.get<bool>("--validate"),
         options,
         BuildCallbacks(logger),
@@ -1574,7 +1579,7 @@ Examples:
     }
 
     // Build PostgreSQL configuration
-    csvzall::pipeline::postgres::ConnectionConfig pg_config;
+    csvzall::postgres::ConnectionConfig pg_config;
     pg_config.host = postgres_cmd.get<std::string>("--host");
     pg_config.port = postgres_cmd.get<int>("--port");
     pg_config.database = postgres_cmd.get<std::string>("--dbname");
@@ -1610,7 +1615,7 @@ Examples:
 
       bool connected = false;
       try {
-        csvzall::pipeline::postgres::PostgresConnection test_conn(pg_config);
+        csvzall::postgres::PostgresConnection test_conn(pg_config);
         connected = true;
       } catch (const std::exception& ex) {
         logger.Error(std::string("postgres --save: connection failed: ") + ex.what());

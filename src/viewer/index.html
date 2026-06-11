@@ -15,18 +15,29 @@
         <h1 id="file-name">Loading…</h1>
         <span id="summary" class="summary" aria-hidden="true"></span>
       </div>
-      <label class="search">
-        <span id="mode-label">Loading rows</span>
-        <input id="quick-filter" type="search" placeholder="Filter loaded table">
-      </label>
+      <div class="query-control" id="query-control">
+        <div class="query-input-row">
+          <div class="query-mode-toggle" role="group" aria-label="Filter mode">
+            <button id="query-mode-search" type="button" class="active" aria-pressed="true">Search</button>
+            <button id="query-mode-sql" type="button" aria-pressed="false">SQL</button>
+          </div>
+          <div class="query-input-shell">
+            <textarea id="quick-filter" rows="1" autocomplete="off" spellcheck="false" placeholder="Type to filter loaded table..."></textarea>
+            <button id="clear-query" type="button" aria-label="Clear filter" title="Clear filter">Clear</button>
+          </div>
+        </div>
+        <p id="sql-error" class="sql-error" hidden></p>
+      </div>
       <div class="chart-toolbar">
-        <button id="add-chart" type="button" hidden>Add chart</button>
+        <button id="add-chart" type="button" hidden>Charts</button>
+      </div>
+      <div id="sql-toolbar" class="sql-toolbar" hidden>
+        <button id="run-sql" type="button">Run</button>
+        <button id="copy-markdown" type="button" disabled>Copy Markdown</button>
       </div>
       <div id="edit-toolbar" class="edit-toolbar" hidden>
-        <button id="insert-row" type="button">Insert row</button>
-        <button id="delete-row" type="button">Delete row</button>
-        <button id="insert-column" type="button">Insert column</button>
-        <button id="delete-column" type="button">Delete column</button>
+        <button id="insert-menu" type="button">Insert</button>
+        <button id="delete-menu" type="button">Delete</button>
         <button id="reset" type="button" disabled>Reset</button>
         <button id="save" type="button" disabled>Save</button>
       </div>
@@ -50,6 +61,20 @@
       <div class="dialog-actions">
         <button id="cancel-insert-column" type="button">Cancel</button>
         <button type="submit">Insert</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="rename-column-dialog" class="csvzall-dialog">
+    <form id="rename-column-form" class="dialog-form">
+      <h2>Rename column</h2>
+      <label>
+        <span>Column name</span>
+        <input id="rename-column-name" type="text" autocomplete="off" required>
+      </label>
+      <p id="rename-column-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancel-rename-column" type="button">Cancel</button>
+        <button type="submit">Rename</button>
       </div>
     </form>
   </dialog>
@@ -102,17 +127,18 @@
           </div>
           <fieldset id="chart-markdown-table-section" class="chart-range" hidden>
             <legend>Markdown table</legend>
-            <label>
+            <div class="form-field">
               <span>Columns</span>
-              <select id="chart-markdown-columns" multiple size="6"></select>
-            </label>
+              <div id="chart-markdown-columns" class="checklist" role="group" aria-label="Markdown table columns"></div>
+            </div>
             <label>
               <span>SQL</span>
-              <textarea id="chart-markdown-sql" rows="4" autocomplete="off"></textarea>
+              <textarea id="chart-markdown-sql" rows="4" autocomplete="off" placeholder="SELECT * FROM data"></textarea>
             </label>
+            <p class="field-help">Use table name <code>data</code> in SQL queries.</p>
           </fieldset>
-          <fieldset id="chart-range-section" class="chart-range">
-            <legend>Range</legend>
+          <fieldset id="chart-layout-section" class="chart-range">
+            <legend>Layout</legend>
             <label>
               <span>Orientation</span>
               <select id="chart-orientation">
@@ -120,6 +146,9 @@
                 <option value="months-vertical">Months down</option>
               </select>
             </label>
+          </fieldset>
+          <fieldset id="chart-range-section" class="chart-range">
+            <legend>Range</legend>
             <label class="toggle-row">
               <input id="chart-range-fixed" type="radio" name="chart-range-mode" value="fixed" checked>
               <span>Fixed dates</span>
@@ -159,6 +188,13 @@
               <option value="grouped">Grouped</option>
             </select>
           </label>
+          <label id="chart-color-scheme-field">
+            <span>Color scheme</span>
+            <select id="chart-color-scheme">
+              <option value="sequential">Sequential</option>
+              <option value="diverging">Diverging</option>
+            </select>
+          </label>
           <label>
             <span>Output path</span>
             <input id="chart-output" type="text" autocomplete="off">
@@ -178,6 +214,6 @@
     </form>
   </dialog>
   <script src="/assets/ag-grid-community.min.js"></script>
-  <script src="/assets/viewer.js"></script>
+  <script type="module" src="/assets/viewer.js"></script>
 </body>
 </html>

@@ -3,6 +3,7 @@
 #include "assets.hpp"
 #include "charts.hpp"
 #include "json.hpp"
+#include "sql.hpp"
 #include "support.hpp"
 
 #include <algorithm>
@@ -26,10 +27,13 @@ using view_internal::BuildChartConfigListJson;
 using view_internal::BuildHealthJson;
 using view_internal::BuildRowsJson;
 using view_internal::BuildSchemaJson;
+using view_internal::BuildSqlQueryResultJson;
 using view_internal::GenerateCurrentCsvChart;
 using view_internal::GenerateSessionToken;
 using view_internal::JsonStringArrayField;
+using view_internal::JsonStringArrayFieldOr;
 using view_internal::JsonStringField;
+using view_internal::JsonStringFieldOr;
 using view_internal::JsonUintField;
 using view_internal::RenderRunOnSaveChartsForCurrentCsv;
 using view_internal::ResolveDevViewerAssetDir;
@@ -177,6 +181,19 @@ int ViewServer::Start(const ViewServerOptions& options) {
                                              "text/plain; charset=utf-8");
                       }
                     });
+  impl_->server.Get(R"(/assets/modules/([A-Za-z0-9._-]+\.m?js))",
+                    [this](const httplib::Request& request, httplib::Response& response) {
+                      const auto route = std::string("/assets/modules/") + request.matches[1].str();
+                      try {
+                        if (!ServeViewerAsset(impl_->viewer_asset_dir, route, response)) {
+                          response.status = 404;
+                        }
+                      } catch (const std::exception& ex) {
+                        response.status = 500;
+                        response.set_content(std::string(ex.what()) + "\n",
+                                             "text/plain; charset=utf-8");
+                      }
+                    });
   impl_->server.Get("/assets/ag-grid-community.min.js",
                     [this](const httplib::Request&, httplib::Response& response) {
                       if (!ServeEmbeddedViewerAsset("/assets/ag-grid-community.min.js", response)) {
@@ -195,16 +212,17 @@ int ViewServer::Start(const ViewServerOptions& options) {
                         response.status = 404;
                       }
                     });
-  impl_->server.Get(R"(/assets/popright/([A-Za-z0-9._-]+\.js))",
+  impl_->server.Get(R"(/assets/popright/([A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\.js))",
                     [](const httplib::Request& request, httplib::Response& response) {
                       const auto route = std::string("/assets/popright/") + request.matches[1].str();
                       if (!ServeEmbeddedViewerAsset(route, response)) {
                         response.status = 404;
                       }
                     });
-  impl_->server.Get("/assets/popright/styles.css",
-                    [](const httplib::Request&, httplib::Response& response) {
-                      if (!ServeEmbeddedViewerAsset("/assets/popright/styles.css", response)) {
+  impl_->server.Get(R"(/assets/popright/([A-Za-z0-9._-]+\.css))",
+                    [](const httplib::Request& request, httplib::Response& response) {
+                      const auto route = std::string("/assets/popright/") + request.matches[1].str();
+                      if (!ServeEmbeddedViewerAsset(route, response)) {
                         response.status = 404;
                       }
                     });
@@ -215,8 +233,15 @@ int ViewServer::Start(const ViewServerOptions& options) {
                         impl_->RejectUnauthorized(response);
                         return;
                       }
-                      response.set_content(BuildSchemaJson(impl_->data, impl_->editable),
-                                           "application/json; charset=utf-8");
+                      try {
+                        impl_->data.recover_renamed_source();
+                        response.set_content(BuildSchemaJson(impl_->data, impl_->editable),
+                                             "application/json; charset=utf-8");
+                      } catch (const std::exception& ex) {
+                        response.status = 409;
+                        response.set_content(std::string(ex.what()) + "\n",
+                                             "text/plain; charset=utf-8");
+                      }
                       impl_->MaybeStopAfterRequest();
                     });
 
@@ -254,6 +279,23 @@ int ViewServer::Start(const ViewServerOptions& options) {
                       }
                       impl_->MaybeStopAfterRequest();
                     });
+
+  impl_->server.Post("/api/sql-query",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       try {
+                         response.set_content(
+                             BuildSqlQueryResultJson(
+                                 impl_->data,
+                                 JsonStringFieldOr(request.body, "sql", "")),
+                             "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     });
 
   impl_->server.Post("/api/edit-cell",
                      [this](const httplib::Request& request, httplib::Response& response) {
@@ -367,6 +409,25 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        }
                      });
 
+  impl_->server.Post("/api/rename-column",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data.rename_column(
+                             JsonStringField(request.body, "column"),
+                             JsonStringField(request.body, "name"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     });
+
   impl_->server.Post("/api/reset",
                      [this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
@@ -396,7 +457,8 @@ int ViewServer::Start(const ViewServerOptions& options) {
                          return;
                        }
                        try {
-                         impl_->data.save();
+                         impl_->data.save(
+                             JsonStringArrayFieldOr(request.body, "columns", {}));
                          std::size_t charts_generated = 0;
                          std::string chart_error;
                          try {

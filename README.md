@@ -1,6 +1,6 @@
 # csvzall
 
-<img src="assets/csvzall-logo.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
+<img src="assets/csvzall-logo-theme-safe.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
 
 A fast, single-binary CSV transformation CLI for Unix-style pipelines. Pipe CSVs through `filter`, `derive`, `summarize`, and `head` — each command reads stdin, writes stdout, logs to stderr.
 For local inspection workflows, `csvzall view <file.csv>` starts a read-only browser table view backed by the same CSV parser.
@@ -311,6 +311,8 @@ regenerate the artifact when the source CSV changes.
 
 If neither `sql` nor `columns` is provided, `markdown-table` exports all CSV
 columns. Pass `--validate` to check selected configs without writing output.
+Use `csvzall charts schema` for the full generated config reference, including
+per-chart option keys and accepted value forms such as heatmap `lookback`.
 
 ### `append <existing.csv> <incoming.csv> [--in-place]`
 
@@ -431,6 +433,23 @@ cmake -S . -B build -DSVGPLOT_ROOT=/path/to/svgplot
 
 The binary is at `build/Release/csvzall.exe` (Windows) or `build/csvzall` (Linux/macOS).
 
+The C++ implementation is also built as `csvzall_core`, with the alias target
+`csvzall::core`, and the CLI executable links that library from a thin
+`main.cpp` layer. This is an early library target for custom C++ programs and
+in-tree tests; the installed SDK/header surface is still intentionally rough.
+
+### API documentation
+
+If Doxygen is installed, generate local API documentation with:
+
+```sh
+cmake --build build --target docs
+```
+
+The generated HTML is written to `docs/doxygen/html`. The GitHub Pages
+documentation workflow generates the same site from `Doxyfile` on pushes to
+`main` or `master`.
+
 ### Windows install helper
 
 Windows users can build, install, and add `csvzall` to PATH with:
@@ -465,7 +484,8 @@ For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) v0.18.5 | [Yuji Hirose](https://github.com/yhirose) and contributors | Embedded local HTTP server for the `view` command | Vendored single header under `vendor/httplib` |
 | [indicators](https://github.com/p-ranav/indicators) v2.3 | [Pranav](https://github.com/p-ranav) | Terminal progress bars for long-running imports | FetchContent |
 | [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) v32.3.9 | [AG Grid Ltd.](https://www.ag-grid.com/) | Interactive browser table for the `view` command | Vendored browser assets under `vendor/ag-grid`, embedded into csvzall at build time |
-| [Popright](https://github.com/vincentlaucsb/popright) v0.0.1 | [Vincent Lau](https://github.com/vincentlaucsb) | Context menu primitive for the `view` command | Vendored npm package under `vendor/popright`, embedded into csvzall at build time |
+| [Popright](https://github.com/vincentlaucsb/popright) v0.1.0 | [Vincent La](https://github.com/vincentlaucsb) | Context menu and dropdown menu primitives for the `view` command | Vendored npm package under `vendor/popright`, embedded into csvzall at build time |
+| [Tabler Icons](https://github.com/tabler/tabler-icons) | [Paweł Kuna](https://github.com/codecalm) and contributors | Viewer toolbar and context menu icons | Selected inline SVG paths in `src/viewer/viewer.js` |
 | [zlib](https://github.com/madler/zlib) v1.3.1 | [Mark Adler](https://github.com/madler) and contributors | gzip and ZIP/deflate decompression for compressed CSV inputs | System package if available; FetchContent fallback |
 | [keychain](https://github.com/hrantzsch/keychain) v1.3.1 | [hrantzsch](https://github.com/hrantzsch) | Optional OS credential storage for PostgreSQL passwords | System package if available; FetchContent fallback; Linux requires libsecret |
 | [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite | FetchContent, with a local CMake patch |
@@ -476,6 +496,10 @@ For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 | [actions/cache](https://github.com/actions/cache) v5.0.5 | [GitHub](https://github.com/actions) | Cache CMake FetchContent dependencies in CI | GitHub Actions workflows only |
 | [lukka/get-cmake](https://github.com/lukka/get-cmake) v4.3.3 | [Luca K.](https://github.com/lukka) and contributors | Install CMake for release binary builds | GitHub Actions release workflow only |
 | [Codecov GitHub Action](https://github.com/codecov/codecov-action) v6.0.1 | [Codecov](https://about.codecov.io/) | Upload coverage reports to Codecov | GitHub Actions coverage workflow only |
+| [Doxygen](https://www.doxygen.nl/) | [Dimitri van Heesch](https://github.com/doxygen) and contributors | Generate C++ API documentation | Optional local tool; installed in the GitHub Pages documentation workflow |
+| [actions/configure-pages](https://github.com/actions/configure-pages) v5 | [GitHub](https://github.com/actions) | Configure GitHub Pages metadata for API docs publishing | GitHub Actions documentation workflow only |
+| [actions/upload-pages-artifact](https://github.com/actions/upload-pages-artifact) v4 | [GitHub](https://github.com/actions) | Upload generated Doxygen HTML for GitHub Pages deployment | GitHub Actions documentation workflow only |
+| [actions/deploy-pages](https://github.com/actions/deploy-pages) v4 | [GitHub](https://github.com/actions) | Deploy generated Doxygen HTML to GitHub Pages | GitHub Actions documentation workflow only |
 
 ## Design notes
 

@@ -174,6 +174,9 @@ Json ChartOptionsForConfig(const common::ChartSpec& spec) {
     if (!spec.bar.title.empty()) options["title"] = spec.bar.title;
     if (!spec.bar.x_label.empty()) options["xLabel"] = spec.bar.x_label;
     if (!spec.bar.y_label.empty()) options["yLabel"] = spec.bar.y_label;
+    if (!spec.bar.color_scheme.empty() && spec.bar.color_scheme != "sequential") {
+      options["colorScheme"] = spec.bar.color_scheme;
+    }
     if (!spec.bar.presentation.empty() && spec.bar.presentation != "stacked") {
       options["presentation"] = spec.bar.presentation;
     }
@@ -188,6 +191,9 @@ Json ChartOptionsForConfig(const common::ChartSpec& spec) {
     if (!spec.line.title.empty()) options["title"] = spec.line.title;
     if (!spec.line.x_label.empty()) options["xLabel"] = spec.line.x_label;
     if (!spec.line.y_label.empty()) options["yLabel"] = spec.line.y_label;
+    if (!spec.line.color_scheme.empty() && spec.line.color_scheme != "sequential") {
+      options["colorScheme"] = spec.line.color_scheme;
+    }
   } else if (spec.type == "markdown-table") {
     if (!spec.markdown_table.sql.empty()) {
       options["sql"] = spec.markdown_table.sql;
@@ -218,6 +224,7 @@ Json ChartOptionsForApi(const common::ChartSpec& spec) {
     options["title"] = spec.bar.title;
     options["xLabel"] = spec.bar.x_label;
     options["yLabel"] = spec.bar.y_label;
+    options["colorScheme"] = spec.bar.color_scheme;
     options["presentation"] = spec.bar.presentation;
   } else if (spec.type == "line") {
     options["x"] = spec.line.x_column;
@@ -227,6 +234,7 @@ Json ChartOptionsForApi(const common::ChartSpec& spec) {
     options["title"] = spec.line.title;
     options["xLabel"] = spec.line.x_label;
     options["yLabel"] = spec.line.y_label;
+    options["colorScheme"] = spec.line.color_scheme;
   } else if (spec.type == "markdown-table") {
     options["sql"] = spec.markdown_table.sql;
     options["columns"] = spec.markdown_table.columns;
@@ -489,6 +497,7 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
     bar.title = title;
     bar.x_label = JsonStringFieldOr(body, "xLabel", "");
     bar.y_label = JsonStringFieldOr(body, "yLabel", "");
+    bar.color_scheme = JsonStringFieldOr(body, "colorScheme", "sequential");
     bar.presentation = JsonStringFieldOr(body, "presentation", "stacked");
     spec = common::MakeBarChartSpec(
         id,
@@ -510,6 +519,7 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
     line.title = title;
     line.x_label = JsonStringFieldOr(body, "xLabel", "");
     line.y_label = JsonStringFieldOr(body, "yLabel", "");
+    line.color_scheme = JsonStringFieldOr(body, "colorScheme", "sequential");
     spec = common::MakeLineChartSpec(
         id,
         ResolveChartOutputPath(root, input_path),

@@ -60,6 +60,12 @@ export declare class ContextMenu {
     canOpenFromNativeEvent(event: Event): boolean;
     getClosestTarget(eventTarget: EventTarget | null): Element | undefined;
     positionRoot(root: HTMLElement, input: OpenInput): void;
+    getPreferredPosition(input: OpenInput, rect: DOMRect): {
+        left: number;
+        top: number;
+        fallbackLeft?: number;
+        fallbackTop?: number;
+    };
     get isOpen(): boolean;
     attachTargets(): void;
     attachGlobalListeners(): void;

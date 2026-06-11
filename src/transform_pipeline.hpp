@@ -1,18 +1,15 @@
 #pragma once
 
 #include "pipeline_types.hpp"
+#include "charts/chart_spec.hpp"
 
 #include <istream>
 #include <ostream>
 #include <string>
 #include <vector>
 
-namespace csvzall::pipeline::common {
-struct HeatmapSpec;
-}
-
 #ifdef CSVZALL_HAVE_POSTGRESQL
-#include "pipeline/postgres/postgres_connection.hpp"
+#include "postgres/postgres_connection.hpp"
 #endif
 
 namespace csvzall::pipeline {
@@ -144,7 +141,7 @@ int RunPostgresExport(std::istream& input,
                       const RunOptions& options,
                       const LoggerCallbacks& logger,
                       RunStats& stats,
-                      const postgres::ConnectionConfig& pg_config,
+                      const ::csvzall::postgres::ConnectionConfig& pg_config,
                       const std::string& table_name,
                       const std::string& if_exists_mode);
 

@@ -17,6 +17,14 @@ include(FetchContent)
 include(GNUInstallDirs)
 include(CTest)
 
+find_package(Doxygen QUIET)
+if(DOXYGEN_FOUND)
+  add_custom_target(docs
+    COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Generate Doxygen API documentation")
+endif()
+
 option(CSVZALL_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(CSVZALL_ENABLE_POSTGRESQL "Enable PostgreSQL export support" ON)
 option(CSVZALL_FETCH_LIBPQXX "Fetch libpqxx from GitHub when not found on system" ON)
@@ -606,15 +614,28 @@ set(CSVZALL_VIEWER_ASSET_INPUTS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/index.html"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/viewer.css"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/viewer.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/dirty-state.mjs"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/fallback-menu.mjs"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/grid.mjs"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/icons.mjs"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/markdown.mjs"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/save.mjs"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/sql.mjs"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/state.mjs"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-grid-community.min.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-grid.css"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-theme-alpine.css"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/constants.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/ContextMenu.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/DropdownMenu.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/index.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/MenuController.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/positioning.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render/items.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render/root.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render/types.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/dropdown.css"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/styles.css"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/theme-utils.js"
   "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/theme.js"
@@ -645,22 +666,22 @@ set_source_files_properties(
 add_custom_target(csvzall_viewer_assets
   DEPENDS "${CSVZALL_VIEWER_ASSET_CPP}" "${CSVZALL_VIEWER_ASSET_HPP}")
 
-set(CSVZALL_APP_SOURCES
+set(CSVZALL_CORE_SOURCES
   ${CSVZALL_VIEWER_ASSET_CPP}
   ${CSVZALL_VIEWER_ASSET_HPP}
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/credentials.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/util.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/transform_pipeline.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/chart_spec.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/chart_schema.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/chart_spec.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/column_lookup.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/gzip_stream.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/json_path.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/markdown_calendar.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/markdown_table.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/row_utils.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/sqlite/sqlite_db.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/sqlite/csv_loader.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/sqlite/sqlite_db.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/sqlite/csv_loader.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/append.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/CsvInputCommand.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/CsvTransformCommand.cpp
@@ -678,26 +699,38 @@ set(CSVZALL_APP_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/json.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/model.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/server.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/sql.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/view/support.cpp)
 
 if(CSVZALL_HAVE_SVGPLOT)
-  list(APPEND CSVZALL_APP_SOURCES
+  list(APPEND CSVZALL_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/bar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/csv_chart_common.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/heatmap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/line.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/validation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/bar.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/chart.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/charts.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/heatmap.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/heatmap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/line.cpp)
 endif()
 
 if(CSVZALL_HAVE_POSTGRESQL)
-  list(APPEND CSVZALL_APP_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/postgres_connection.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/schema_inference.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/postgres/row_loader.cpp
+  list(APPEND CSVZALL_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/postgres/exporter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/postgres/postgres_connection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/postgres/schema_inference.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/postgres/row_loader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/postgres_export.cpp)
 endif()
 
-function(csvzall_configure_app target_name)
+set(CSVZALL_APP_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
+  ${CSVZALL_CORE_SOURCES})
+
+function(csvzall_core_link_libraries out_var)
   set(LINK_LIBS
-    ${CSVZALL_ARGPARSE_TARGET}
-    ${CSVZALL_INDICATORS_TARGET}
     ${CSVZALL_SIMDJSON_TARGET}
     ${CSVZALL_NLOHMANN_JSON_TARGET}
     csv
@@ -715,26 +748,13 @@ function(csvzall_configure_app target_name)
     list(APPEND LINK_LIBS ${CSVZALL_SVGPLOT_TARGET})
   endif()
 
-  target_link_libraries(${target_name} PRIVATE ${LINK_LIBS})
-  csvzall_copy_runtime_dependencies(${target_name})
-  add_dependencies(${target_name} csvzall_viewer_assets)
-  target_include_directories(${target_name} PRIVATE "${CSVZALL_VIEWER_GENERATED_DIR}")
+  set(${out_var} ${LINK_LIBS} PARENT_SCOPE)
+endfunction()
 
+function(csvzall_apply_common_target_settings target_name)
   set_property(TARGET ${target_name} PROPERTY CXX_STANDARD ${CSVZALL_CXX_STANDARD})
   set_property(TARGET ${target_name} PROPERTY CXX_STANDARD_REQUIRED ON)
   set_property(TARGET ${target_name} PROPERTY CXX_EXTENSIONS OFF)
-
-  target_compile_definitions(${target_name} PRIVATE CSVZALL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-
-  if(CSVZALL_HAVE_POSTGRESQL)
-    target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_POSTGRESQL=1)
-  endif()
-  if(CSVZALL_HAVE_KEYCHAIN)
-    target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_KEYCHAIN=1)
-  endif()
-  if(CSVZALL_HAVE_SVGPLOT)
-    target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_SVGPLOT=1)
-  endif()
 
   if(MSVC)
     target_compile_options(${target_name} PRIVATE /W4 /permissive- /bigobj)
@@ -749,12 +769,84 @@ function(csvzall_configure_app target_name)
   endif()
 endfunction()
 
-add_executable(csvzall ${CSVZALL_APP_SOURCES})
-csvzall_configure_app(csvzall)
+function(csvzall_configure_core target_name)
+  csvzall_core_link_libraries(LINK_LIBS)
+  target_link_libraries(${target_name} PUBLIC ${LINK_LIBS})
+  add_dependencies(${target_name} csvzall_viewer_assets)
+  target_include_directories(${target_name}
+    PUBLIC
+      "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>"
+      "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
+    PRIVATE
+      "${CSVZALL_VIEWER_GENERATED_DIR}")
+
+  csvzall_apply_common_target_settings(${target_name})
+
+  target_compile_definitions(${target_name} PRIVATE CSVZALL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+  if(CSVZALL_HAVE_POSTGRESQL)
+    target_compile_definitions(${target_name} PUBLIC CSVZALL_HAVE_POSTGRESQL=1)
+  endif()
+  if(CSVZALL_HAVE_KEYCHAIN)
+    target_compile_definitions(${target_name} PUBLIC CSVZALL_HAVE_KEYCHAIN=1)
+  endif()
+  if(CSVZALL_HAVE_SVGPLOT)
+    target_compile_definitions(${target_name} PUBLIC CSVZALL_HAVE_SVGPLOT=1)
+  endif()
+endfunction()
+
+function(csvzall_configure_cli target_name core_target)
+  target_link_libraries(${target_name}
+    PRIVATE
+      ${core_target}
+      ${CSVZALL_ARGPARSE_TARGET}
+      ${CSVZALL_INDICATORS_TARGET})
+  csvzall_copy_runtime_dependencies(${target_name})
+  csvzall_apply_common_target_settings(${target_name})
+endfunction()
+
+function(csvzall_configure_app target_name)
+  csvzall_core_link_libraries(LINK_LIBS)
+  target_link_libraries(${target_name}
+    PRIVATE
+      ${LINK_LIBS}
+      ${CSVZALL_ARGPARSE_TARGET}
+      ${CSVZALL_INDICATORS_TARGET})
+  csvzall_copy_runtime_dependencies(${target_name})
+  add_dependencies(${target_name} csvzall_viewer_assets)
+  target_include_directories(${target_name}
+    PRIVATE
+      "${CSVZALL_VIEWER_GENERATED_DIR}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src"
+      "${CMAKE_CURRENT_SOURCE_DIR}")
+
+  csvzall_apply_common_target_settings(${target_name})
+
+  target_compile_definitions(${target_name} PRIVATE CSVZALL_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+  if(CSVZALL_HAVE_POSTGRESQL)
+    target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_POSTGRESQL=1)
+  endif()
+  if(CSVZALL_HAVE_KEYCHAIN)
+    target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_KEYCHAIN=1)
+  endif()
+  if(CSVZALL_HAVE_SVGPLOT)
+    target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_SVGPLOT=1)
+  endif()
+endfunction()
+
+add_library(csvzall_core STATIC ${CSVZALL_CORE_SOURCES})
+add_library(csvzall::core ALIAS csvzall_core)
+csvzall_configure_core(csvzall_core)
+
+add_executable(csvzall ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp)
+csvzall_configure_cli(csvzall csvzall::core)
 
 add_subdirectory(programs)
 
-install(TARGETS csvzall
+install(TARGETS csvzall csvzall_core
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
   COMPONENT csvzall)
 

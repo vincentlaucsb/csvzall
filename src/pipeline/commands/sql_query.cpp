@@ -1,19 +1,18 @@
 #include "commands.hpp"
+#include "sqlite_options.hpp"
 
 #include "../common/column_lookup.hpp"
 #include "../common/markdown_table.hpp"
-#include "../sqlite/csv_loader.hpp"
-#include "../sqlite/sqlite_db.hpp"
+#include "../../sqlite/csv_loader.hpp"
+#include "../../sqlite/sqlite_db.hpp"
 
 #include <SQLiteCpp/SQLiteCpp.h>
-#include <csv.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <ostream>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace csvzall::pipeline::commands {
@@ -214,41 +213,17 @@ int WriteQueryResult(SQLite::Statement& query,
     return 1;
   }
 
-  std::vector<std::string> out_headers;
-  out_headers.reserve(static_cast<std::size_t>(col_count));
-  for (int i = 0; i < col_count; ++i) {
-    out_headers.emplace_back(query.getColumnName(i));
-  }
+  const std::vector<std::string> out_headers = sqlite::StatementColumnNames(query);
 
   if (format == "csv") {
-    auto writer = csv::make_csv_writer(output).set_auto_flush(false);
-    writer << out_headers;
-
-    while (query.executeStep()) {
-      std::vector<std::string> out_row;
-      out_row.reserve(static_cast<std::size_t>(col_count));
-      for (int i = 0; i < col_count; ++i) {
-        out_row.emplace_back(
-            query.getColumn(i).isNull() ? std::string{} : query.getColumn(i).getString());
-      }
-      writer << out_row;
-      stats.rows_processed++;
-    }
-
-    writer.flush();
+    stats.rows_processed += sqlite::WriteStatementRowsAsCsv(query, out_headers, output);
     return 0;
   }
 
   if (format == "markdown") {
     std::vector<std::vector<std::string>> out_rows;
     while (query.executeStep()) {
-      std::vector<std::string> out_row;
-      out_row.reserve(static_cast<std::size_t>(col_count));
-      for (int i = 0; i < col_count; ++i) {
-        out_row.emplace_back(
-            query.getColumn(i).isNull() ? std::string{} : query.getColumn(i).getString());
-      }
-      out_rows.push_back(std::move(out_row));
+      out_rows.push_back(sqlite::StatementRowValues(query));
       stats.rows_processed++;
     }
 
@@ -297,13 +272,11 @@ protected:
       return 1;
     }
 
-    sqlite::SqliteDb sdb = sqlite::OpenSqliteDb(options());
-    const auto column_affinities = sqlite::InferColumnAffinities(reader(), headers());
-    if (reset_reader() != 0) {
-      return 1;
-    }
-    if (!sqlite::LoadCsvIntoTable(
-            reader(), headers(), sdb.db(), table_name_text, column_affinities, options(), logger())) {
+    sqlite::SqliteDb sdb = sqlite::OpenSqliteDb(MakeSqliteDbOpenOptions(options()));
+    if (!sqlite::LoadCsvIntoTableWithInferredAffinities(
+            [this]() -> csv::CSVReader& { return reader(); }, headers(), sdb.db(), table_name_text,
+            [this]() { return reset_reader() == 0; },
+            MakeCsvLoadOptions(options()), MakeSqliteLogCallbacks(logger()))) {
       return 1;
     }
 

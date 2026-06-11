@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "../src/transform_pipeline.hpp"
+#include "../src/charts/csv_chart.hpp"
 #include "../src/pipeline/common/chart_spec.hpp"
 
 #include <chrono>
@@ -9,6 +10,8 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -47,6 +50,17 @@ struct CurrentPathGuard {
   ~CurrentPathGuard() {
     std::filesystem::current_path(previous);
   }
+};
+
+struct ChartReader {
+  std::istringstream input;
+  csv::CSVReader reader;
+  std::vector<std::string> headers;
+
+  explicit ChartReader(std::string text)
+      : input(std::move(text)),
+        reader(input, csv::CSVFormat().delimiter({',', '|', '\t', ';', '^'}).quote('"').header_row(0)),
+        headers(reader.get_col_names()) {}
 };
 
 }  // namespace
@@ -216,6 +230,18 @@ TEST_CASE("charts config accepts grouped bar presentation") {
   CHECK(config.charts.front().bar.presentation == "grouped");
 }
 
+TEST_CASE("charts config accepts multi-value color schemes") {
+  const auto root = TempDir("csvzall_chart_color_scheme_config");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"bar","type":"bar","input":"training.csv","output":"bar.svg","options":{"label":"date","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}],"colorScheme":"diverging"}},{"id":"line","type":"line","input":"training.csv","output":"line.svg","options":{"x":"day","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}],"colorScheme":"sequential"}}]})");
+
+  const auto config = csvzall::pipeline::common::LoadChartConfig(root / "config.json");
+
+  REQUIRE(config.charts.size() == 2);
+  CHECK(config.charts[0].bar.color_scheme == "diverging");
+  CHECK(config.charts[1].line.color_scheme == "sequential");
+}
+
 TEST_CASE("heatmap chart specs from direct args and JSON config match") {
   const auto root = TempDir("csvzall_chart_spec_match");
   WriteText(root / ".csvzall" / "charts.json",
@@ -379,6 +405,27 @@ TEST_CASE("charts run renders configured multi-value heatmap bar and line output
   CHECK(ReadText(root / "line.svg").find(">Bike</text>") != std::string::npos);
 }
 
+TEST_CASE("charts run applies generated color schemes and preserves explicit colors") {
+  const auto root = TempDir("csvzall_charts_color_scheme_render");
+  WriteText(root / "training.csv",
+            "date,day,gym,bike\n"
+            "2026-01-01,1,1,0\n"
+            "2026-01-02,2,0,1\n");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"heatmap","type":"heatmap","input":"training.csv","output":"heatmap.svg","options":{"date":"date","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}],"start":"2026-01-01","end":"2026-01-07"}},{"id":"bar","type":"bar","input":"training.csv","output":"bar.svg","options":{"label":"date","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike","color":"#123456"}],"colorScheme":"diverging"}},{"id":"line","type":"line","input":"training.csv","output":"line.svg","options":{"x":"day","values":[{"column":"gym","label":"Gym"},{"column":"bike","label":"Bike"}],"colorScheme":"sequential"}}]})");
+
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  const auto rc = csvzall::pipeline::RunCharts((root / "config.json").string(),
+                                               "", false, options, SilentLogger(), stats);
+
+  CHECK(rc == 0);
+  CHECK(ReadText(root / "heatmap.svg").find("#ea580c") != std::string::npos);
+  CHECK(ReadText(root / "bar.svg").find("#123456") != std::string::npos);
+  CHECK(ReadText(root / "bar.svg").find("#2563eb") != std::string::npos);
+  CHECK(ReadText(root / "line.svg").find("#1e40af") != std::string::npos);
+}
+
 TEST_CASE("charts run renders configured Markdown table output") {
   const auto root = TempDir("csvzall_charts_markdown_table");
   WriteText(root / "activity.csv",
@@ -526,4 +573,225 @@ TEST_CASE("charts config rejects unknown chart types and options") {
                     Catch::Matchers::ContainsSubstring("unknown chart type"));
   CHECK_THROWS_WITH(csvzall::pipeline::common::LoadChartConfig(root / "unknown-option.json"),
                     Catch::Matchers::ContainsSubstring("unknown key 'bogus'"));
+}
+
+TEST_CASE("CSV chart helpers reject invalid heatmap date range and orientation options") {
+  using namespace csvzall::charts;
+
+  HeatmapSpec spec;
+  CHECK_THROWS_WITH(ResolveHeatmapDateRange(spec),
+                    Catch::Matchers::ContainsSubstring("start and end dates are required"));
+
+  spec.lookback = "  \t ";
+  CHECK_THROWS_WITH(ResolveHeatmapDateRange(spec),
+                    Catch::Matchers::ContainsSubstring("lookback is empty"));
+
+  spec.lookback = "days";
+  CHECK_THROWS_WITH(ResolveHeatmapDateRange(spec),
+                    Catch::Matchers::ContainsSubstring("lookback must start"));
+
+  spec.lookback = "0d";
+  CHECK_THROWS_WITH(ResolveHeatmapDateRange(spec),
+                    Catch::Matchers::ContainsSubstring("lookback must be positive"));
+
+  spec.lookback = "1w";
+  CHECK_THROWS_WITH(ResolveHeatmapDateRange(spec),
+                    Catch::Matchers::ContainsSubstring("lookback unit"));
+
+  spec.lookback = "1y";
+  spec.end_date = "2026-02-30";
+  CHECK_THROWS_WITH(ResolveHeatmapDateRange(spec),
+                    Catch::Matchers::ContainsSubstring("invalid heatmap date"));
+
+  spec.end_date = "2026-01-01";
+  spec.start_date = "2025-01-01";
+  CHECK_THROWS_WITH(ResolveHeatmapDateRange(spec),
+                    Catch::Matchers::ContainsSubstring("lookback cannot be combined"));
+
+  CHECK_THROWS_WITH(ParseHeatmapOrientation("diagonal"),
+                    Catch::Matchers::ContainsSubstring("orientation must be"));
+}
+
+TEST_CASE("CSV heatmap helper reports all CSV conversion error paths") {
+  using namespace csvzall::charts;
+  CsvChartOptions options;
+
+  {
+    ChartReader data("date,count\n2026-01-01,1\n");
+    HeatmapSpec spec;
+    spec.date_column = "date";
+    spec.value_column = "missing";
+    spec.start_date = "2026-01-01";
+    spec.end_date = "2026-01-07";
+    CHECK_THROWS_WITH(RenderHeatmapCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("value column not found"));
+  }
+  {
+    ChartReader data("date,count\n2026-01-01,1\n");
+    HeatmapSpec spec;
+    spec.date_column = "date";
+    spec.label_column = "missing";
+    spec.start_date = "2026-01-01";
+    spec.end_date = "2026-01-07";
+    CHECK_THROWS_WITH(RenderHeatmapCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("label column not found"));
+  }
+  {
+    ChartReader data("date,count\n,1\n");
+    HeatmapSpec spec;
+    spec.date_column = "date";
+    spec.start_date = "2026-01-01";
+    spec.end_date = "2026-01-07";
+    CHECK_THROWS_WITH(RenderHeatmapCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("empty date value"));
+  }
+  {
+    ChartReader data("date,count\n2026-01-01,nope\n");
+    HeatmapSpec spec;
+    spec.date_column = "date";
+    spec.value_column = "count";
+    spec.start_date = "2026-01-01";
+    spec.end_date = "2026-01-07";
+    CHECK_THROWS_WITH(RenderHeatmapCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("non-numeric heatmap value"));
+  }
+  {
+    ChartReader data("date,gym\n2026-01-01,nope\n");
+    HeatmapSpec spec;
+    spec.date_column = "date";
+    spec.values = {{"gym", "Gym", ""}};
+    spec.start_date = "2026-01-01";
+    spec.end_date = "2026-01-07";
+    CHECK_THROWS_WITH(RenderHeatmapCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("non-numeric heatmap value"));
+  }
+}
+
+TEST_CASE("CSV bar and line helpers report all CSV conversion error paths") {
+  using namespace csvzall::charts;
+  CsvChartOptions options;
+
+  CHECK_THROWS_WITH(IsGroupedBarPresentation("sideways"),
+                    Catch::Matchers::ContainsSubstring("presentation must be"));
+
+  {
+    ChartReader data("label,value\nA,1\n");
+    BarSpec spec;
+    spec.label_column = "missing";
+    spec.value_column = "value";
+    CHECK_THROWS_WITH(RenderBarCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("label column not found"));
+  }
+  {
+    ChartReader data("label,value\nA,1\n");
+    BarSpec spec;
+    spec.label_column = "label";
+    CHECK_THROWS_WITH(RenderBarCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("value column is required"));
+  }
+  {
+    ChartReader data("label,value\nA,1\n");
+    BarSpec spec;
+    spec.label_column = "label";
+    spec.value_column = "missing";
+    CHECK_THROWS_WITH(RenderBarCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("value column not found"));
+  }
+  {
+    ChartReader data("label,a\nA,1\n");
+    BarSpec spec;
+    spec.label_column = "label";
+    spec.values = {{"a", "A", ""}, {"missing", "Missing", ""}};
+    CHECK_THROWS_WITH(RenderBarCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("value column not found"));
+  }
+  {
+    ChartReader data("label,value\nA,nope\n");
+    BarSpec spec;
+    spec.label_column = "label";
+    spec.value_column = "value";
+    CHECK_THROWS_WITH(RenderBarCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("non-numeric bar value"));
+  }
+  {
+    ChartReader data("x,y,series\n1,2,A\n");
+    LineSpec spec;
+    spec.x_column = "missing";
+    spec.y_column = "y";
+    CHECK_THROWS_WITH(RenderLineCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("x column not found"));
+  }
+  {
+    ChartReader data("x,y,series\n1,2,A\n");
+    LineSpec spec;
+    spec.x_column = "x";
+    CHECK_THROWS_WITH(RenderLineCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("y column is required"));
+  }
+  {
+    ChartReader data("x,y,series\n1,2,A\n");
+    LineSpec spec;
+    spec.x_column = "x";
+    spec.y_column = "missing";
+    CHECK_THROWS_WITH(RenderLineCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("y column not found"));
+  }
+  {
+    ChartReader data("x,y,series\n1,2,A\n");
+    LineSpec spec;
+    spec.x_column = "x";
+    spec.y_column = "y";
+    spec.series_column = "missing";
+    CHECK_THROWS_WITH(RenderLineCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("series column not found"));
+  }
+  {
+    ChartReader data("x,a\n1,2\n");
+    LineSpec spec;
+    spec.x_column = "x";
+    spec.values = {{"a", "A", ""}, {"missing", "Missing", ""}};
+    CHECK_THROWS_WITH(RenderLineCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("y column not found"));
+  }
+  {
+    ChartReader data("x,y\nnope,2\n");
+    LineSpec spec;
+    spec.x_column = "x";
+    spec.y_column = "y";
+    CHECK_THROWS_WITH(RenderLineCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("non-numeric line x value"));
+  }
+  {
+    ChartReader data("x,y\n1,nope\n");
+    LineSpec spec;
+    spec.x_column = "x";
+    spec.y_column = "y";
+    CHECK_THROWS_WITH(RenderLineCsv(data.reader, data.headers, spec, options),
+                      Catch::Matchers::ContainsSubstring("non-numeric line y value"));
+  }
+}
+
+TEST_CASE("charts config parser reports malformed config shapes") {
+  const auto root = TempDir("csvzall_chart_config_errors");
+  const std::vector<std::pair<std::string, std::string>> cases = {
+      {"top-level-unknown.json", R"({"charts":[],"extra":true})"},
+      {"missing-charts.json", R"({})"},
+      {"charts-not-array.json", R"({"charts":{}})"},
+      {"chart-not-object.json", R"({"charts":[1]})"},
+      {"missing-id.json", R"({"charts":[{"type":"heatmap","input":"data.csv","output":"x.svg","options":{"date":"date","start":"2026-01-01","end":"2026-01-07"}}]})"},
+      {"type-not-string.json", R"({"charts":[{"id":"x","type":1,"input":"data.csv","output":"x.svg","options":{}}]})"},
+      {"options-not-object.json", R"({"charts":[{"id":"x","type":"bar","input":"data.csv","output":"x.svg","options":1}]})"},
+      {"values-not-array.json", R"({"charts":[{"id":"x","type":"bar","input":"data.csv","output":"x.svg","options":{"label":"label","values":1}}]})"},
+      {"values-missing-column.json", R"({"charts":[{"id":"x","type":"bar","input":"data.csv","output":"x.svg","options":{"label":"label","values":[{"label":"A"}]}}]})"},
+      {"columns-not-array.json", R"({"charts":[{"id":"x","type":"markdown-table","input":"data.csv","output":"x.md","options":{"columns":1}}]})"},
+      {"columns-empty-value.json", R"({"charts":[{"id":"x","type":"markdown-table","input":"data.csv","output":"x.md","options":{"columns":[""]}}]})"},
+      {"run-on-save-not-bool.json", R"({"charts":[{"id":"x","type":"bar","input":"data.csv","output":"x.svg","runOnSave":"yes","options":{"label":"label","value":"value"}}]})"},
+      {"root-not-object.json", R"([])"},
+      {"invalid-json.json", R"({"charts":[)"},
+  };
+
+  for (const auto& [name, json] : cases) {
+    WriteText(root / name, json);
+    CHECK_THROWS(csvzall::pipeline::common::LoadChartConfig(root / name));
+  }
 }
