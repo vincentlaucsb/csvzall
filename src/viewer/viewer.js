@@ -304,15 +304,15 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const sqlTableName = schema.sqlTableName || VIEWER_SQL_TABLE_NAME;
     const sqlDefaultQuery = defaultSqlQuery(sqlTableName);
     chartMarkdownSql.placeholder = `SELECT * FROM ${sqlTableName}`;
-    const guessedDateColumn = guessColumn(schema.columns, ['date', 'day', 'attendance_date']);
-    const guessedValueColumn = guessColumn(schema.columns, ['count', 'value', 'total']);
-    const guessedLabelColumn = guessColumn(schema.columns, ['content', 'label', 'note', 'description']);
+    const guessedDateColumn = () => guessColumn(schema.columns, ['date', 'day', 'attendance_date']);
+    const guessedValueColumn = () => guessColumn(schema.columns, ['count', 'value', 'total']);
+    const guessedLabelColumn = () => guessColumn(schema.columns, ['content', 'label', 'note', 'description']);
     let currentCharts = [];
     let selectedChartId = '';
-    populateColumnSelect(chartDateColumn, schema.columns, { preferred: guessedDateColumn });
-    populateColumnSelect(chartValueColumn, schema.columns, { optional: true, preferred: guessedValueColumn });
+    populateColumnSelect(chartDateColumn, schema.columns, { preferred: guessedDateColumn() });
+    populateColumnSelect(chartValueColumn, schema.columns, { optional: true, preferred: guessedValueColumn() });
     populateColumnSelect(chartValueColumn2, schema.columns, { optional: true });
-    populateColumnSelect(chartLabelColumn, schema.columns, { optional: true, preferred: guessedLabelColumn });
+    populateColumnSelect(chartLabelColumn, schema.columns, { optional: true, preferred: guessedLabelColumn() });
     populateColumnChecklist(chartMarkdownColumns, schema.columns);
 
     const chartValidationFields = [
@@ -406,10 +406,10 @@ async function csvzallViewBootstrap(dependencies = {}) {
         type,
         id: `${baseSlug}-${type}`,
         title: markdown ? '' : baseName,
-        date: guessedDateColumn,
-        value: guessedValueColumn,
+        date: guessedDateColumn(),
+        value: guessedValueColumn(),
         value2: '',
-        label: guessedLabelColumn,
+        label: guessedLabelColumn(),
         orientation: 'months-horizontal',
         presentation: 'stacked',
         colorScheme: 'sequential',
@@ -466,11 +466,11 @@ async function csvzallViewBootstrap(dependencies = {}) {
       } else if (type === 'bar') {
         chartPrimaryColumnLabel.textContent = 'Label column';
         chartLabelColumnLabel.textContent = 'Unused';
-        if (!chartValueColumn.value) chartValueColumn.value = guessedValueColumn || schema.columns[0] || '';
+        if (!chartValueColumn.value) chartValueColumn.value = guessedValueColumn() || schema.columns[0] || '';
       } else {
         chartPrimaryColumnLabel.textContent = 'X column';
         chartLabelColumnLabel.textContent = 'Series column';
-        if (!chartValueColumn.value) chartValueColumn.value = guessedValueColumn || schema.columns[0] || '';
+        if (!chartValueColumn.value) chartValueColumn.value = guessedValueColumn() || schema.columns[0] || '';
       }
     };
 
@@ -505,7 +505,16 @@ async function csvzallViewBootstrap(dependencies = {}) {
       });
     };
 
+    const refreshChartColumnOptions = (values = {}) => {
+      populateColumnSelect(chartDateColumn, schema.columns, { preferred: values.date ?? guessedDateColumn() });
+      populateColumnSelect(chartValueColumn, schema.columns, { optional: true, preferred: values.value ?? guessedValueColumn() });
+      populateColumnSelect(chartValueColumn2, schema.columns, { optional: true, preferred: values.value2 ?? '' });
+      populateColumnSelect(chartLabelColumn, schema.columns, { optional: true, preferred: values.label ?? guessedLabelColumn() });
+      populateColumnChecklist(chartMarkdownColumns, schema.columns, values.columns ?? []);
+    };
+
     const applyChartValues = (values) => {
+      refreshChartColumnOptions(values);
       setChartType(values.type ?? 'heatmap');
       chartId.value = values.id ?? '';
       chartTitle.value = values.title ?? '';
@@ -517,7 +526,6 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartOrientation.value = values.orientation ?? 'months-horizontal';
       chartPresentation.value = values.presentation ?? 'stacked';
       chartColorScheme.value = values.colorScheme ?? 'sequential';
-      populateColumnChecklist(chartMarkdownColumns, schema.columns, values.columns ?? []);
       chartMarkdownSql.value = values.sql ?? '';
       updateMarkdownColumnsAvailability();
       chartStart.value = values.start ?? '';
