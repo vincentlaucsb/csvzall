@@ -404,7 +404,7 @@ ThroughputStats FinishStats(const csvzall::pipeline::RunStats& ps,
 }  // namespace
 
 int main(int argc, char** argv) {
-  argparse::ArgumentParser program("csvzall", "0.1.0");
+  argparse::ArgumentParser program("csvzall", "0.2.1");
   program.add_description("csvzall: high-performance CSV ETL and reporting CLI");
   program.add_epilog(R"(Intent groups:
   ETL/data: head, filter, derive, summarize, timeseries, sql, json, append, merge

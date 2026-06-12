@@ -60,6 +60,16 @@ This file mirrors [AGENTS.md](AGENTS.md).
 - When adding, removing, or materially changing a third-party dependency, update the README dependency table in the same change.
 - Include the dependency name, author or maintainer with a link, role in csvzall, and how it is sourced (local checkout, FetchContent, system package, test-only, optional, etc.).
 
+## Release versioning
+
+- Git tags are the canonical release markers.
+- Keep source version markers in sync with the intended release tag:
+  - `CMakeLists.txt`: `project(csvzall VERSION ...)`
+  - `Doxyfile`: `PROJECT_NUMBER`
+  - `src/main.cpp`: `argparse::ArgumentParser program("csvzall", "...")`
+- When preparing a release bump, update all three source markers in the same commit, then create the matching Git tag after that commit.
+- Do not update unrelated dependency version references, such as the README dependency table, when bumping csvzall itself.
+
 ## Local CMake workflow
 
 - Prefer the local, ignored `CMakeUserPresets.json` when it exists; it is the workspace-specific record of the preferred generator and build directory.
