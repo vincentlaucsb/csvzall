@@ -20,14 +20,46 @@ jobs:
       - name: Install coverage tools
         run: python3 -m pip install --user gcovr
 
+      - name: Detect CMake toolchain cache key
+        id: cmake-cache-key
+        shell: pwsh
+        run: |
+          function Convert-CachePart($value) {
+            $part = [string]$value
+            if ([string]::IsNullOrWhiteSpace($part)) {
+              return "unknown"
+            }
+            return ($part -replace '[^A-Za-z0-9_.-]+', '-').Trim('-')
+          }
+
+          $cmakeVersion = (cmake --version | Select-Object -First 1)
+          $defaultGenerator = (cmake --help | Where-Object { $_ -match '^\* ' } | Select-Object -First 1)
+          $defaultGenerator = $defaultGenerator -replace '^\*\s*', ''
+          $defaultGenerator = ($defaultGenerator -split '\s+=\s+', 2)[0].Trim()
+
+          if ($env:RUNNER_OS -eq 'Windows') {
+            $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+            $toolchain = if (Test-Path $vswhere) { & $vswhere -latest -property installationVersion } else { $env:VisualStudioVersion }
+            $toolchain = "vs-$toolchain"
+          } else {
+            $compiler = if ($env:CXX) { $env:CXX } else { "c++" }
+            $toolchain = (& $compiler --version | Select-Object -First 1)
+          }
+
+          $id = @(
+            Convert-CachePart $cmakeVersion
+            Convert-CachePart $defaultGenerator
+            Convert-CachePart $toolchain
+          ) -join '-'
+          "id=$id" >> $env:GITHUB_OUTPUT
+
       - name: Cache CMake dependencies
         uses: actions/cache@v5.0.5
         with:
           path: out/fetchcontent
-          key: ${{ runner.os }}-${{ runner.arch }}-cmake-fetchcontent-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cmake-fetchcontent-${{ steps.cmake-cache-key.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cmake-fetchcontent-
-            ${{ runner.os }}-cmake-fetchcontent-
+            ${{ runner.os }}-${{ runner.arch }}-cmake-fetchcontent-${{ steps.cmake-cache-key.outputs.id }}-
 
       - name: Configure CMake
         run: >
