@@ -1,7 +1,7 @@
 # Doxygen configuration for csvzall API documentation.
 
 PROJECT_NAME           = "csvzall"
-PROJECT_NUMBER         = 0.2.1
+PROJECT_NUMBER         = 0.2.2
 PROJECT_BRIEF          = "CSV command-line tool and emerging C++ library"
 
 OUTPUT_DIRECTORY       = docs/doxygen

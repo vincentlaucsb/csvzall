@@ -236,6 +236,10 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const renameColumnName = document.getElementById('rename-column-name');
     const renameColumnError = document.getElementById('rename-column-error');
     const cancelRenameColumn = document.getElementById('cancel-rename-column');
+    const chartDirtyDialog = document.getElementById('chart-dirty-dialog');
+    const chartDirtyForm = document.getElementById('chart-dirty-form');
+    const cancelChartDirty = document.getElementById('cancel-chart-dirty');
+    const discardChartDirty = document.getElementById('discard-chart-dirty');
     const chartDialog = document.getElementById('heatmap-chart-dialog');
     const chartForm = document.getElementById('heatmap-chart-form');
     const chartList = document.getElementById('chart-list');
@@ -290,6 +294,9 @@ async function csvzallViewBootstrap(dependencies = {}) {
     decorateButton(insertColumnForm.querySelector('button[type="submit"]'), 'plus', 'Insert');
     decorateButton(cancelRenameColumn, 'x', 'Cancel');
     decorateButton(renameColumnForm.querySelector('button[type="submit"]'), 'pencil', 'Rename');
+    decorateButton(cancelChartDirty, 'x', 'Cancel');
+    decorateButton(discardChartDirty, 'restore', 'Discard changes');
+    decorateButton(chartDirtyForm.querySelector('button[type="submit"]'), 'device-floppy', 'Save changes');
     decorateButton(newChartButton, 'plus', 'New');
     decorateButton(cancelChart, 'x', 'Cancel');
     decorateButton(generateChartButton, 'chart-bar', 'Create chart');
@@ -620,7 +627,12 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartId.focus();
     };
 
-    addChartButton.addEventListener('click', async () => {
+    const reopenChartsAfterReloadKey = 'csvzall:reopen-charts-after-reload';
+    let prepareForCharts = async () => true;
+    const openChartDialog = async () => {
+      if (!(await prepareForCharts())) {
+        return;
+      }
       clearChartError();
       try {
         await loadChartList();
@@ -632,6 +644,10 @@ async function csvzallViewBootstrap(dependencies = {}) {
       }
       chartDialog.showModal();
       chartDateColumn.focus();
+    };
+
+    addChartButton.addEventListener('click', () => {
+      void openChartDialog();
     });
     newChartButton.addEventListener('click', useNewChartDefaults);
     chartType.addEventListener('change', () => {
@@ -842,6 +858,94 @@ async function csvzallViewBootstrap(dependencies = {}) {
       const markDataDirty = () => {
         viewState.markDataDirty();
         refreshDirtyUi();
+      };
+      const saveCurrentChanges = async ({ reopenChartsAfterReload = false } = {}) => {
+        try {
+          saveButton.disabled = true;
+          statusNode.textContent = 'Saving…';
+          const { result, reloadAfterSave } = await saveViewerState({
+            viewState,
+            postJson,
+            getColumns: () => currentGridColumns(api, schema.columns),
+          });
+          refreshDirtyUi();
+          if (reloadAfterSave) {
+            if (reopenChartsAfterReload) {
+              sessionStorage.setItem(reopenChartsAfterReloadKey, '1');
+            }
+            statusNode.textContent = 'Saved. Reloading…';
+            window.location.reload();
+            return false;
+          }
+          if (result.chartError) {
+            statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows. Chart generation failed: ${result.chartError}`;
+          } else if (result.chartsGenerated > 0) {
+            statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows. Regenerated ${result.chartsGenerated} chart${result.chartsGenerated === 1 ? '' : 's'}.`;
+          } else {
+            statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows.`;
+          }
+          return true;
+        } catch (error) {
+          saveButton.disabled = !viewState.dirty;
+          statusNode.textContent = error instanceof Error ? error.message : 'Save failed';
+          return false;
+        }
+      };
+      const discardCurrentChangesForCharts = async () => {
+        try {
+          resetButton.disabled = true;
+          saveButton.disabled = true;
+          statusNode.textContent = 'Discarding changes…';
+          sessionStorage.setItem(reopenChartsAfterReloadKey, '1');
+          await postJson('/api/reset');
+          viewState.markClean();
+          emitDirtyState();
+          window.location.reload();
+        } catch (error) {
+          sessionStorage.removeItem(reopenChartsAfterReloadKey);
+          resetButton.disabled = !viewState.dirty;
+          saveButton.disabled = !viewState.dirty;
+          statusNode.textContent = error instanceof Error ? error.message : 'Reset failed';
+        }
+        return false;
+      };
+      const promptChartDirtyAction = () => new Promise((resolve) => {
+        const cleanup = () => {
+          chartDirtyForm.removeEventListener('submit', onSubmit);
+          cancelChartDirty.removeEventListener('click', onCancel);
+          discardChartDirty.removeEventListener('click', onDiscard);
+          chartDirtyDialog.removeEventListener('close', onClose);
+        };
+        const onClose = () => {
+          cleanup();
+          resolve(chartDirtyDialog.returnValue || 'cancel');
+        };
+        const onSubmit = (event) => {
+          event.preventDefault();
+          chartDirtyDialog.close('save');
+        };
+        const onCancel = () => chartDirtyDialog.close('cancel');
+        const onDiscard = () => chartDirtyDialog.close('discard');
+
+        chartDirtyForm.addEventListener('submit', onSubmit);
+        cancelChartDirty.addEventListener('click', onCancel);
+        discardChartDirty.addEventListener('click', onDiscard);
+        chartDirtyDialog.addEventListener('close', onClose);
+        chartDirtyDialog.showModal();
+        chartDirtyForm.querySelector('button[type="submit"]')?.focus();
+      });
+      prepareForCharts = async () => {
+        if (!viewState.dirty) {
+          return true;
+        }
+        const action = await promptChartDirtyAction();
+        if (action === 'save') {
+          return saveCurrentChanges({ reopenChartsAfterReload: true });
+        }
+        if (action === 'discard') {
+          return discardCurrentChangesForCharts();
+        }
+        return false;
       };
       setGridRowData(api, allRows);
       quickFilterNode.addEventListener('input', () => {
@@ -1320,35 +1424,15 @@ async function csvzallViewBootstrap(dependencies = {}) {
             statusNode.textContent = error instanceof Error ? error.message : 'Reset failed';
           }
         });
-        saveButton.addEventListener('click', async () => {
-          try {
-            saveButton.disabled = true;
-            statusNode.textContent = 'Saving…';
-            const { result, reloadAfterSave } = await saveViewerState({
-              viewState,
-              postJson,
-              getColumns: () => currentGridColumns(api, schema.columns),
-            });
-            refreshDirtyUi();
-            if (reloadAfterSave) {
-              statusNode.textContent = 'Saved. Reloading…';
-              window.location.reload();
-              return;
-            }
-            if (result.chartError) {
-              statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows. Chart generation failed: ${result.chartError}`;
-            } else if (result.chartsGenerated > 0) {
-              statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows. Regenerated ${result.chartsGenerated} chart${result.chartsGenerated === 1 ? '' : 's'}.`;
-            } else {
-              statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows.`;
-            }
-          } catch (error) {
-            saveButton.disabled = !viewState.dirty;
-            statusNode.textContent = error instanceof Error ? error.message : 'Save failed';
-          }
+        saveButton.addEventListener('click', () => {
+          void saveCurrentChanges();
         });
       }
       refreshDirtyUi();
+      if (sessionStorage.getItem(reopenChartsAfterReloadKey) === '1') {
+        sessionStorage.removeItem(reopenChartsAfterReloadKey);
+        void openChartDialog();
+      }
     } else {
       setDatasource(api, {
         async getRows(params) {

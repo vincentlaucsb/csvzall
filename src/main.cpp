@@ -404,7 +404,7 @@ ThroughputStats FinishStats(const csvzall::pipeline::RunStats& ps,
 }  // namespace
 
 int main(int argc, char** argv) {
-  argparse::ArgumentParser program("csvzall", "0.2.1");
+  argparse::ArgumentParser program("csvzall", "0.2.2");
   program.add_description("csvzall: high-performance CSV ETL and reporting CLI");
   program.add_epilog(R"(Intent groups:
   ETL/data: head, filter, derive, summarize, timeseries, sql, json, append, merge
@@ -703,7 +703,9 @@ Examples:
       "Render date/value CSV as a self-contained SVG calendar heatmap. "
       "Output is SVG to stdout.");
   heatmap_cmd.add_epilog(R"(Input CSV shape:
-  A date column is required. It must contain ISO YYYY-MM-DD dates.
+  A date column is required. Dates may be YYYY-MM-DD, American M/D/YYYY or
+  M-D-YYYY, or European D/M/YYYY or D-M-YYYY. Ambiguous numeric dates use a
+  column-wide inference when an unambiguous clue exists, otherwise month-first.
   A numeric value column is optional. If omitted, each row contributes 1.
   Repeat --value to render a multi-value categorical heatmap.
   Multi-value labels can be written as --value column=Label.
@@ -725,10 +727,10 @@ Examples:
   AddCsvInputArguments(heatmap_cmd);
   AddExactArgument(heatmap_cmd);
   heatmap_cmd.add_argument("--start")
-      .help("Inclusive start date, YYYY-MM-DD. Use with --end, or omit when using --lookback.")
+      .help("Inclusive start date. Accepts YYYY-MM-DD, M/D/YYYY, M-D-YYYY, D/M/YYYY, or D-M-YYYY. Use with --end, or omit when using --lookback.")
       .default_value(std::string{});
   heatmap_cmd.add_argument("--end")
-      .help("Inclusive end date, YYYY-MM-DD. With --lookback, defaults to today's local date.")
+      .help("Inclusive end date. Accepts YYYY-MM-DD, M/D/YYYY, M-D-YYYY, D/M/YYYY, or D-M-YYYY. With --lookback, defaults to today's local date.")
       .default_value(std::string{});
   heatmap_cmd.add_argument("--lookback")
       .help("Rolling range ending at --end or today, such as 365d or 1y. Cannot be combined with --start.")

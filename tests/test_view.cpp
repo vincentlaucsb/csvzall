@@ -316,6 +316,9 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer->body.find("aria-disabled=\"true\"") == std::string::npos);
   REQUIRE(viewer->body.find("Weight column") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"rename-column-dialog\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"chart-dirty-dialog\"") != std::string::npos);
+  REQUIRE(viewer->body.find("Save or discard current changes before opening Charts.") !=
+          std::string::npos);
   REQUIRE(viewer->body.find(">Bar</option>") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"chart-id\" type=\"text\" autocomplete=\"off\" required") ==
           std::string::npos);
@@ -348,6 +351,9 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer_js->body.find("Column After") != std::string::npos);
   REQUIRE(viewer_js->body.find("Rename Column") != std::string::npos);
   REQUIRE(viewer_js->body.find("dirty-state") != std::string::npos);
+  REQUIRE(viewer_js->body.find("prepareForCharts") != std::string::npos);
+  REQUIRE(viewer_js->body.find("csvzall:reopen-charts-after-reload") != std::string::npos);
+  REQUIRE(viewer_js->body.find("discardCurrentChangesForCharts") != std::string::npos);
   REQUIRE(viewer_js->body.find("await loadChartList();\n        clearChartError();") !=
           std::string::npos);
 

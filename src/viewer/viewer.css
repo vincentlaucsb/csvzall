@@ -582,6 +582,25 @@ button:disabled {
   background: var(--csvzall-background-secondary);
   color: var(--csvzall-text-normal);
   font: inherit;
+  white-space: nowrap;
+}
+
+.dialog-actions button .action-content {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+#chart-dirty-dialog {
+  width: min(30rem, calc(100vw - 2rem));
+}
+
+#chart-dirty-dialog .dialog-form p {
+  margin: 0;
+  white-space: nowrap;
+}
+
+#chart-dirty-dialog .dialog-actions {
+  flex-wrap: nowrap;
 }
 
 [data-popright-menu] {

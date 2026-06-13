@@ -91,6 +91,71 @@ TEST_CASE("heatmap renders CSV date rows as an SVG calendar heatmap") {
   CHECK(svg.find("<title>2026-01-01: 3 - Gym; Lift</title>") != std::string::npos);
 }
 
+TEST_CASE("heatmap accepts ISO date format") {
+  std::istringstream input(
+      "date,count,content\n"
+      "2026-06-01,1,ISO\n"
+      "2026-06-02,1,ISO next\n");
+  std::ostringstream output;
+
+  csvzall::pipeline::RunOptions options;
+  options.input_is_stdin = true;
+  csvzall::pipeline::RunStats stats;
+
+  const auto rc = csvzall::pipeline::RunHeatmap(
+      "date", "count", "content", "2026-06-01", "2026-06-02", "Savings",
+      input, output, options, SilentLogger(), stats);
+
+  CHECK(rc == 0);
+  const auto svg = output.str();
+  CHECK(svg.find("<title>2026-06-01: 1 - ISO</title>") != std::string::npos);
+  CHECK(svg.find("<title>2026-06-02: 1 - ISO next</title>") != std::string::npos);
+}
+
+TEST_CASE("heatmap accepts American month-day-year date format") {
+  std::istringstream input(
+      "date,count,content\n"
+      "6-1-2026,1,US dash\n"
+      "06/02/2026,1,US slash\n"
+      "6/13/2026,1,US unambiguous\n");
+  std::ostringstream output;
+
+  csvzall::pipeline::RunOptions options;
+  options.input_is_stdin = true;
+  csvzall::pipeline::RunStats stats;
+
+  const auto rc = csvzall::pipeline::RunHeatmap(
+      "date", "count", "content", "6/1/2026", "6/13/2026", "Savings",
+      input, output, options, SilentLogger(), stats);
+
+  CHECK(rc == 0);
+  const auto svg = output.str();
+  CHECK(svg.find("<title>2026-06-01: 1 - US dash</title>") != std::string::npos);
+  CHECK(svg.find("<title>2026-06-02: 1 - US slash</title>") != std::string::npos);
+  CHECK(svg.find("<title>2026-06-13: 1 - US unambiguous</title>") != std::string::npos);
+}
+
+TEST_CASE("heatmap accepts European day-month-year date format") {
+  std::istringstream input(
+      "date,count,content\n"
+      "01/06/2026,1,European slash\n"
+      "14-06-2026,1,European dash\n");
+  std::ostringstream output;
+
+  csvzall::pipeline::RunOptions options;
+  options.input_is_stdin = true;
+  csvzall::pipeline::RunStats stats;
+
+  const auto rc = csvzall::pipeline::RunHeatmap(
+      "date", "count", "content", "01/06/2026", "14/06/2026", "Savings",
+      input, output, options, SilentLogger(), stats);
+
+  CHECK(rc == 0);
+  const auto svg = output.str();
+  CHECK(svg.find("<title>2026-06-01: 1 - European slash</title>") != std::string::npos);
+  CHECK(svg.find("<title>2026-06-14: 1 - European dash</title>") != std::string::npos);
+}
+
 TEST_CASE("heatmap counts rows when no value column is provided") {
   std::istringstream input(
       "date,content\n"

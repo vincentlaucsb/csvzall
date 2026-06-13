@@ -11,29 +11,135 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace csvzall::charts {
 namespace {
 
 using Day = std::chrono::sys_days;
 
-Day ParseIsoDate(std::string_view text) {
-  int year = 0;
-  unsigned month = 0;
-  unsigned day = 0;
-  char dash1 = '\0';
-  char dash2 = '\0';
-  std::istringstream input{std::string(text)};
-  input >> year >> dash1 >> month >> dash2 >> day;
-  if (!input || dash1 != '-' || dash2 != '-') {
+enum class DateOrder {
+  MonthDay,
+  DayMonth,
+};
+
+struct DateParts {
+  std::string raw;
+  std::string first;
+  std::string second;
+  std::string third;
+  unsigned a = 0;
+  unsigned b = 0;
+  unsigned c = 0;
+};
+
+std::optional<unsigned> ParseDatePart(std::string_view text) {
+  if (text.empty()) {
+    return std::nullopt;
+  }
+  unsigned value = 0;
+  for (const unsigned char ch : text) {
+    if (std::isdigit(ch) == 0) {
+      return std::nullopt;
+    }
+    value = value * 10 + static_cast<unsigned>(ch - '0');
+  }
+  return value;
+}
+
+DateParts SplitDateParts(std::string_view text) {
+  DateParts parts;
+  parts.raw = Trim(text);
+  const auto first_sep = parts.raw.find_first_of("-/");
+  if (first_sep == std::string::npos) {
     throw std::runtime_error("invalid heatmap date: " + std::string(text));
   }
+  const auto second_sep = parts.raw.find_first_of("-/", first_sep + 1);
+  if (second_sep == std::string::npos ||
+      parts.raw.find_first_of("-/", second_sep + 1) != std::string::npos) {
+    throw std::runtime_error("invalid heatmap date: " + std::string(text));
+  }
+
+  parts.first = parts.raw.substr(0, first_sep);
+  parts.second = parts.raw.substr(first_sep + 1, second_sep - first_sep - 1);
+  parts.third = parts.raw.substr(second_sep + 1);
+  const auto a = ParseDatePart(parts.first);
+  const auto b = ParseDatePart(parts.second);
+  const auto c = ParseDatePart(parts.third);
+  if (!a || !b || !c) {
+    throw std::runtime_error("invalid heatmap date: " + std::string(text));
+  }
+  parts.a = *a;
+  parts.b = *b;
+  parts.c = *c;
+  return parts;
+}
+
+Day MakeDate(int year, unsigned month, unsigned day, std::string_view raw) {
   const std::chrono::year_month_day ymd{
       std::chrono::year{year}, std::chrono::month{month}, std::chrono::day{day}};
   if (!ymd.ok()) {
-    throw std::runtime_error("invalid heatmap date: " + std::string(text));
+    throw std::runtime_error("invalid heatmap date: " + std::string(raw));
   }
   return Day{ymd};
+}
+
+std::optional<DateOrder> DateOrderClue(std::string_view text) {
+  const auto parts = SplitDateParts(text);
+  if (parts.first.size() == 4) {
+    return std::nullopt;
+  }
+  if (parts.third.size() != 4) {
+    throw std::runtime_error("invalid heatmap date: " + std::string(text));
+  }
+  if (parts.a > 12 && parts.b <= 12) {
+    return DateOrder::DayMonth;
+  }
+  if (parts.b > 12 && parts.a <= 12) {
+    return DateOrder::MonthDay;
+  }
+  return std::nullopt;
+}
+
+DateOrder InferDateOrder(const std::vector<std::string>& values) {
+  std::optional<DateOrder> inferred;
+  for (const auto& value : values) {
+    if (value.empty()) {
+      continue;
+    }
+    const auto clue = DateOrderClue(value);
+    if (!clue) {
+      continue;
+    }
+    if (inferred && *inferred != *clue) {
+      throw std::runtime_error("conflicting heatmap date formats near: " + value);
+    }
+    inferred = clue;
+  }
+  return inferred.value_or(DateOrder::MonthDay);
+}
+
+Day ParseFlexibleDate(std::string_view text, DateOrder order = DateOrder::MonthDay) {
+  const auto parts = SplitDateParts(text);
+  if (parts.first.size() == 4) {
+    return MakeDate(static_cast<int>(parts.a), parts.b, parts.c, text);
+  }
+  if (parts.third.size() == 4) {
+    if (parts.a > 12 && parts.b <= 12) {
+      return MakeDate(static_cast<int>(parts.c), parts.b, parts.a, text);
+    }
+    if (parts.b > 12 && parts.a <= 12) {
+      return MakeDate(static_cast<int>(parts.c), parts.a, parts.b, text);
+    }
+    if (order == DateOrder::DayMonth) {
+      return MakeDate(static_cast<int>(parts.c), parts.b, parts.a, text);
+    }
+    return MakeDate(static_cast<int>(parts.c), parts.a, parts.b, text);
+  }
+
+  throw std::runtime_error("invalid heatmap date: " + std::string(text));
 }
 
 std::string FormatIsoDate(Day day) {
@@ -118,21 +224,36 @@ std::string NormalizedOrientation(std::string_view raw) {
   return value;
 }
 
-}  // namespace
-
-std::pair<std::string, std::string> ResolveHeatmapDateRange(const HeatmapSpec& spec) {
+std::pair<std::string, std::string> ResolveHeatmapDateRange(const HeatmapSpec& spec,
+                                                            DateOrder order) {
   if (spec.lookback.empty()) {
     if (spec.start_date.empty() || spec.end_date.empty()) {
       throw std::runtime_error("start and end dates are required unless lookback is set");
     }
-    return {spec.start_date, spec.end_date};
+    return {FormatIsoDate(ParseFlexibleDate(spec.start_date, order)),
+            FormatIsoDate(ParseFlexibleDate(spec.end_date, order))};
   }
   if (!spec.start_date.empty()) {
     throw std::runtime_error("lookback cannot be combined with start");
   }
-  const auto end = spec.end_date.empty() ? TodayLocalDate() : ParseIsoDate(spec.end_date);
+  const auto end =
+      spec.end_date.empty() ? TodayLocalDate() : ParseFlexibleDate(spec.end_date, order);
   const auto start = StartForLookback(end, spec.lookback);
   return {FormatIsoDate(start), FormatIsoDate(end)};
+}
+
+}  // namespace
+
+std::pair<std::string, std::string> ResolveHeatmapDateRange(const HeatmapSpec& spec) {
+  std::vector<std::string> values;
+  values.reserve(2);
+  if (!spec.start_date.empty()) {
+    values.push_back(spec.start_date);
+  }
+  if (!spec.end_date.empty()) {
+    values.push_back(spec.end_date);
+  }
+  return ResolveHeatmapDateRange(spec, InferDateOrder(values));
 }
 
 svgplot::CalendarHeatmapOrientation ParseHeatmapOrientation(std::string_view raw) {
@@ -188,7 +309,22 @@ CsvChartResult RenderHeatmapCsv(csv::CSVReader& reader,
     }
   }
 
+  struct PendingHeatmapCell {
+    std::string date;
+    double value = 0.0;
+    std::string label;
+    std::vector<std::string> classes;
+  };
+
   CsvChartResult result;
+  std::vector<std::string> dates_for_inference;
+  if (!spec.start_date.empty()) {
+    dates_for_inference.push_back(spec.start_date);
+  }
+  if (!spec.end_date.empty()) {
+    dates_for_inference.push_back(spec.end_date);
+  }
+  std::vector<PendingHeatmapCell> pending_cells;
   std::vector<svgplot::HeatmapCell> cells;
   for (auto& row : reader) {
     const auto date_text = row[*date_index].get<std::string>();
@@ -218,8 +354,9 @@ CsvChartResult RenderHeatmapCsv(csv::CSVReader& reader,
       label = row[*label_index].get<std::string>();
     }
 
+    dates_for_inference.push_back(date_text);
     if (value_specs.empty()) {
-      cells.push_back({svgplot::parse_date(date_text), value, std::move(label)});
+      pending_cells.push_back({date_text, value, std::move(label), {}});
     } else {
       bool label_used = false;
       for (std::size_t i = 0; i < value_specs.size(); ++i) {
@@ -228,8 +365,8 @@ CsvChartResult RenderHeatmapCsv(csv::CSVReader& reader,
         if (parsed <= 0.0) {
           continue;
         }
-        cells.push_back({
-            svgplot::parse_date(date_text),
+        pending_cells.push_back({
+            date_text,
             parsed,
             label_used ? std::string{} : label,
             {value_specs[i].column}});
@@ -240,8 +377,19 @@ CsvChartResult RenderHeatmapCsv(csv::CSVReader& reader,
     AccumulateRowBytes(row, result);
   }
 
+  const auto date_order = InferDateOrder(dates_for_inference);
+  cells.reserve(pending_cells.size());
+  for (auto& pending : pending_cells) {
+    const auto iso_date = FormatIsoDate(ParseFlexibleDate(pending.date, date_order));
+    cells.push_back({
+        svgplot::parse_date(iso_date),
+        pending.value,
+        std::move(pending.label),
+        std::move(pending.classes)});
+  }
+
   svgplot::HeatmapOptions chart_options;
-  const auto [start_date, end_date] = ResolveHeatmapDateRange(spec);
+  const auto [start_date, end_date] = ResolveHeatmapDateRange(spec, date_order);
   chart_options.title = spec.title;
   chart_options.start_date = svgplot::parse_date(start_date);
   chart_options.end_date = svgplot::parse_date(end_date);

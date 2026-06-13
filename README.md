@@ -253,12 +253,15 @@ Additional columns are ignored. Cells outside the requested range or outside the
 current month are left empty, and the `content` value is used as the date cell
 body.
 
-### `heatmap [input] --start <YYYY-MM-DD> --end <YYYY-MM-DD>`
+### `heatmap [input] --start <date> --end <date>`
 
 Render dated CSV rows as a self-contained SVG calendar heatmap. The input must
-contain an ISO `YYYY-MM-DD` date column. If `--value` is omitted, each row
-contributes `1`; otherwise the named numeric column is summed per date. Use
-`--label` to include cell tooltip text.
+contain a date column. Dates may be `YYYY-MM-DD`, American `M/D/YYYY` or
+`M-D-YYYY`, or European `D/M/YYYY` or `D-M-YYYY`. Ambiguous numeric dates use a
+column-wide inference when an unambiguous clue exists; otherwise they are read
+month-first. If `--value` is omitted, each row contributes `1`; otherwise the
+named numeric column is summed per date. Use `--label` to include cell tooltip
+text.
 
 ```sh
 csvzall heatmap gym-attendance.csv --start 2025-05-15 --end 2026-05-15 \

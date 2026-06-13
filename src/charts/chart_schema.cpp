@@ -9,8 +9,12 @@ namespace {
 
 constexpr std::array<ChartOptionDoc, 9> kHeatmapOptions{{
     {"date", "Date column. Defaults to \"date\"."},
-    {"start", "ISO start date, YYYY-MM-DD. Required with end unless lookback is set."},
-    {"end", "ISO end date, YYYY-MM-DD. Optional with lookback; defaults to today."},
+    {"start",
+     "Start date. Accepts YYYY-MM-DD, M/D/YYYY, M-D-YYYY, D/M/YYYY, or D-M-YYYY.\n"
+     "                 Required with end unless lookback is set."},
+    {"end",
+     "End date. Accepts YYYY-MM-DD, M/D/YYYY, M-D-YYYY, D/M/YYYY, or D-M-YYYY.\n"
+     "                 Optional with lookback; defaults to today."},
     {"lookback",
      "Positive number plus days or years: 30d, 90 days, 1y, 2 years.\n"
      "                 Cannot be combined with start; end is optional and defaults to today."},
