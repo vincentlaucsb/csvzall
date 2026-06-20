@@ -158,3 +158,64 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$RELEASE_TAG" "$ASSET_PATH" --clobber
+
+  wasm-viewer:
+    runs-on: ubuntu-latest
+    env:
+      EMSDK_VERSION: 6.0.0
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          submodules: recursive
+
+      - name: Install Emscripten SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
+
+      - name: Build WASM target
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          emcmake cmake -S . -B out/build/wasm -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build out/build/wasm --target csvzall_viewer_wasm --parallel
+
+      - name: Build web app
+        working-directory: src/viewer_wasm/web
+        run: |
+          npm install
+          npm run build
+
+      - name: Package WASM viewer release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_tag="${RELEASE_TAG//\//-}"
+          package_dir="dist/csvzall-wasm-viewer-${safe_tag}"
+          asset_path="dist/csvzall-wasm-viewer-${safe_tag}.zip"
+          source_commit="$(git rev-list -n 1 "$RELEASE_TAG")"
+
+          node scripts/package_wasm_viewer.mjs \
+            --version "$RELEASE_TAG" \
+            --source-ref "$RELEASE_TAG" \
+            --source-commit "$source_commit" \
+            --out-dir "$package_dir"
+
+          (cd "$package_dir" && zip -r "../csvzall-wasm-viewer-${safe_tag}.zip" .)
+          sha256sum "$asset_path" > "${asset_path}.sha256"
+
+          echo "WASM_VIEWER_ASSET_PATH=$asset_path" >> "$GITHUB_ENV"
+          echo "WASM_VIEWER_CHECKSUM_PATH=${asset_path}.sha256" >> "$GITHUB_ENV"
+
+      - name: Attach WASM viewer to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" "$WASM_VIEWER_ASSET_PATH" "$WASM_VIEWER_CHECKSUM_PATH" --clobber

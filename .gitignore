@@ -2,6 +2,7 @@
 build/
 build_*/
 out/
+dist/
 docs/doxygen/
 Debug/
 Release/

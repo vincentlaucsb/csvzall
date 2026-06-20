@@ -494,6 +494,7 @@ For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 | [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite | FetchContent, with a local CMake patch |
 | [libpqxx](https://github.com/jtv/libpqxx) v7.10.1 | [Jeroen T. Vermeulen](https://pqxx.org/libpqxx/) | PostgreSQL C++ client API used by the `postgres` command | System package if available; FetchContent fallback |
 | [PostgreSQL libpq](https://www.postgresql.org/docs/current/libpq.html) | [PostgreSQL Global Development Group](https://www.postgresql.org/community/) | PostgreSQL client C library required by libpqxx | System PostgreSQL installation |
+| [Emscripten](https://emscripten.org/) | [Emscripten contributors](https://github.com/emscripten-core/emscripten) | Builds the experimental WASM CSV viewer release asset | Local Emscripten SDK for development; GitHub Actions clones `emscripten-core/emsdk` for CI/release builds |
 | [Catch2](https://github.com/catchorg/Catch2) v3.4.0 | [Catch2 contributors](https://github.com/catchorg/Catch2) | Test framework | FetchContent, tests only |
 | [gcovr](https://github.com/gcovr/gcovr) | [gcovr contributors](https://github.com/gcovr/gcovr/graphs/contributors) | Coverage report generation for CI | GitHub Actions coverage workflow only |
 | [actions/cache](https://github.com/actions/cache) v5.0.5 | [GitHub](https://github.com/actions) | Cache CMake FetchContent dependencies in CI | GitHub Actions workflows only |

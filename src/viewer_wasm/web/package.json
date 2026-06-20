@@ -7,6 +7,7 @@
     "copy:wasm": "node scripts/copy-wasm.mjs",
     "dev": "npm run copy:wasm && vite --host 127.0.0.1",
     "build": "npm run copy:wasm && vite build",
+    "artifact": "npm run build && node ../../../scripts/package_wasm_viewer.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

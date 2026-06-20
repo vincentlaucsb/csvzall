@@ -63,3 +63,58 @@ npm run dev
 The Vite build uses a relative base path, so the generated `dist` directory can
 be deployed directly to GitHub Pages. The web app uses npm AG Grid Community
 instead of csvzall's native-viewer vendored AG Grid assets.
+
+## Release Artifact
+
+Build and stage the canonical release payload locally with:
+
+```sh
+emcmake cmake -G Ninja -S . -B out/build/wasm -DBUILD_TESTING=OFF
+cmake --build out/build/wasm --target csvzall_viewer_wasm
+cd src/viewer_wasm/web
+npm install
+npm run artifact
+```
+
+`npm run artifact` rebuilds the Vite app and stages:
+
+```text
+dist/csvzall-wasm-viewer/
+  index.html
+  assets/
+    *.js
+    *.css
+    *.wasm
+  csvzall-wasm-viewer.json
+```
+
+The metadata file records the source repository, commit, ref, version, build
+timestamp, CMake target, and source dist path. To inspect the staged artifact:
+
+```sh
+node -e "console.log(require('fs').readdirSync('dist/csvzall-wasm-viewer'))"
+cat dist/csvzall-wasm-viewer/csvzall-wasm-viewer.json
+```
+
+To create a zip and checksum locally from the staged directory:
+
+```sh
+version="$(node -e 'const fs=require("fs"); const m=fs.readFileSync("CMakeLists.txt","utf8").match(/project\\s*\\(\\s*csvzall\\s+VERSION\\s+([^\\s)]+)/); console.log(m[1])')"
+(cd dist/csvzall-wasm-viewer && zip -r "../csvzall-wasm-viewer-${version}.zip" .)
+sha256sum "dist/csvzall-wasm-viewer-${version}.zip" > "dist/csvzall-wasm-viewer-${version}.zip.sha256"
+```
+
+PowerShell:
+
+```powershell
+$version = node -e "const fs=require('fs'); const m=fs.readFileSync('CMakeLists.txt','utf8').match(/project\s*\(\s*csvzall\s+VERSION\s+([^\s)]+)/); console.log(m[1])"
+$asset = "dist\csvzall-wasm-viewer-$version.zip"
+Compress-Archive -Path "dist\csvzall-wasm-viewer\*" -DestinationPath $asset -Force
+$hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+"$hash  $(Split-Path $asset -Leaf)" | Set-Content "$asset.sha256"
+```
+
+On GitHub releases, `.github/workflows/build-binaries.yml` uploads
+`csvzall-wasm-viewer-<release-tag>.zip` and a matching `.sha256` file alongside
+the existing native release assets. The zip is rooted at `index.html`, so it can
+be extracted directly into an Obsidian plugin static asset directory.
