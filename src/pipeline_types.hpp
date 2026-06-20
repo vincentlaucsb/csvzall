@@ -10,7 +10,6 @@ namespace csvzall::pipeline {
 
 enum class ViewModeSelection {
   Auto,
-  Materialized,
   Paged,
 };
 
@@ -46,12 +45,12 @@ struct RunOptions {
   // Number of PostgreSQL COPY workers. Values above 1 do not preserve physical
   // insertion order and use one PostgreSQL connection per worker.
   std::size_t postgres_parallel_copy_workers = 1;
-  // Viewer loading strategy. Auto materializes ordinary local files at or below
-  // view_materialize_threshold_mb and uses row-offset paging for larger files.
+  // Viewer loading strategy. The viewer uses row-offset paging for all files;
+  // Auto remains as a compatibility spelling for the default paged behavior.
   ViewModeSelection view_mode = ViewModeSelection::Auto;
   std::size_t view_materialize_threshold_mb = 200;
-  // Enable csvzall view's explicit editable mode. Editing always uses
-  // materialized local-file data so save can rewrite the CSV deterministically.
+  // Enable csvzall view's explicit editable mode. Editing uses a paged source
+  // file plus an in-memory overlay until save rewrites the CSV deterministically.
   bool view_edit = false;
   // Optional development override for first-party viewer assets. When set,
   // view serves index.html, viewer.css, viewer.js, and viewer modules from this

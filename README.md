@@ -201,32 +201,30 @@ process. Pass `--startup-json` to print `{"url":"http://127.0.0.1:..."}` for
 host integrations such as
 [obsidian-csvzall](https://github.com/vincentlaucsb/obsidian-csvzall).
 
-In auto mode, files at or below `--materialize-threshold-mb` (default: 200) are
-materialized once so AG Grid can provide client-side sorting, column filters,
-and quick filtering for ordinary CSVs. Larger files build a compact row-offset
-index and serve rows through paged `/api/rows?offset=...&limit=...` requests
-instead of loading the whole table in the browser. AG Grid Community handles
-column resizing and virtual scrolling, while the local API (`/api/schema`,
-`/api/rows`, `/api/health`) keeps the default experience read-only by design.
-Viewer HTML, CSS, JavaScript, and AG Grid assets are embedded in the binary.
-The view is a startup-time snapshot of the CSV; reopen the viewer to pick up
-on-disk file changes.
+The viewer builds a compact row-offset index and serves rows through paged
+`/api/rows?offset=...&limit=...` requests for all file sizes instead of loading
+the whole table in the server. AG Grid Community handles column resizing and
+virtual scrolling, while the local API (`/api/schema`, `/api/rows`,
+`/api/health`) keeps the default experience read-only by design. Viewer HTML,
+CSS, JavaScript, and AG Grid assets are embedded in the binary. The view is a
+startup-time snapshot of the CSV; reopen the viewer to pick up on-disk file
+changes.
 
 For viewer development, pass `--viewer-assets <dir>` or set
 `CSVZALL_VIEWER_ASSETS=<dir>` to serve first-party `index.html`, `viewer.css`,
 and `viewer.js` from disk on every request. AG Grid and Popright remain
 embedded.
 
-Pass `--edit` to enable explicit editable mode. Editable mode materializes the
-CSV, allows cell edits plus row/column insert/delete in the browser, tracks
+Pass `--edit` to enable explicit editable mode. Editable mode uses the same
+row-offset index, keeps unsaved cell/row/column changes in an overlay, tracks
 dirty state, supports reset from disk, and saves by writing a temporary sibling
 CSV before atomically replacing the source. Save refuses if the source file size
 or mtime changed after the viewer opened.
 
 Current limitation: `view` is optimized for plain local CSV files. stdin,
 `.gz`, and `.zip` inputs are rejected in this pass. Server-side global
-sort/search/filter are deferred for paged mode; the UI only enables full-table
-sort/filter when the table is materialized.
+sort/search/filter are deferred for paged mode. Edit mode uses the same paged
+row loading path and applies visible-row edits through the backend overlay.
 
 ```sh
 csvzall view todoist_activities.csv

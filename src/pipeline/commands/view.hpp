@@ -4,19 +4,32 @@
 
 #include <csv.hpp>
 
+#include <optional>
 #include <memory>
 #include <ostream>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
-#include <variant>
+#include <unordered_map>
 #include <vector>
 
 namespace csvzall::pipeline::commands {
 
 struct CsvRowIndexEntry {
   std::uint64_t byte_offset = 0;
+};
+
+struct CsvColumnDescriptor {
+  std::string name;
+  std::optional<std::size_t> source_index;
+  std::string default_value;
+};
+
+struct CsvLogicalRow {
+  std::optional<std::uint64_t> source_row;
+  std::unordered_map<std::string, std::string> cells;
 };
 
 class CsvIndexedFile {
@@ -35,26 +48,45 @@ class CsvIndexedFile {
       std::uint64_t offset,
       std::uint64_t limit) const;
 
+  void edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
+  void delete_row(std::uint64_t row);
+  void insert_row(std::uint64_t row, const std::vector<std::string>& values);
+  void swap_rows(std::uint64_t first, std::uint64_t second);
+  void insert_column(std::uint64_t column, const std::string& name, const std::string& value);
+  void rename_column(const std::string& column, const std::string& name);
+  void delete_column(const std::string& column);
+  bool recover_renamed_source();
+  void reset();
+  void save(const std::vector<std::string>& columns = {});
+
  private:
+  [[nodiscard]] std::vector<std::vector<std::string>> read_source_rows(
+      std::uint64_t offset,
+      std::uint64_t limit) const;
+  [[nodiscard]] std::vector<std::string> read_source_row(std::uint64_t source_row) const;
+  [[nodiscard]] std::vector<std::string> row_values_for_columns(
+      const CsvLogicalRow& row,
+      const std::vector<CsvColumnDescriptor>& columns) const;
+  [[nodiscard]] std::size_t column_index(const std::string& column) const;
+  [[nodiscard]] bool has_column(const std::string& column) const;
+  void refresh_headers();
+  void validate_column_order(const std::vector<std::string>& columns) const;
+  [[nodiscard]] std::vector<CsvColumnDescriptor> ordered_columns(
+      const std::vector<std::string>& columns) const;
+  void reload();
+
   std::string input_path_;
   std::string file_name_;
   std::vector<std::string> headers_;
+  std::vector<CsvColumnDescriptor> columns_;
   std::vector<CsvRowIndexEntry> index_;
+  std::vector<CsvLogicalRow> rows_;
   std::uint64_t file_size_ = 0;
+  std::filesystem::file_time_type source_mtime_{};
   csv::CSVFormat format_;
 };
 
-struct CsvMaterializedFile {
-  std::string input_path;
-  std::string file_name;
-  std::shared_ptr<csv::DataFrame<>> frame;
-  csv::CSVFormat format;
-  std::uint64_t source_size = 0;
-  std::filesystem::file_time_type source_mtime{};
-};
-
 enum class CsvViewDataMode {
-  Materialized,
   Paged,
 };
 
@@ -88,10 +120,9 @@ class CsvViewData {
   void save(const std::vector<std::string>& columns = {});
 
  private:
-  explicit CsvViewData(CsvMaterializedFile materialized);
   explicit CsvViewData(CsvIndexedFile indexed);
 
-  std::variant<CsvMaterializedFile, CsvIndexedFile> data_;
+  CsvIndexedFile data_;
 };
 
 struct ViewServerOptions {

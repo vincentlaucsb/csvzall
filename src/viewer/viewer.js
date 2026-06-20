@@ -6,7 +6,7 @@ import {
   postDirtyState,
 } from './modules/dirty-state.mjs';
 import { createFallbackContextMenu } from './modules/fallback-menu.mjs';
-import { currentGridColumns, rowInsertionIndex } from './modules/grid.mjs';
+import { currentGridColumns, rowInsertionIndex, rowsToObjects } from './modules/grid.mjs';
 import {
   createTablerIcon,
   decorateButton,
@@ -24,6 +24,7 @@ if (typeof globalThis !== 'undefined') {
     currentGridColumns,
     defaultSqlQuery,
     rowInsertionIndex,
+    rowsToObjects,
     rowsToMarkdownTable,
     buildSavePayload,
     saveViewerState,
@@ -43,11 +44,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
   const fileNode = document.getElementById('file-name');
   const quickFilterNode = document.getElementById('quick-filter');
   const queryControl = document.getElementById('query-control');
-  const searchModeButton = document.getElementById('query-mode-search');
-  const sqlModeButton = document.getElementById('query-mode-sql');
   const clearQueryButton = document.getElementById('clear-query');
-  const sqlErrorNode = document.getElementById('sql-error');
-  const sqlToolbar = document.getElementById('sql-toolbar');
   const runSqlButton = document.getElementById('run-sql');
   const copyMarkdownButton = document.getElementById('copy-markdown');
   const token = new URLSearchParams(window.location.search).get('token');
@@ -93,22 +90,6 @@ async function csvzallViewBootstrap(dependencies = {}) {
     api.setDatasource(datasource);
   }
 
-  function setQuickFilter(api, value) {
-    if (api.setGridOption) {
-      api.setGridOption('quickFilterText', value);
-      return;
-    }
-    api.setQuickFilter(value);
-  }
-
-  function setGridRowData(api, rows) {
-    if (api.setGridOption) {
-      api.setGridOption('rowData', rows);
-      return;
-    }
-    api.setRowData(rows);
-  }
-
   function setGridColumnDefs(api, columns, options = {}) {
     const columnDefs = columns.map((column) => ({
       headerName: column,
@@ -125,37 +106,6 @@ async function csvzallViewBootstrap(dependencies = {}) {
       return;
     }
     api.setColumnDefs(columnDefs);
-  }
-
-  function autoResizeQueryInput() {
-    quickFilterNode.style.height = 'auto';
-    quickFilterNode.style.height = `${Math.min(quickFilterNode.scrollHeight, 144)}px`;
-  }
-
-  function showSqlError(message) {
-    sqlErrorNode.textContent = message;
-    sqlErrorNode.hidden = false;
-  }
-
-  function clearSqlError() {
-    sqlErrorNode.textContent = '';
-    sqlErrorNode.hidden = true;
-  }
-
-  function rowsToObjects(columns, rows) {
-    return rows.map((values, index) => {
-      const row = { _csvzallRowId: index };
-      columns.forEach((column, index) => {
-        row[column] = values[index] ?? '';
-      });
-      return row;
-    });
-  }
-
-  function renumberRows(rows) {
-    rows.forEach((row, index) => {
-      row._csvzallRowId = index;
-    });
   }
 
   function slugify(value) {
@@ -218,7 +168,6 @@ async function csvzallViewBootstrap(dependencies = {}) {
     fileNode.textContent = schema.file;
     summaryNode.textContent = '';
     recordCountNode.textContent = `${schema.totalRows.toLocaleString()} rows, ${schema.columns.length.toLocaleString()} columns`;
-    const materialized = schema.mode === 'materialized';
     const editable = schema.editable === true;
     const editToolbar = document.getElementById('edit-toolbar');
     const addChartButton = document.getElementById('add-chart');
@@ -301,15 +250,14 @@ async function csvzallViewBootstrap(dependencies = {}) {
     decorateButton(cancelChart, 'x', 'Cancel');
     decorateButton(generateChartButton, 'chart-bar', 'Create chart');
     decorateButton(chartForm.querySelector('button[type="submit"]'), 'device-floppy', 'Save chart');
-    queryControl.hidden = !materialized;
-    quickFilterNode.disabled = !materialized;
+    queryControl.hidden = true;
+    quickFilterNode.disabled = true;
     editToolbar.hidden = !editable;
     addChartButton.hidden = false;
 
     const baseName = stripCsvExtension(schema.file);
     const baseSlug = slugify(baseName);
     const sqlTableName = schema.sqlTableName || VIEWER_SQL_TABLE_NAME;
-    const sqlDefaultQuery = defaultSqlQuery(sqlTableName);
     chartMarkdownSql.placeholder = `SELECT * FROM ${sqlTableName}`;
     const guessedDateColumn = () => guessColumn(schema.columns, ['date', 'day', 'attendance_date']);
     const guessedValueColumn = () => guessColumn(schema.columns, ['count', 'value', 'total']);
@@ -721,8 +669,8 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const makeColumnDefs = () => schema.columns.map((column) => ({
       headerName: column,
       field: column,
-      sortable: materialized,
-      filter: materialized,
+      sortable: false,
+      filter: false,
       editable,
       resizable: true,
       minWidth: 140,
@@ -732,8 +680,8 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const gridOptions = {
       columnDefs: makeColumnDefs(),
       defaultColDef: {
-        sortable: materialized,
-        filter: materialized,
+        sortable: false,
+        filter: false,
         editable,
         resizable: true,
       },
@@ -742,12 +690,10 @@ async function csvzallViewBootstrap(dependencies = {}) {
       rowSelection: 'single',
     };
 
-    if (!materialized) {
-      gridOptions.rowModelType = 'infinite';
-      gridOptions.cacheBlockSize = 500;
-      gridOptions.maxBlocksInCache = 8;
-      gridOptions.blockLoadDebounceMillis = 40;
-    }
+    gridOptions.rowModelType = 'infinite';
+    gridOptions.cacheBlockSize = 500;
+    gridOptions.maxBlocksInCache = 8;
+    gridOptions.blockLoadDebounceMillis = 40;
 
     const gridElement = document.getElementById('grid');
     const api = window.agGrid.createGrid
@@ -757,107 +703,106 @@ async function csvzallViewBootstrap(dependencies = {}) {
           return gridOptions.api;
         })();
 
-    if (materialized) {
-      statusNode.textContent = `Loading ${schema.totalRows.toLocaleString()} rows for client-side sort/filter…`;
-      const viewState = createViewStateStore();
-      if (editable) {
-        installUnsavedChangesBeforeUnload(viewState);
-      }
-      const emitDirtyState = editable ? createDirtyStateEmitter(viewState) : () => false;
-      emitDirtyState();
-      const allRows = schema.totalRows === 0
-        ? []
-        : rowsToObjects(schema.columns, (await fetchJson('/api/rows', { offset: 0, limit: schema.totalRows })).rows);
-      let queryMode = 'search';
-      let searchText = '';
-      let sqlText = '';
-      let sqlResultColumns = [];
-      let sqlResultRows = [];
-      const refreshToolbarForMode = () => {
-        const sqlMode = queryMode === 'sql';
-        queryControl.classList.toggle('sql-mode', sqlMode);
-        searchModeButton.classList.toggle('active', !sqlMode);
-        sqlModeButton.classList.toggle('active', sqlMode);
-        searchModeButton.setAttribute('aria-pressed', String(!sqlMode));
-        sqlModeButton.setAttribute('aria-pressed', String(sqlMode));
-        sqlToolbar.hidden = !sqlMode;
-        editToolbar.hidden = sqlMode || !editable;
-        addChartButton.hidden = sqlMode;
-        quickFilterNode.placeholder = sqlMode
-          ? `SELECT * FROM ${sqlTableName}`
-          : 'Type to filter loaded table...';
-        clearQueryButton.title = sqlMode ? 'Clear query' : 'Clear filter';
-        clearQueryButton.setAttribute('aria-label', sqlMode ? 'Clear query' : 'Clear filter');
-      };
-      const applySearchMode = () => {
-        queryMode = 'search';
-        quickFilterNode.value = searchText;
-        clearSqlError();
-        refreshToolbarForMode();
-        setGridColumnDefs(api, schema.columns, { sortable: true, filter: true, editable });
-        setGridRowData(api, allRows);
-        setQuickFilter(api, searchText);
-        recordCountNode.textContent = `${schema.totalRows.toLocaleString()} rows, ${schema.columns.length.toLocaleString()} columns`;
-        autoResizeQueryInput();
-        refreshDirtyUi();
-      };
-      const applySqlResult = (result) => {
-        sqlResultColumns = Array.isArray(result.columns) ? result.columns : [];
-        sqlResultRows = rowsToObjects(sqlResultColumns, Array.isArray(result.rows) ? result.rows : []);
-        setQuickFilter(api, '');
-        setGridColumnDefs(api, sqlResultColumns, { sortable: true, filter: false, editable: false });
-        setGridRowData(api, sqlResultRows);
-        copyMarkdownButton.disabled = sqlResultColumns.length === 0;
-        recordCountNode.textContent =
-          `${sqlResultRows.length.toLocaleString()} SQL result row${sqlResultRows.length === 1 ? '' : 's'}, ${sqlResultColumns.length.toLocaleString()} columns`;
-        statusNode.textContent = `SQL result: ${sqlResultRows.length.toLocaleString()} row${sqlResultRows.length === 1 ? '' : 's'}.`;
-        api.sizeColumnsToFit?.();
-      };
-      const runSqlQuery = async () => {
-        if (queryMode !== 'sql') {
-          return;
-        }
-        runSqlButton.disabled = true;
-        copyMarkdownButton.disabled = true;
-        statusNode.textContent = 'Running SQL...';
+    const pagedDatasource = {
+      async getRows(params) {
+        const offset = params.startRow;
+        const limit = Math.max(params.endRow - params.startRow, 1);
+        statusNode.textContent = `Loading rows ${offset + 1}-${Math.min(params.endRow, schema.totalRows)} of ${schema.totalRows}…`;
         try {
-          const result = await postJson('/api/sql-query', { sql: quickFilterNode.value });
-          sqlText = quickFilterNode.value;
-          clearSqlError();
-          applySqlResult(result);
+          const page = await fetchJson('/api/rows', { offset, limit });
+          schema.totalRows = page.totalRows;
+          recordCountNode.textContent = `${schema.totalRows.toLocaleString()} rows, ${schema.columns.length.toLocaleString()} columns`;
+          const rowData = rowsToObjects(schema.columns, page.rows, page.offset);
+          const loadedThrough = page.offset + page.rows.length;
+          const lastRow = loadedThrough >= page.totalRows ? page.totalRows : undefined;
+          params.successCallback(rowData, lastRow);
+          statusNode.textContent = `Loaded rows ${page.offset + 1}-${loadedThrough} of ${page.totalRows}.`;
         } catch (error) {
-          copyMarkdownButton.disabled = sqlResultColumns.length === 0;
-          showSqlError(error instanceof Error ? error.message : 'SQL query failed');
-          statusNode.textContent = 'SQL query failed.';
-        } finally {
-          runSqlButton.disabled = false;
+          params.failCallback();
+          statusNode.textContent = error instanceof Error ? error.message : 'Row load failed';
+        }
+      },
+    };
+    setDatasource(api, pagedDatasource);
+    statusNode.textContent = `Ready: ${schema.totalRows.toLocaleString()} rows indexed.`;
+    if (editable) {
+      const viewState = createViewStateStore();
+      installUnsavedChangesBeforeUnload(viewState);
+      const emitDirtyState = createDirtyStateEmitter(viewState);
+      emitDirtyState();
+      const refreshRows = () => {
+        if (typeof api.purgeInfiniteCache === 'function') {
+          api.purgeInfiniteCache();
+        } else if (typeof api.refreshInfiniteCache === 'function') {
+          api.refreshInfiniteCache();
+        } else {
+          setDatasource(api, pagedDatasource);
         }
       };
-      const applySqlMode = () => {
-        queryMode = 'sql';
-        searchText = searchText || '';
-        if (!sqlText) {
-          sqlText = sqlDefaultQuery;
-        }
-        quickFilterNode.value = sqlText;
-        refreshToolbarForMode();
-        autoResizeQueryInput();
-        void runSqlQuery();
+      const refreshColumns = () => {
+        setGridColumnDefs(api, schema.columns, { sortable: false, filter: false, editable });
       };
       const refreshDirtyUi = () => {
         saveButton.disabled = !viewState.dirty;
         resetButton.disabled = !viewState.dirty;
-        if (queryMode === 'sql') {
-          return;
-        }
         statusNode.textContent = viewState.dirty
           ? 'Unsaved changes.'
-          : `Loaded ${allRows.length.toLocaleString()} rows for ${editable ? 'editing' : 'client-side sort/filter'}.`;
+          : `Ready: ${schema.totalRows.toLocaleString()} rows indexed.`;
         emitDirtyState();
       };
       const markDataDirty = () => {
         viewState.markDataDirty();
         refreshDirtyUi();
+      };
+      const selectedSourceRow = () => {
+        const selected = api.getSelectedRows ? api.getSelectedRows() : [];
+        if (Number.isInteger(selected[0]?._csvzallRowId)) {
+          return selected[0]._csvzallRowId;
+        }
+        const focused = api.getFocusedCell ? api.getFocusedCell() : null;
+        if (focused && Number.isInteger(focused.rowIndex) && typeof api.getDisplayedRowAtIndex === 'function') {
+          const focusedNode = api.getDisplayedRowAtIndex(focused.rowIndex);
+          if (Number.isInteger(focusedNode?.data?._csvzallRowId)) {
+            return focusedNode.data._csvzallRowId;
+          }
+        }
+        return schema.totalRows;
+      };
+      const focusedColumnName = () => {
+        const focused = api.getFocusedCell ? api.getFocusedCell() : null;
+        const column = focused && focused.column;
+        if (!column) {
+          return '';
+        }
+        return column.getColId ? column.getColId() : (column.colId || '');
+      };
+      const createToolbarDropdown = (button, items, onSelect) => {
+        if (typeof createDropdownMenu === 'function') {
+          return createDropdownMenu(button, {
+            items,
+            theme: 'system',
+            onSelect,
+          });
+        }
+        if (typeof createContextMenu !== 'function') {
+          return null;
+        }
+        const menu = createContextMenu({
+          trigger: 'manual',
+          theme: 'system',
+          items,
+          onSelect,
+        });
+        button.addEventListener('click', (event) => {
+          const rect = button.getBoundingClientRect();
+          menu.open({
+            x: rect.left,
+            y: rect.bottom + 4,
+            target: button,
+            triggerEvent: event,
+          });
+        });
+        return menu;
       };
       const saveCurrentChanges = async ({ reopenChartsAfterReload = false } = {}) => {
         try {
@@ -878,12 +823,13 @@ async function csvzallViewBootstrap(dependencies = {}) {
             return false;
           }
           if (result.chartError) {
-            statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows. Chart generation failed: ${result.chartError}`;
+            statusNode.textContent = `Saved ${schema.totalRows.toLocaleString()} rows. Chart generation failed: ${result.chartError}`;
           } else if (result.chartsGenerated > 0) {
-            statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows. Regenerated ${result.chartsGenerated} chart${result.chartsGenerated === 1 ? '' : 's'}.`;
+            statusNode.textContent = `Saved ${schema.totalRows.toLocaleString()} rows. Regenerated ${result.chartsGenerated} chart${result.chartsGenerated === 1 ? '' : 's'}.`;
           } else {
-            statusNode.textContent = `Saved ${allRows.length.toLocaleString()} rows.`;
+            statusNode.textContent = `Saved ${schema.totalRows.toLocaleString()} rows.`;
           }
+          refreshRows();
           return true;
         } catch (error) {
           saveButton.disabled = !viewState.dirty;
@@ -947,512 +893,356 @@ async function csvzallViewBootstrap(dependencies = {}) {
         }
         return false;
       };
-      setGridRowData(api, allRows);
-      quickFilterNode.addEventListener('input', () => {
-        autoResizeQueryInput();
-        if (queryMode === 'search') {
-          searchText = quickFilterNode.value;
-          setQuickFilter(api, searchText);
-          return;
-        }
-        clearSqlError();
-      });
-      quickFilterNode.addEventListener('keydown', (event) => {
-        if (queryMode === 'sql' && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-          event.preventDefault();
-          void runSqlQuery();
-        }
-      });
-      searchModeButton.addEventListener('click', applySearchMode);
-      sqlModeButton.addEventListener('click', applySqlMode);
-      clearQueryButton.addEventListener('click', () => {
-        quickFilterNode.value = '';
-        autoResizeQueryInput();
-        if (queryMode === 'search') {
-          searchText = '';
-          setQuickFilter(api, '');
-          quickFilterNode.focus();
-          return;
-        }
-        sqlText = '';
-        void runSqlQuery();
-        quickFilterNode.focus();
-      });
-      runSqlButton.addEventListener('click', () => {
-        void runSqlQuery();
-      });
-      copyMarkdownButton.addEventListener('click', async () => {
+      let pendingInsertColumn = schema.columns.length;
+      let pendingRenameColumn = '';
+      const showColumnError = (message) => {
+        insertColumnError.textContent = message;
+        insertColumnError.hidden = false;
+      };
+      const clearColumnError = () => {
+        insertColumnError.textContent = '';
+        insertColumnError.hidden = true;
+      };
+      const showRenameColumnError = (message) => {
+        renameColumnError.textContent = message;
+        renameColumnError.hidden = false;
+      };
+      const clearRenameColumnError = () => {
+        renameColumnError.textContent = '';
+        renameColumnError.hidden = true;
+      };
+      const insertColumnAt = async (column, name) => {
+        await postJson('/api/insert-column', { column, name, value: '' });
+        schema.columns.splice(column, 0, name);
+        refreshColumns();
+        refreshRows();
+        markDataDirty();
+      };
+      const insertRowAt = async (row) => {
+        const values = schema.columns.map(() => '');
         try {
-          await navigator.clipboard.writeText(rowsToMarkdownTable(sqlResultColumns, sqlResultRows));
-          statusNode.textContent = 'Copied Markdown table.';
+          await postJson('/api/insert-row', { row, values });
+          schema.totalRows += 1;
+          recordCountNode.textContent = `${schema.totalRows.toLocaleString()} rows, ${schema.columns.length.toLocaleString()} columns`;
+          refreshRows();
+          markDataDirty();
         } catch (error) {
-          statusNode.textContent = error instanceof Error ? error.message : 'Copy failed';
+          statusNode.textContent = error instanceof Error ? error.message : 'Insert failed';
         }
-      });
-      refreshToolbarForMode();
-      autoResizeQueryInput();
-      if (editable) {
-        const refreshRows = () => {
-          setGridRowData(api, allRows);
-        };
-        const refreshColumns = () => {
-          setGridColumnDefs(api, schema.columns, { sortable: true, filter: true, editable });
-        };
-        const selectedSourceRow = () => {
-          const selected = api.getSelectedRows ? api.getSelectedRows() : [];
-          if (Number.isInteger(selected[0]?._csvzallRowId)) {
-            return selected[0]._csvzallRowId;
-          }
-          const focused = api.getFocusedCell ? api.getFocusedCell() : null;
-          if (focused && Number.isInteger(focused.rowIndex) && typeof api.getDisplayedRowAtIndex === 'function') {
-            const focusedNode = api.getDisplayedRowAtIndex(focused.rowIndex);
-            if (Number.isInteger(focusedNode?.data?._csvzallRowId)) {
-              return focusedNode.data._csvzallRowId;
-            }
-          }
-          return allRows.length;
-        };
-        const focusedColumnName = () => {
-          const focused = api.getFocusedCell ? api.getFocusedCell() : null;
-          const column = focused && focused.column;
-          if (!column) {
-            return '';
-          }
-          return column.getColId ? column.getColId() : (column.colId || '');
-        };
-        let pendingInsertColumn = schema.columns.length;
-        let pendingRenameColumn = '';
-        const showColumnError = (message) => {
-          insertColumnError.textContent = message;
-          insertColumnError.hidden = false;
-        };
-        const clearColumnError = () => {
-          insertColumnError.textContent = '';
-          insertColumnError.hidden = true;
-        };
-        const showRenameColumnError = (message) => {
-          renameColumnError.textContent = message;
-          renameColumnError.hidden = false;
-        };
-        const clearRenameColumnError = () => {
-          renameColumnError.textContent = '';
-          renameColumnError.hidden = true;
-        };
-        const insertColumnAt = async (column, name) => {
-          await postJson('/api/insert-column', { column, name, value: '' });
-          schema.columns.splice(column, 0, name);
-          allRows.forEach((row) => {
-            row[name] = '';
-          });
+      };
+      const insertRowRelativeToSelection = async (offset) => {
+        await insertRowAt(rowInsertionIndex(selectedSourceRow(), schema.totalRows, offset));
+      };
+      const deleteRowAt = async (row) => {
+        if (row >= schema.totalRows) {
+          statusNode.textContent = 'Select a row to delete.';
+          return;
+        }
+        try {
+          await postJson('/api/delete-row', { row });
+          schema.totalRows = Math.max(0, schema.totalRows - 1);
+          recordCountNode.textContent = `${schema.totalRows.toLocaleString()} rows, ${schema.columns.length.toLocaleString()} columns`;
+          refreshRows();
+          markDataDirty();
+        } catch (error) {
+          statusNode.textContent = error instanceof Error ? error.message : 'Delete failed';
+        }
+      };
+      const moveRowBy = async (row, delta) => {
+        const target = row + delta;
+        if (row < 0 || row >= schema.totalRows || target < 0 || target >= schema.totalRows) {
+          return;
+        }
+        try {
+          await postJson('/api/swap-rows', { first: row, second: target });
+          refreshRows();
+          markDataDirty();
+        } catch (error) {
+          statusNode.textContent = error instanceof Error ? error.message : 'Move failed';
+        }
+      };
+      const deleteColumnByName = async (column) => {
+        if (!column || !schema.columns.includes(column)) {
+          statusNode.textContent = 'Focus a column to delete.';
+          return;
+        }
+        try {
+          await postJson('/api/delete-column', { column });
+          schema.columns.splice(schema.columns.indexOf(column), 1);
+          recordCountNode.textContent = `${schema.totalRows.toLocaleString()} rows, ${schema.columns.length.toLocaleString()} columns`;
           refreshColumns();
           refreshRows();
           markDataDirty();
-        };
-        const insertRowAt = async (row) => {
-          const values = schema.columns.map(() => '');
-          try {
-            await postJson('/api/insert-row', { row, values });
-            const inserted = { _csvzallRowId: row };
-            schema.columns.forEach((column) => {
-              inserted[column] = '';
-            });
-            allRows.splice(row, 0, inserted);
-            renumberRows(allRows);
-            refreshRows();
-            markDataDirty();
-          } catch (error) {
-            statusNode.textContent = error instanceof Error ? error.message : 'Insert failed';
-          }
-        };
-        const insertRowRelativeToSelection = async (offset) => {
-          await insertRowAt(rowInsertionIndex(selectedSourceRow(), allRows.length, offset));
-        };
-        const deleteRowAt = async (row) => {
-          if (row >= allRows.length) {
-            statusNode.textContent = 'Select a row to delete.';
-            return;
-          }
-          try {
-            await postJson('/api/delete-row', { row });
-            allRows.splice(row, 1);
-            renumberRows(allRows);
-            refreshRows();
-            markDataDirty();
-          } catch (error) {
-            statusNode.textContent = error instanceof Error ? error.message : 'Delete failed';
-          }
-        };
-        const moveRowBy = async (row, delta) => {
-          const target = row + delta;
-          if (row < 0 || row >= allRows.length || target < 0 || target >= allRows.length) {
-            return;
-          }
-          try {
-            await postJson('/api/swap-rows', { first: row, second: target });
-            const [moved] = allRows.splice(row, 1);
-            allRows.splice(target, 0, moved);
-            renumberRows(allRows);
-            refreshRows();
-            api.forEachNode?.((node) => {
-              if (node.data?._csvzallRowId === target) {
-                node.setSelected?.(true);
-              }
-            });
-            markDataDirty();
-          } catch (error) {
-            statusNode.textContent = error instanceof Error ? error.message : 'Move failed';
-          }
-        };
-        const deleteColumnByName = async (column) => {
-          if (!column || !schema.columns.includes(column)) {
-            statusNode.textContent = 'Focus a column to delete.';
-            return;
-          }
-          try {
-            await postJson('/api/delete-column', { column });
-            schema.columns.splice(schema.columns.indexOf(column), 1);
-            allRows.forEach((row) => {
-              delete row[column];
-            });
-            refreshColumns();
-            refreshRows();
-            markDataDirty();
-          } catch (error) {
-            statusNode.textContent = error instanceof Error ? error.message : 'Column delete failed';
-          }
-        };
-        const renameColumnByName = async (column, name) => {
-          try {
-            await postJson('/api/rename-column', { column, name });
-            const columnIndex = schema.columns.indexOf(column);
-            if (columnIndex >= 0) {
-              schema.columns[columnIndex] = name;
-            }
-            allRows.forEach((row) => {
-              row[name] = row[column] ?? '';
-              delete row[column];
-            });
-            refreshColumns();
-            refreshRows();
-            markDataDirty();
-          } catch (error) {
-            throw new Error(error instanceof Error ? error.message : 'Column rename failed');
-          }
-        };
-        const columnIndexFor = (column) => {
-          const columnIndex = schema.columns.indexOf(column || focusedColumnName());
-          return columnIndex >= 0 ? columnIndex : schema.columns.length;
-        };
-        const showInsertColumnDialog = (column = '', offset = 0) => {
-          const columnIndex = columnIndexFor(column);
-          pendingInsertColumn = Math.min(columnIndex + offset, schema.columns.length);
-          insertColumnName.value = '';
-          clearColumnError();
-          insertColumnDialog.showModal();
-          insertColumnName.focus();
-        };
-        const showRenameColumnDialog = (column) => {
-          if (!column || !schema.columns.includes(column)) {
-            statusNode.textContent = 'Choose a column to rename.';
-            return;
-          }
-          pendingRenameColumn = column;
-          renameColumnName.value = column;
-          clearRenameColumnError();
-          renameColumnDialog.showModal();
-          renameColumnName.focus();
-          renameColumnName.select();
-        };
-        const createToolbarDropdown = (button, items, onSelect) => {
-          if (typeof createDropdownMenu === 'function') {
-            return createDropdownMenu(button, {
-              items,
-              theme: 'system',
-              onSelect,
-            });
-          }
-          if (typeof createContextMenu !== 'function') {
-            return null;
-          }
-          const menu = createContextMenu({
-            trigger: 'manual',
-            theme: 'system',
-            items,
-            onSelect,
-          });
-          button.addEventListener('click', (event) => {
-            const rect = button.getBoundingClientRect();
-            menu.open({
-              x: rect.left,
-              y: rect.bottom + 4,
-              target: button,
-              triggerEvent: event,
-            });
-          });
-          return menu;
-        };
-        gridOptions.onCellValueChanged = async (event) => {
-          if (queryMode === 'sql') {
-            return;
-          }
-          if (!event.colDef.field || event.colDef.field === '_csvzallRowId') {
-            return;
-          }
-          try {
-            await postJson('/api/edit-cell', {
-              row: event.data._csvzallRowId,
-              column: event.colDef.field,
-              value: event.newValue ?? '',
-            });
-            markDataDirty();
-          } catch (error) {
-            event.node.setDataValue(event.colDef.field, event.oldValue ?? '');
-            statusNode.textContent = error instanceof Error ? error.message : 'Edit failed';
-          }
-        };
-        if (api.setGridOption) {
-          api.setGridOption('onCellValueChanged', gridOptions.onCellValueChanged);
+        } catch (error) {
+          statusNode.textContent = error instanceof Error ? error.message : 'Column delete failed';
         }
-        gridOptions.onColumnMoved = (event) => {
-          if (event.finished !== true) {
-            return;
+      };
+      const renameColumnByName = async (column, name) => {
+        try {
+          await postJson('/api/rename-column', { column, name });
+          const columnIndex = schema.columns.indexOf(column);
+          if (columnIndex >= 0) {
+            schema.columns[columnIndex] = name;
           }
-          const columns = currentGridColumns(api, schema.columns);
-          if (columns.length !== schema.columns.length) {
-            return;
-          }
-          const changed = !columns.every((column, index) => column === schema.columns[index]);
-          viewState.setColumnOrderDirty(changed);
-          refreshDirtyUi();
-        };
-        if (api.setGridOption) {
-          api.setGridOption('onColumnMoved', gridOptions.onColumnMoved);
+          refreshColumns();
+          refreshRows();
+          markDataDirty();
+        } catch (error) {
+          throw new Error(error instanceof Error ? error.message : 'Column rename failed');
         }
-        if (typeof createContextMenu === 'function') {
-          const rowMenu = createContextMenu({
-            trigger: 'manual',
-            theme: 'system',
-            items: ({ data }) => {
-              const row = data?.row;
-              return [
-                { id: 'move-up', label: 'Move Up', icon: () => createTablerIcon('arrow-up'), disabled: !Number.isInteger(row) || row <= 0 },
-                { id: 'move-down', label: 'Move Down', icon: () => createTablerIcon('arrow-down'), disabled: !Number.isInteger(row) || row >= allRows.length - 1 },
-                { type: 'separator' },
-                { id: 'insert-row-before', label: 'Insert Row Before', icon: () => createTablerIcon('row-insert-bottom') },
-                { id: 'insert-row-after', label: 'Insert Row After', icon: () => createTablerIcon('row-insert-bottom') },
-                { type: 'separator' },
-                { id: 'delete-row', label: 'Delete Row', icon: () => createTablerIcon('trash'), variant: 'danger' },
-                { id: 'delete-column', label: 'Delete Column', icon: () => createTablerIcon('column-remove'), variant: 'danger' },
-              ];
-            },
-            onSelect(event) {
-              const row = event.context.data?.row;
-              const column = event.context.data?.column;
-              if (event.id === 'move-up' && Number.isInteger(row)) {
-                void moveRowBy(row, -1);
-              }
-              if (event.id === 'move-down' && Number.isInteger(row)) {
-                void moveRowBy(row, 1);
-              }
-              if (event.id === 'insert-row-before' && Number.isInteger(row)) {
-                void insertRowAt(rowInsertionIndex(row, allRows.length, 0));
-              }
-              if (event.id === 'insert-row-after' && Number.isInteger(row)) {
-                void insertRowAt(rowInsertionIndex(row, allRows.length, 1));
-              }
-              if (event.id === 'delete-row' && Number.isInteger(row)) {
-                void deleteRowAt(row);
-              }
-              if (event.id === 'delete-column' && typeof column === 'string') {
-                void deleteColumnByName(column);
-              }
-            },
+      };
+      const columnIndexFor = (column) => {
+        const columnIndex = schema.columns.indexOf(column || focusedColumnName());
+        return columnIndex >= 0 ? columnIndex : schema.columns.length;
+      };
+      const showInsertColumnDialog = (column = '', offset = 0) => {
+        const columnIndex = columnIndexFor(column);
+        pendingInsertColumn = Math.min(columnIndex + offset, schema.columns.length);
+        insertColumnName.value = '';
+        clearColumnError();
+        insertColumnDialog.showModal();
+        insertColumnName.focus();
+      };
+      const showRenameColumnDialog = (column) => {
+        if (!column || !schema.columns.includes(column)) {
+          statusNode.textContent = 'Choose a column to rename.';
+          return;
+        }
+        pendingRenameColumn = column;
+        renameColumnName.value = column;
+        clearRenameColumnError();
+        renameColumnDialog.showModal();
+        renameColumnName.focus();
+        renameColumnName.select();
+      };
+      gridOptions.onCellValueChanged = async (event) => {
+        if (!event.colDef.field || event.colDef.field === '_csvzallRowId') {
+          return;
+        }
+        try {
+          await postJson('/api/edit-cell', {
+            row: event.data._csvzallRowId,
+            column: event.colDef.field,
+            value: event.newValue ?? '',
           });
-          gridOptions.onCellContextMenu = (event) => {
-            if (queryMode === 'sql') {
-              return;
-            }
-            const nativeEvent = event.event;
-            const row = event.data?._csvzallRowId;
-            const column = event.colDef?.field;
-            if (!nativeEvent || !Number.isInteger(row)) {
-              return;
-            }
-            nativeEvent.preventDefault();
-            event.node?.setSelected?.(true);
-            rowMenu.open({
-              x: nativeEvent.clientX,
-              y: nativeEvent.clientY,
-              target: gridElement,
-              triggerEvent: nativeEvent,
-              context: { row, column },
-            });
-          };
-          if (api.setGridOption) {
-            api.setGridOption('onCellContextMenu', gridOptions.onCellContextMenu);
-          }
-          const columnMenu = createContextMenu({
-            trigger: 'manual',
-            theme: 'system',
-            items: [
-              { id: 'rename-column', label: 'Rename Column', icon: () => createTablerIcon('pencil') },
+          markDataDirty();
+        } catch (error) {
+          event.node.setDataValue(event.colDef.field, event.oldValue ?? '');
+          statusNode.textContent = error instanceof Error ? error.message : 'Edit failed';
+        }
+      };
+      if (api.setGridOption) {
+        api.setGridOption('onCellValueChanged', gridOptions.onCellValueChanged);
+      }
+      gridOptions.onColumnMoved = (event) => {
+        if (event.finished !== true) {
+          return;
+        }
+        const columns = currentGridColumns(api, schema.columns);
+        if (columns.length !== schema.columns.length) {
+          return;
+        }
+        const changed = !columns.every((column, index) => column === schema.columns[index]);
+        viewState.setColumnOrderDirty(changed);
+        refreshDirtyUi();
+      };
+      if (api.setGridOption) {
+        api.setGridOption('onColumnMoved', gridOptions.onColumnMoved);
+      }
+      if (typeof createContextMenu === 'function') {
+        const rowMenu = createContextMenu({
+          trigger: 'manual',
+          theme: 'system',
+          items: ({ data }) => {
+            const row = data?.row;
+            return [
+              { id: 'move-up', label: 'Move Up', icon: () => createTablerIcon('arrow-up'), disabled: !Number.isInteger(row) || row <= 0 },
+              { id: 'move-down', label: 'Move Down', icon: () => createTablerIcon('arrow-down'), disabled: !Number.isInteger(row) || row >= schema.totalRows - 1 },
               { type: 'separator' },
+              { id: 'insert-row-before', label: 'Insert Row Before', icon: () => createTablerIcon('row-insert-bottom') },
+              { id: 'insert-row-after', label: 'Insert Row After', icon: () => createTablerIcon('row-insert-bottom') },
+              { type: 'separator' },
+              { id: 'delete-row', label: 'Delete Row', icon: () => createTablerIcon('trash'), variant: 'danger' },
               { id: 'delete-column', label: 'Delete Column', icon: () => createTablerIcon('column-remove'), variant: 'danger' },
-            ],
-            onSelect(event) {
-              const column = event.context.data?.column;
-              if (event.id === 'rename-column' && typeof column === 'string') {
-                showRenameColumnDialog(column);
-              }
-              if (event.id === 'delete-column' && typeof column === 'string') {
-                void deleteColumnByName(column);
-              }
-            },
-          });
-          gridElement.addEventListener('contextmenu', (event) => {
-            if (queryMode === 'sql') {
-              return;
+            ];
+          },
+          onSelect(event) {
+            const row = event.context.data?.row;
+            const column = event.context.data?.column;
+            if (event.id === 'move-up' && Number.isInteger(row)) {
+              void moveRowBy(row, -1);
             }
-            const headerCell = event.target?.closest?.('.ag-header-cell[col-id]');
-            const column = headerCell?.getAttribute('col-id') ?? '';
-            if (!column || !schema.columns.includes(column)) {
-              return;
+            if (event.id === 'move-down' && Number.isInteger(row)) {
+              void moveRowBy(row, 1);
             }
-            event.preventDefault();
-            columnMenu.open({
-              x: event.clientX,
-              y: event.clientY,
-              target: headerCell,
-              triggerEvent: event,
-              context: { column },
-            });
+            if (event.id === 'insert-row-before' && Number.isInteger(row)) {
+              void insertRowAt(rowInsertionIndex(row, schema.totalRows, 0));
+            }
+            if (event.id === 'insert-row-after' && Number.isInteger(row)) {
+              void insertRowAt(rowInsertionIndex(row, schema.totalRows, 1));
+            }
+            if (event.id === 'delete-row' && Number.isInteger(row)) {
+              void deleteRowAt(row);
+            }
+            if (event.id === 'delete-column' && typeof column === 'string') {
+              void deleteColumnByName(column);
+            }
+          },
+        });
+        gridOptions.onCellContextMenu = (event) => {
+          const nativeEvent = event.event;
+          const row = event.data?._csvzallRowId;
+          const column = event.colDef?.field;
+          if (!nativeEvent || !Number.isInteger(row)) {
+            return;
+          }
+          nativeEvent.preventDefault();
+          event.node?.setSelected?.(true);
+          rowMenu.open({
+            x: nativeEvent.clientX,
+            y: nativeEvent.clientY,
+            target: gridElement,
+            triggerEvent: nativeEvent,
+            context: { row, column },
           });
+        };
+        if (api.setGridOption) {
+          api.setGridOption('onCellContextMenu', gridOptions.onCellContextMenu);
         }
-        createToolbarDropdown(insertMenuButton, [
-          { id: 'insert-row-before', label: 'Row Before', icon: () => createTablerIcon('row-insert-bottom') },
-          { id: 'insert-row-after', label: 'Row After', icon: () => createTablerIcon('row-insert-bottom') },
-          { type: 'separator' },
-          { id: 'insert-column-before', label: 'Column Before', icon: () => createTablerIcon('column-insert-right') },
-          { id: 'insert-column-after', label: 'Column After', icon: () => createTablerIcon('column-insert-right') },
-        ], (event) => {
-          if (event.id === 'insert-row-before') {
-            void insertRowRelativeToSelection(0);
-          }
-          if (event.id === 'insert-row-after') {
-            void insertRowRelativeToSelection(1);
-          }
-          if (event.id === 'insert-column-before') {
-            showInsertColumnDialog('', 0);
-          }
-          if (event.id === 'insert-column-after') {
-            showInsertColumnDialog('', 1);
-          }
+        const columnMenu = createContextMenu({
+          trigger: 'manual',
+          theme: 'system',
+          items: [
+            { id: 'rename-column', label: 'Rename Column', icon: () => createTablerIcon('pencil') },
+            { type: 'separator' },
+            { id: 'delete-column', label: 'Delete Column', icon: () => createTablerIcon('column-remove'), variant: 'danger' },
+          ],
+          onSelect(event) {
+            const column = event.context.data?.column;
+            if (event.id === 'rename-column' && typeof column === 'string') {
+              showRenameColumnDialog(column);
+            }
+            if (event.id === 'delete-column' && typeof column === 'string') {
+              void deleteColumnByName(column);
+            }
+          },
         });
-        insertColumnForm.addEventListener('submit', async (event) => {
+        gridElement.addEventListener('contextmenu', (event) => {
+          const headerCell = event.target?.closest?.('.ag-header-cell[col-id]');
+          const column = headerCell?.getAttribute('col-id') ?? '';
+          if (!column || !schema.columns.includes(column)) {
+            return;
+          }
           event.preventDefault();
-          const name = insertColumnName.value.trim();
-          if (!name) {
-            showColumnError('Enter a column name.');
-            insertColumnName.focus();
-            return;
-          }
-          if (schema.columns.includes(name)) {
-            showColumnError(`Column already exists: ${name}`);
-            insertColumnName.focus();
-            return;
-          }
-          try {
-            await insertColumnAt(pendingInsertColumn, name);
-            insertColumnDialog.close('insert');
-          } catch (error) {
-            showColumnError(error instanceof Error ? error.message : 'Column insert failed');
-          }
-        });
-        cancelInsertColumn.addEventListener('click', () => {
-          insertColumnDialog.close('cancel');
-        });
-        renameColumnForm.addEventListener('submit', async (event) => {
-          event.preventDefault();
-          const name = renameColumnName.value.trim();
-          if (!name) {
-            showRenameColumnError('Enter a column name.');
-            renameColumnName.focus();
-            return;
-          }
-          if (name === pendingRenameColumn) {
-            renameColumnDialog.close('rename');
-            return;
-          }
-          if (name !== pendingRenameColumn && schema.columns.includes(name)) {
-            showRenameColumnError(`Column already exists: ${name}`);
-            renameColumnName.focus();
-            return;
-          }
-          try {
-            await renameColumnByName(pendingRenameColumn, name);
-            renameColumnDialog.close('rename');
-          } catch (error) {
-            showRenameColumnError(error instanceof Error ? error.message : 'Column rename failed');
-          }
-        });
-        cancelRenameColumn.addEventListener('click', () => {
-          renameColumnDialog.close('cancel');
-        });
-        createToolbarDropdown(deleteMenuButton, [
-          { id: 'delete-row', label: 'Row', icon: () => createTablerIcon('row-remove'), variant: 'danger' },
-          { id: 'delete-column', label: 'Column', icon: () => createTablerIcon('column-remove'), variant: 'danger' },
-        ], (event) => {
-          if (event.id === 'delete-row') {
-            void deleteRowAt(selectedSourceRow());
-          }
-          if (event.id === 'delete-column') {
-            void deleteColumnByName(focusedColumnName());
-          }
-        });
-        resetButton.addEventListener('click', async () => {
-          try {
-            resetButton.disabled = true;
-            saveButton.disabled = true;
-            statusNode.textContent = 'Resetting…';
-            await postJson('/api/reset');
-            viewState.markClean();
-            emitDirtyState();
-            window.location.reload();
-          } catch (error) {
-            resetButton.disabled = !viewState.dirty;
-            saveButton.disabled = !viewState.dirty;
-            statusNode.textContent = error instanceof Error ? error.message : 'Reset failed';
-          }
-        });
-        saveButton.addEventListener('click', () => {
-          void saveCurrentChanges();
+          columnMenu.open({
+            x: event.clientX,
+            y: event.clientY,
+            target: headerCell,
+            triggerEvent: event,
+            context: { column },
+          });
         });
       }
-      refreshDirtyUi();
-      if (sessionStorage.getItem(reopenChartsAfterReloadKey) === '1') {
-        sessionStorage.removeItem(reopenChartsAfterReloadKey);
-        void openChartDialog();
-      }
-    } else {
-      setDatasource(api, {
-        async getRows(params) {
-          const offset = params.startRow;
-          const limit = Math.max(params.endRow - params.startRow, 1);
-          statusNode.textContent = `Loading rows ${offset + 1}-${Math.min(params.endRow, schema.totalRows)} of ${schema.totalRows}…`;
-          try {
-            const page = await fetchJson('/api/rows', { offset, limit });
-            const rowData = rowsToObjects(schema.columns, page.rows);
-            const loadedThrough = page.offset + page.rows.length;
-            const lastRow = loadedThrough >= page.totalRows ? page.totalRows : undefined;
-            params.successCallback(rowData, lastRow);
-            statusNode.textContent = `Loaded rows ${page.offset + 1}-${loadedThrough} of ${page.totalRows}.`;
-          } catch (error) {
-            params.failCallback();
-            statusNode.textContent = error instanceof Error ? error.message : 'Row load failed';
-          }
-        },
+      createToolbarDropdown(insertMenuButton, [
+        { id: 'insert-row-before', label: 'Row Before', icon: () => createTablerIcon('row-insert-bottom') },
+        { id: 'insert-row-after', label: 'Row After', icon: () => createTablerIcon('row-insert-bottom') },
+        { type: 'separator' },
+        { id: 'insert-column-before', label: 'Column Before', icon: () => createTablerIcon('column-insert-right') },
+        { id: 'insert-column-after', label: 'Column After', icon: () => createTablerIcon('column-insert-right') },
+      ], (event) => {
+        if (event.id === 'insert-row-before') {
+          void insertRowRelativeToSelection(0);
+        }
+        if (event.id === 'insert-row-after') {
+          void insertRowRelativeToSelection(1);
+        }
+        if (event.id === 'insert-column-before') {
+          showInsertColumnDialog('', 0);
+        }
+        if (event.id === 'insert-column-after') {
+          showInsertColumnDialog('', 1);
+        }
       });
-      statusNode.textContent = `Ready: ${schema.totalRows.toLocaleString()} rows indexed.`;
+      insertColumnForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const name = insertColumnName.value.trim();
+        if (!name) {
+          showColumnError('Enter a column name.');
+          insertColumnName.focus();
+          return;
+        }
+        if (schema.columns.includes(name)) {
+          showColumnError(`Column already exists: ${name}`);
+          insertColumnName.focus();
+          return;
+        }
+        try {
+          await insertColumnAt(pendingInsertColumn, name);
+          insertColumnDialog.close('insert');
+        } catch (error) {
+          showColumnError(error instanceof Error ? error.message : 'Column insert failed');
+        }
+      });
+      cancelInsertColumn.addEventListener('click', () => {
+        insertColumnDialog.close('cancel');
+      });
+      renameColumnForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const name = renameColumnName.value.trim();
+        if (!name) {
+          showRenameColumnError('Enter a column name.');
+          renameColumnName.focus();
+          return;
+        }
+        if (name === pendingRenameColumn) {
+          renameColumnDialog.close('rename');
+          return;
+        }
+        if (name !== pendingRenameColumn && schema.columns.includes(name)) {
+          showRenameColumnError(`Column already exists: ${name}`);
+          renameColumnName.focus();
+          return;
+        }
+        try {
+          await renameColumnByName(pendingRenameColumn, name);
+          renameColumnDialog.close('rename');
+        } catch (error) {
+          showRenameColumnError(error instanceof Error ? error.message : 'Column rename failed');
+        }
+      });
+      cancelRenameColumn.addEventListener('click', () => {
+        renameColumnDialog.close('cancel');
+      });
+      createToolbarDropdown(deleteMenuButton, [
+        { id: 'delete-row', label: 'Row', icon: () => createTablerIcon('row-remove'), variant: 'danger' },
+        { id: 'delete-column', label: 'Column', icon: () => createTablerIcon('column-remove'), variant: 'danger' },
+      ], (event) => {
+        if (event.id === 'delete-row') {
+          void deleteRowAt(selectedSourceRow());
+        }
+        if (event.id === 'delete-column') {
+          void deleteColumnByName(focusedColumnName());
+        }
+      });
+      resetButton.addEventListener('click', async () => {
+        try {
+          resetButton.disabled = true;
+          saveButton.disabled = true;
+          statusNode.textContent = 'Resetting…';
+          await postJson('/api/reset');
+          viewState.markClean();
+          emitDirtyState();
+          window.location.reload();
+        } catch (error) {
+          resetButton.disabled = !viewState.dirty;
+          saveButton.disabled = !viewState.dirty;
+          statusNode.textContent = error instanceof Error ? error.message : 'Reset failed';
+        }
+      });
+      saveButton.addEventListener('click', () => {
+        void saveCurrentChanges();
+      });
+      refreshDirtyUi();
     }
 
     if (api.sizeColumnsToFit) {

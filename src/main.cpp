@@ -279,7 +279,7 @@ std::optional<char> ParseDelimiter(const std::string& s) {
 
 std::optional<csvzall::pipeline::ViewModeSelection> ParseViewMode(const std::string& s) {
   if (s == "auto") return csvzall::pipeline::ViewModeSelection::Auto;
-  if (s == "materialized") return csvzall::pipeline::ViewModeSelection::Materialized;
+  if (s == "materialized") return csvzall::pipeline::ViewModeSelection::Paged;
   if (s == "paged") return csvzall::pipeline::ViewModeSelection::Paged;
   return std::nullopt;
 }
@@ -589,19 +589,19 @@ Output shape:
   API requests require a random session token.
   --startup-json prints {"url":"http://127.0.0.1:..."} for host integrations.
   The viewer is read-only unless --edit is provided.
-  Pass --edit to enable explicit editable mode. Editable mode materializes the
-  file, tracks dirty state in the browser, supports cell edits plus row/column
-  insert/delete, exposes row deletion from the context menu, and saves by
-  atomically rewriting the source CSV after checking that size and mtime did not
-  change externally.
+  Pass --edit to enable explicit editable mode. Editable mode uses the same
+  row-offset index as read-only viewing, keeps unsaved edits in an overlay,
+  supports cell edits plus row/column insert/delete, exposes row deletion from
+  the context menu, and saves by atomically rewriting the source CSV after
+  checking that size and mtime did not change externally.
   --viewer-assets <dir> is a developer override that serves index.html,
   viewer.css, viewer.js, and viewer modules from disk on every request;
   embedded assets remain the default. CSVZALL_VIEWER_ASSETS provides the same
   override. AG Grid and Popright vendor files remain embedded.
-  Auto mode materializes files at or below --materialize-threshold-mb for
-  client-side sorting/filtering and uses indexed /api/rows paging for larger
-  files. Paged mode disables global sort/search/filter until server-side
-  implementations exist.
+  The viewer indexes CSV row byte offsets and serves rows through /api/rows for
+  all file sizes. Paged mode disables global sort/search/filter until
+  server-side implementations exist. The old materialized view mode spelling is
+  accepted as a compatibility alias for paged mode.
   --once serves one successful request and exits; useful for scripts and tests.
 
 Examples:
@@ -636,10 +636,10 @@ Related:
       .default_value(0)
       .scan<'i', int>();
   view_cmd.add_argument("--view-mode")
-      .help("Viewer row loading mode: auto, materialized, or paged")
+      .help("Viewer row loading mode: auto or paged; materialized is a compatibility alias")
       .default_value(std::string{"auto"});
   view_cmd.add_argument("--materialize-threshold-mb")
-      .help("Auto mode materializes plain local files at or below this size for client-side sort/filter")
+      .help("Compatibility no-op; the viewer now uses row-offset paging for all files")
       .default_value(200)
       .scan<'i', int>();
   view_cmd.add_argument("--edit")
@@ -1248,7 +1248,7 @@ Examples:
     }
     const auto view_mode = ParseViewMode(view_cmd.get<std::string>("--view-mode"));
     if (!view_mode) {
-      logger.Error("view: --view-mode must be one of auto, materialized, or paged.");
+      logger.Error("view: --view-mode must be one of auto, paged, or materialized.");
       return 1;
     }
     const int materialize_threshold_mb = view_cmd.get<int>("--materialize-threshold-mb");

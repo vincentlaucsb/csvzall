@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <ranges>
@@ -27,8 +28,8 @@ namespace csvzall::pipeline::commands {
 namespace {
 
 using view_internal::GenerateSessionToken;
-using view_internal::kBytesPerMiB;
 using view_internal::MakeViewFormat;
+
 void ValidatePlainLocalViewInput(const std::string& input_path, const RunOptions& options) {
   if (input_path.empty() || input_path == "-") {
     throw std::runtime_error("stdin is not supported; pass a plain local CSV file path");
@@ -61,12 +62,15 @@ bool FileExists(const std::string& input_path) {
   return std::filesystem::exists(input_path, ec);
 }
 
-bool RecoverRenamedMaterializedSource(CsvMaterializedFile& materialized) {
-  if (FileExists(materialized.input_path)) {
+bool RecoverRenamedSource(std::string& input_path,
+                          std::string& file_name,
+                          const std::uint64_t source_size,
+                          const std::filesystem::file_time_type source_mtime) {
+  if (FileExists(input_path)) {
     return false;
   }
 
-  const auto original = std::filesystem::path(materialized.input_path);
+  const auto original = std::filesystem::path(input_path);
   auto parent = original.parent_path();
   if (parent.empty()) {
     parent = ".";
@@ -74,7 +78,7 @@ bool RecoverRenamedMaterializedSource(CsvMaterializedFile& materialized) {
 
   std::error_code ec;
   if (!std::filesystem::exists(parent, ec)) {
-    throw std::runtime_error("source file no longer exists: " + materialized.input_path);
+    throw std::runtime_error("source file no longer exists: " + input_path);
   }
 
   std::vector<std::filesystem::path> matches;
@@ -89,26 +93,26 @@ bool RecoverRenamedMaterializedSource(CsvMaterializedFile& materialized) {
       continue;
     }
     const auto size = entry.file_size(entry_ec);
-    if (entry_ec || static_cast<std::uint64_t>(size) != materialized.source_size) {
+    if (entry_ec || static_cast<std::uint64_t>(size) != source_size) {
       continue;
     }
     const auto mtime = entry.last_write_time(entry_ec);
-    if (entry_ec || mtime != materialized.source_mtime) {
+    if (entry_ec || mtime != source_mtime) {
       continue;
     }
     matches.push_back(entry.path());
   }
 
   if (matches.empty()) {
-    throw std::runtime_error("source file no longer exists: " + materialized.input_path);
+    throw std::runtime_error("source file no longer exists: " + input_path);
   }
   if (matches.size() > 1) {
     throw std::runtime_error(
         "source file was renamed, but the new path is ambiguous; reopen the viewer");
   }
 
-  materialized.input_path = matches.front().string();
-  materialized.file_name = matches.front().filename().string();
+  input_path = matches.front().string();
+  file_name = matches.front().filename().string();
   return true;
 }
 
@@ -119,86 +123,17 @@ void RequireNonEmptyCsvFile(const std::uint64_t file_size) {
   }
 }
 
-std::uint64_t ThresholdBytes(std::size_t threshold_mb) {
-  constexpr auto max = std::numeric_limits<std::uint64_t>::max();
-  if (threshold_mb > max / kBytesPerMiB) {
-    return max;
-  }
-  return static_cast<std::uint64_t>(threshold_mb) * kBytesPerMiB;
-}
-
-void ValidateColumnOrder(const csv::DataFrame<>& frame,
-                         const std::vector<std::string>& columns) {
-  if (columns.empty()) {
-    return;
-  }
-  if (columns.size() != frame.n_cols()) {
-    throw std::runtime_error("column order must include every column exactly once");
-  }
-
-  std::unordered_map<std::string, std::size_t> counts;
-  for (const auto& column : frame.columns()) {
-    ++counts[column];
-  }
+std::vector<std::string> ColumnNames(const std::vector<CsvColumnDescriptor>& columns) {
+  std::vector<std::string> names;
+  names.reserve(columns.size());
   for (const auto& column : columns) {
-    const auto iter = counts.find(column);
-    if (iter == counts.end() || iter->second == 0) {
-      throw std::runtime_error("unknown column: " + column);
-    }
-    --iter->second;
+    names.push_back(column.name);
   }
-  for (const auto& [column, count] : counts) {
-    if (count != 0) {
-      throw std::runtime_error("missing column: " + column);
-    }
-  }
-}
-
-void ReloadMaterializedFile(CsvMaterializedFile& materialized) {
-  const auto file_size = GetFileSize(materialized.input_path);
-  csv::CSVReader reader(materialized.input_path, materialized.format);
-  auto frame = std::make_shared<csv::DataFrame<>>(reader);
-  if (frame->columns().empty()) {
-    throw std::runtime_error("input appears to have no header row");
-  }
-
-  materialized.frame = std::move(frame);
-  materialized.source_size = file_size;
-  materialized.source_mtime = GetFileMtime(materialized.input_path);
-}
-
-CsvMaterializedFile OpenMaterializedFile(const std::string& input_path,
-                                         const RunOptions& options,
-                                         const LoggerCallbacks& logger,
-                                         RunStats& stats) {
-  ValidatePlainLocalViewInput(input_path, options);
-
-  CsvMaterializedFile materialized;
-  materialized.input_path = input_path;
-  materialized.file_name = std::filesystem::path(input_path).filename().string();
-  const auto file_size = GetFileSize(input_path);
-  RequireNonEmptyCsvFile(file_size);
-  materialized.source_size = file_size;
-  materialized.source_mtime = GetFileMtime(input_path);
-
-  auto format = MakeViewFormat(options);
-  materialized.format = format;
-  csv::CSVReader reader(input_path, format);
-  materialized.frame = std::make_shared<csv::DataFrame<>>(reader);
-  if (materialized.frame->columns().empty()) {
-    throw std::runtime_error("input appears to have no header row");
-  }
-
-  stats.rows_processed = static_cast<std::uint64_t>(materialized.frame->n_rows());
-  stats.bytes_processed = file_size;
-  if (logger.verbose) {
-    logger.verbose("view: materialized " + std::to_string(materialized.frame->n_rows()) +
-                   " row(s) from " + input_path);
-  }
-  return materialized;
+  return names;
 }
 
 }  // namespace
+
 CsvIndexedFile CsvIndexedFile::Open(const std::string& input_path,
                                     const RunOptions& options,
                                     const LoggerCallbacks& logger,
@@ -211,17 +146,26 @@ CsvIndexedFile CsvIndexedFile::Open(const std::string& input_path,
 
   indexed.file_size_ = GetFileSize(input_path);
   RequireNonEmptyCsvFile(indexed.file_size_);
+  indexed.source_mtime_ = GetFileMtime(input_path);
 
   auto format = MakeViewFormat(options);
   csv::CSVReader reader(input_path, format);
   indexed.format_ = reader.get_format();
+  indexed.format_.header_row(0);
   indexed.headers_ = reader.get_col_names();
   if (indexed.headers_.empty()) {
     throw std::runtime_error("input appears to have no header row");
   }
 
+  indexed.columns_.reserve(indexed.headers_.size());
+  for (std::size_t i = 0; i < indexed.headers_.size(); ++i) {
+    indexed.columns_.push_back({indexed.headers_[i], i, ""});
+  }
+
   for (auto& row : reader) {
+    const auto source_row = static_cast<std::uint64_t>(indexed.index_.size());
     indexed.index_.push_back({static_cast<std::uint64_t>(row.byte_offset())});
+    indexed.rows_.push_back({source_row, {}});
   }
 
   stats.rows_processed = static_cast<std::uint64_t>(indexed.index_.size());
@@ -246,20 +190,20 @@ const std::vector<std::string>& CsvIndexedFile::headers() const {
 }
 
 std::uint64_t CsvIndexedFile::row_count() const {
-  return static_cast<std::uint64_t>(index_.size());
+  return static_cast<std::uint64_t>(rows_.size());
 }
 
-std::vector<std::vector<std::string>> CsvIndexedFile::read_rows(
+std::vector<std::vector<std::string>> CsvIndexedFile::read_source_rows(
     const std::uint64_t offset,
     const std::uint64_t limit) const {
-  if (offset >= row_count() || limit == 0) {
+  if (offset >= index_.size() || limit == 0) {
     return {};
   }
 
-  const auto count = std::min<std::uint64_t>(limit, row_count() - offset);
+  const auto count = std::min<std::uint64_t>(limit, index_.size() - offset);
   const auto start = index_[static_cast<std::size_t>(offset)].byte_offset;
   const auto after_last_row = offset + count;
-  const auto end = after_last_row < row_count()
+  const auto end = after_last_row < index_.size()
       ? index_[static_cast<std::size_t>(after_last_row)].byte_offset
       : file_size_;
   if (end < start) {
@@ -297,256 +241,271 @@ std::vector<std::vector<std::string>> CsvIndexedFile::read_rows(
   return rows;
 }
 
-CsvViewData CsvViewData::Open(const std::string& input_path,
-                              const RunOptions& options,
-                              const LoggerCallbacks& logger,
-                              RunStats& stats) {
-  ValidatePlainLocalViewInput(input_path, options);
-  const auto file_size = GetFileSize(input_path);
-  const auto materialize = [&]() {
-    if (options.view_edit) {
-      return true;
+std::vector<std::string> CsvIndexedFile::read_source_row(const std::uint64_t source_row) const {
+  auto rows = read_source_rows(source_row, 1);
+  if (rows.empty()) {
+    throw std::out_of_range("row index out of bounds");
+  }
+  return std::move(rows.front());
+}
+
+std::vector<std::string> CsvIndexedFile::row_values_for_columns(
+    const CsvLogicalRow& row,
+    const std::vector<CsvColumnDescriptor>& columns) const {
+  std::vector<std::string> source_values;
+  if (row.source_row) {
+    source_values = read_source_row(*row.source_row);
+  }
+
+  std::vector<std::string> values;
+  values.reserve(columns.size());
+  for (const auto& column : columns) {
+    std::string value = column.default_value;
+    if (column.source_index && *column.source_index < source_values.size()) {
+      value = source_values[*column.source_index];
     }
-    switch (options.view_mode) {
-      case ViewModeSelection::Materialized:
-        return true;
-      case ViewModeSelection::Paged:
-        return false;
-      case ViewModeSelection::Auto:
-        return file_size <= ThresholdBytes(options.view_materialize_threshold_mb);
+    if (const auto edit = row.cells.find(column.name); edit != row.cells.end()) {
+      value = edit->second;
     }
-    return false;
-  }();
-
-  if (materialize) {
-    return CsvViewData(OpenMaterializedFile(input_path, options, logger, stats));
+    values.push_back(std::move(value));
   }
-  return CsvViewData(CsvIndexedFile::Open(input_path, options, logger, stats));
+  return values;
 }
 
-CsvViewData::CsvViewData(CsvMaterializedFile materialized)
-    : data_(std::move(materialized)) {}
-
-CsvViewData::CsvViewData(CsvIndexedFile indexed)
-    : data_(std::move(indexed)) {}
-
-CsvViewDataMode CsvViewData::mode() const {
-  return std::holds_alternative<CsvMaterializedFile>(data_)
-      ? CsvViewDataMode::Materialized
-      : CsvViewDataMode::Paged;
-}
-
-std::string_view CsvViewData::mode_name() const {
-  return mode() == CsvViewDataMode::Materialized ? "materialized" : "paged";
-}
-
-const std::string& CsvViewData::input_path() const {
-  if (const auto* materialized = std::get_if<CsvMaterializedFile>(&data_)) {
-    return materialized->input_path;
-  }
-  return std::get<CsvIndexedFile>(data_).input_path();
-}
-
-const std::string& CsvViewData::file_name() const {
-  if (const auto* materialized = std::get_if<CsvMaterializedFile>(&data_)) {
-    return materialized->file_name;
-  }
-  return std::get<CsvIndexedFile>(data_).file_name();
-}
-
-const std::vector<std::string>& CsvViewData::headers() const {
-  if (const auto* materialized = std::get_if<CsvMaterializedFile>(&data_)) {
-    return materialized->frame->columns();
-  }
-  return std::get<CsvIndexedFile>(data_).headers();
-}
-
-std::uint64_t CsvViewData::row_count() const {
-  if (const auto* materialized = std::get_if<CsvMaterializedFile>(&data_)) {
-    return static_cast<std::uint64_t>(materialized->frame->n_rows());
-  }
-  return std::get<CsvIndexedFile>(data_).row_count();
-}
-
-std::vector<std::vector<std::string>> CsvViewData::read_rows(
+std::vector<std::vector<std::string>> CsvIndexedFile::read_rows(
     const std::uint64_t offset,
     const std::uint64_t limit) const {
-  if (const auto* materialized = std::get_if<CsvMaterializedFile>(&data_)) {
-    if (offset >= row_count() || limit == 0) {
-      return {};
-    }
-    const auto count = std::min<std::uint64_t>(limit, row_count() - offset);
-    std::vector<std::vector<std::string>> rows;
-    rows.reserve(static_cast<std::size_t>(count));
-    for (std::uint64_t i = 0; i < count; ++i) {
-      rows.emplace_back(std::vector<std::string>(
-          materialized->frame->at(static_cast<std::size_t>(offset + i))));
-    }
-    return rows;
+  if (offset >= row_count() || limit == 0) {
+    return {};
   }
-  return std::get<CsvIndexedFile>(data_).read_rows(offset, limit);
+
+  const auto count = std::min<std::uint64_t>(limit, row_count() - offset);
+  bool direct_source_page = columns_.size() == headers_.size();
+  for (std::size_t i = 0; direct_source_page && i < columns_.size(); ++i) {
+    direct_source_page = columns_[i].source_index == i;
+  }
+  const auto first_source_row = rows_[static_cast<std::size_t>(offset)].source_row;
+  direct_source_page = direct_source_page && first_source_row.has_value();
+  for (std::uint64_t i = 0; direct_source_page && i < count; ++i) {
+    const auto& row = rows_[static_cast<std::size_t>(offset + i)];
+    direct_source_page = row.source_row && row.cells.empty() &&
+        *row.source_row == *first_source_row + i;
+  }
+  if (direct_source_page) {
+    return read_source_rows(*first_source_row, count);
+  }
+
+  std::vector<std::vector<std::string>> rows;
+  rows.reserve(static_cast<std::size_t>(count));
+  for (std::uint64_t i = 0; i < count; ++i) {
+    rows.push_back(row_values_for_columns(
+        rows_[static_cast<std::size_t>(offset + i)], columns_));
+  }
+  return rows;
 }
 
-void CsvViewData::edit_cell(const std::uint64_t row,
-                            const std::string& column,
-                            const std::string& value) {
-  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
-  if (!materialized) {
-    throw std::runtime_error("editing requires materialized view mode");
-  }
-  if (!materialized->frame->has_column(column)) {
+std::size_t CsvIndexedFile::column_index(const std::string& column) const {
+  const auto iter = std::ranges::find(headers_, column);
+  if (iter == headers_.end()) {
     throw std::runtime_error("unknown column: " + column);
   }
-  if (row >= materialized->frame->n_rows()) {
-    throw std::out_of_range("row index out of bounds");
-  }
-  materialized->frame->at(static_cast<std::size_t>(row))[column] = value;
+  return static_cast<std::size_t>(std::distance(headers_.begin(), iter));
 }
 
-void CsvViewData::delete_row(const std::uint64_t row) {
-  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
-  if (!materialized) {
-    throw std::runtime_error("editing requires materialized view mode");
+bool CsvIndexedFile::has_column(const std::string& column) const {
+  return std::ranges::find(headers_, column) != headers_.end();
+}
+
+void CsvIndexedFile::refresh_headers() {
+  headers_ = ColumnNames(columns_);
+}
+
+void CsvIndexedFile::validate_column_order(const std::vector<std::string>& columns) const {
+  if (columns.empty()) {
+    return;
   }
-  if (row >= materialized->frame->n_rows()) {
-    throw std::out_of_range("row index out of bounds");
+  if (columns.size() != headers_.size()) {
+    throw std::runtime_error("column order must include every column exactly once");
   }
-  if (!materialized->frame->at(static_cast<std::size_t>(row)).erase()) {
-    throw std::runtime_error("failed to delete row");
+
+  std::unordered_map<std::string, std::size_t> counts;
+  for (const auto& column : headers_) {
+    ++counts[column];
+  }
+  for (const auto& column : columns) {
+    const auto iter = counts.find(column);
+    if (iter == counts.end() || iter->second == 0) {
+      throw std::runtime_error("unknown column: " + column);
+    }
+    --iter->second;
+  }
+  for (const auto& [column, count] : counts) {
+    if (count != 0) {
+      throw std::runtime_error("missing column: " + column);
+    }
   }
 }
 
-void CsvViewData::insert_row(const std::uint64_t row, const std::vector<std::string>& values) {
-  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
-  if (!materialized) {
-    throw std::runtime_error("editing requires materialized view mode");
+std::vector<CsvColumnDescriptor> CsvIndexedFile::ordered_columns(
+    const std::vector<std::string>& columns) const {
+  validate_column_order(columns);
+  if (columns.empty()) {
+    return columns_;
   }
-  if (values.size() != materialized->frame->n_cols()) {
+
+  std::vector<CsvColumnDescriptor> ordered;
+  ordered.reserve(columns.size());
+  for (const auto& column : columns) {
+    ordered.push_back(columns_[column_index(column)]);
+  }
+  return ordered;
+}
+
+void CsvIndexedFile::edit_cell(const std::uint64_t row,
+                               const std::string& column,
+                               const std::string& value) {
+  if (row >= row_count()) {
+    throw std::out_of_range("row index out of bounds");
+  }
+  if (!has_column(column)) {
+    throw std::runtime_error("unknown column: " + column);
+  }
+  rows_[static_cast<std::size_t>(row)].cells[column] = value;
+}
+
+void CsvIndexedFile::delete_row(const std::uint64_t row) {
+  if (row >= row_count()) {
+    throw std::out_of_range("row index out of bounds");
+  }
+  rows_.erase(rows_.begin() + static_cast<std::ptrdiff_t>(row));
+}
+
+void CsvIndexedFile::insert_row(const std::uint64_t row, const std::vector<std::string>& values) {
+  if (values.size() != headers_.size()) {
     throw std::runtime_error("inserted row must match header shape");
   }
-  if (row > materialized->frame->n_rows()) {
+  if (row > row_count()) {
     throw std::out_of_range("row index out of bounds");
   }
-  materialized->frame->insert_row(static_cast<std::size_t>(row), values);
+
+  CsvLogicalRow inserted;
+  for (std::size_t i = 0; i < headers_.size(); ++i) {
+    inserted.cells[headers_[i]] = values[i];
+  }
+  rows_.insert(rows_.begin() + static_cast<std::ptrdiff_t>(row), std::move(inserted));
 }
 
-void CsvViewData::swap_rows(const std::uint64_t first, const std::uint64_t second) {
-  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
-  if (!materialized) {
-    throw std::runtime_error("editing requires materialized view mode");
-  }
-  const auto row_count = materialized->frame->n_rows();
-  if (first >= row_count || second >= row_count) {
+void CsvIndexedFile::swap_rows(const std::uint64_t first, const std::uint64_t second) {
+  if (first >= row_count() || second >= row_count()) {
     throw std::out_of_range("row index out of bounds");
   }
   if (first == second) {
     return;
   }
-
-  const auto first_index = static_cast<std::size_t>(first);
-  const auto second_index = static_cast<std::size_t>(second);
-  const auto first_values = std::vector<std::string>(materialized->frame->at(first_index));
-  const auto second_values = std::vector<std::string>(materialized->frame->at(second_index));
-  for (std::size_t column = 0; column < materialized->frame->n_cols(); ++column) {
-    materialized->frame->at(first_index)[column] = second_values[column];
-    materialized->frame->at(second_index)[column] = first_values[column];
-  }
+  std::swap(rows_[static_cast<std::size_t>(first)], rows_[static_cast<std::size_t>(second)]);
 }
 
-void CsvViewData::insert_column(const std::uint64_t column,
-                                const std::string& name,
-                                const std::string& value) {
-  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
-  if (!materialized) {
-    throw std::runtime_error("editing requires materialized view mode");
-  }
-  if (column > materialized->frame->n_cols()) {
-    throw std::out_of_range("column index out of bounds");
-  }
-  materialized->frame->insert_column(static_cast<std::size_t>(column), name, value);
-}
-
-void CsvViewData::rename_column(const std::string& column, const std::string& name) {
-  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
-  if (!materialized) {
-    throw std::runtime_error("editing requires materialized view mode");
-  }
+void CsvIndexedFile::insert_column(const std::uint64_t column,
+                                   const std::string& name,
+                                   const std::string& value) {
   if (name.empty()) {
     throw std::runtime_error("column name is required");
   }
-  if (!materialized->frame->has_column(column)) {
-    throw std::runtime_error("unknown column: " + column);
+  if (has_column(name)) {
+    throw std::runtime_error("column already exists: " + name);
   }
+  if (column > columns_.size()) {
+    throw std::out_of_range("column index out of bounds");
+  }
+  columns_.insert(columns_.begin() + static_cast<std::ptrdiff_t>(column),
+                  CsvColumnDescriptor{name, std::nullopt, value});
+  refresh_headers();
+}
+
+void CsvIndexedFile::rename_column(const std::string& column, const std::string& name) {
+  if (name.empty()) {
+    throw std::runtime_error("column name is required");
+  }
+  const auto index = column_index(column);
   if (column == name) {
     return;
   }
-  if (materialized->frame->has_column(name)) {
+  if (has_column(name)) {
     throw std::runtime_error("column already exists: " + name);
   }
 
-  const auto column_index = static_cast<std::size_t>(materialized->frame->index_of(column));
-  std::vector<std::string> values;
-  values.reserve(materialized->frame->n_rows());
-  for (std::size_t row = 0; row < materialized->frame->n_rows(); ++row) {
-    values.emplace_back(materialized->frame->at(row)[column]);
+  columns_[index].name = name;
+  for (auto& row : rows_) {
+    if (const auto iter = row.cells.find(column); iter != row.cells.end()) {
+      row.cells[name] = std::move(iter->second);
+      row.cells.erase(iter);
+    }
   }
-
-  materialized->frame->insert_column(column_index, name, "");
-  for (std::size_t row = 0; row < materialized->frame->n_rows(); ++row) {
-    materialized->frame->at(row)[name] = values[row];
-  }
-  if (!materialized->frame->column_view(column).erase()) {
-    throw std::runtime_error("failed to rename column: " + column);
-  }
+  refresh_headers();
 }
 
-void CsvViewData::delete_column(const std::string& column) {
-  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
-  if (!materialized) {
-    throw std::runtime_error("editing requires materialized view mode");
-  }
-  if (materialized->frame->n_cols() <= 1) {
+void CsvIndexedFile::delete_column(const std::string& column) {
+  if (columns_.size() <= 1) {
     throw std::runtime_error("cannot delete the last column");
   }
-  if (!materialized->frame->has_column(column)) {
-    throw std::runtime_error("unknown column: " + column);
+  const auto index = column_index(column);
+  columns_.erase(columns_.begin() + static_cast<std::ptrdiff_t>(index));
+  for (auto& row : rows_) {
+    row.cells.erase(column);
   }
-  if (!materialized->frame->column_view(column).erase()) {
-    throw std::runtime_error("failed to delete column: " + column);
+  refresh_headers();
+}
+
+bool CsvIndexedFile::recover_renamed_source() {
+  return RecoverRenamedSource(input_path_, file_name_, file_size_, source_mtime_);
+}
+
+void CsvIndexedFile::reload() {
+  const auto input_path = input_path_;
+  const auto options_format = format_;
+
+  file_size_ = GetFileSize(input_path);
+  RequireNonEmptyCsvFile(file_size_);
+  source_mtime_ = GetFileMtime(input_path);
+
+  csv::CSVReader reader(input_path, options_format);
+  format_ = reader.get_format();
+  format_.header_row(0);
+  headers_ = reader.get_col_names();
+  if (headers_.empty()) {
+    throw std::runtime_error("input appears to have no header row");
+  }
+
+  columns_.clear();
+  columns_.reserve(headers_.size());
+  for (std::size_t i = 0; i < headers_.size(); ++i) {
+    columns_.push_back({headers_[i], i, ""});
+  }
+
+  index_.clear();
+  rows_.clear();
+  for (auto& row : reader) {
+    const auto source_row = static_cast<std::uint64_t>(index_.size());
+    index_.push_back({static_cast<std::uint64_t>(row.byte_offset())});
+    rows_.push_back({source_row, {}});
   }
 }
 
-bool CsvViewData::recover_renamed_source() {
-  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
-  if (!materialized) {
-    return false;
-  }
-  return RecoverRenamedMaterializedSource(*materialized);
+void CsvIndexedFile::reset() {
+  recover_renamed_source();
+  reload();
 }
 
-void CsvViewData::reset() {
-  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
-  if (!materialized) {
-    throw std::runtime_error("reset requires materialized view mode");
-  }
-  RecoverRenamedMaterializedSource(*materialized);
-  ReloadMaterializedFile(*materialized);
-}
+void CsvIndexedFile::save(const std::vector<std::string>& columns) {
+  const auto save_columns = ordered_columns(columns);
 
-void CsvViewData::save(const std::vector<std::string>& columns) {
-  auto* materialized = std::get_if<CsvMaterializedFile>(&data_);
-  if (!materialized) {
-    throw std::runtime_error("saving requires materialized view mode");
-  }
-  ValidateColumnOrder(*materialized->frame, columns);
-
-  RecoverRenamedMaterializedSource(*materialized);
-  if (GetFileSize(materialized->input_path) != materialized->source_size ||
-      GetFileMtime(materialized->input_path) != materialized->source_mtime) {
+  recover_renamed_source();
+  if (GetFileSize(input_path_) != file_size_ ||
+      GetFileMtime(input_path_) != source_mtime_) {
     throw std::runtime_error("source file changed externally; reload before saving");
   }
 
-  const auto target = std::filesystem::path(materialized->input_path);
+  const auto target = std::filesystem::path(input_path_);
   const auto temp = target.parent_path() /
       (target.filename().string() + ".csvzall-save-" + GenerateSessionToken() + ".tmp");
   try {
@@ -556,17 +515,9 @@ void CsvViewData::save(const std::vector<std::string>& columns) {
         throw std::runtime_error("unable to open temporary save file: " + temp.string());
       }
       auto writer = csv::make_csv_writer(output).set_auto_flush(false);
-      const auto& save_columns = columns.empty() ? materialized->frame->columns() : columns;
-      writer << save_columns;
-      for (const auto& row : *materialized->frame) {
-        if (columns.empty()) {
-          writer << row;
-        } else {
-          auto reordered = save_columns | std::views::transform([&row](const std::string& column) {
-            return row[column];
-          });
-          writer << reordered;
-        }
+      writer << ColumnNames(save_columns);
+      for (const auto& row : rows_) {
+        writer << row_values_for_columns(row, save_columns);
       }
       writer.flush();
       output.close();
@@ -585,16 +536,96 @@ void CsvViewData::save(const std::vector<std::string>& columns) {
 #else
     std::filesystem::rename(temp, target);
 #endif
-    if (columns.empty()) {
-      materialized->source_size = GetFileSize(materialized->input_path);
-      materialized->source_mtime = GetFileMtime(materialized->input_path);
-    } else {
-      ReloadMaterializedFile(*materialized);
-    }
+    reload();
   } catch (...) {
     std::error_code ec;
     std::filesystem::remove(temp, ec);
     throw;
   }
 }
+
+CsvViewData CsvViewData::Open(const std::string& input_path,
+                              const RunOptions& options,
+                              const LoggerCallbacks& logger,
+                              RunStats& stats) {
+  return CsvViewData(CsvIndexedFile::Open(input_path, options, logger, stats));
+}
+
+CsvViewData::CsvViewData(CsvIndexedFile indexed)
+    : data_(std::move(indexed)) {}
+
+CsvViewDataMode CsvViewData::mode() const {
+  return CsvViewDataMode::Paged;
+}
+
+std::string_view CsvViewData::mode_name() const {
+  return "paged";
+}
+
+const std::string& CsvViewData::input_path() const {
+  return data_.input_path();
+}
+
+const std::string& CsvViewData::file_name() const {
+  return data_.file_name();
+}
+
+const std::vector<std::string>& CsvViewData::headers() const {
+  return data_.headers();
+}
+
+std::uint64_t CsvViewData::row_count() const {
+  return data_.row_count();
+}
+
+std::vector<std::vector<std::string>> CsvViewData::read_rows(
+    const std::uint64_t offset,
+    const std::uint64_t limit) const {
+  return data_.read_rows(offset, limit);
+}
+
+void CsvViewData::edit_cell(const std::uint64_t row,
+                            const std::string& column,
+                            const std::string& value) {
+  data_.edit_cell(row, column, value);
+}
+
+void CsvViewData::delete_row(const std::uint64_t row) {
+  data_.delete_row(row);
+}
+
+void CsvViewData::insert_row(const std::uint64_t row, const std::vector<std::string>& values) {
+  data_.insert_row(row, values);
+}
+
+void CsvViewData::swap_rows(const std::uint64_t first, const std::uint64_t second) {
+  data_.swap_rows(first, second);
+}
+
+void CsvViewData::insert_column(const std::uint64_t column,
+                                const std::string& name,
+                                const std::string& value) {
+  data_.insert_column(column, name, value);
+}
+
+void CsvViewData::rename_column(const std::string& column, const std::string& name) {
+  data_.rename_column(column, name);
+}
+
+void CsvViewData::delete_column(const std::string& column) {
+  data_.delete_column(column);
+}
+
+bool CsvViewData::recover_renamed_source() {
+  return data_.recover_renamed_source();
+}
+
+void CsvViewData::reset() {
+  data_.reset();
+}
+
+void CsvViewData::save(const std::vector<std::string>& columns) {
+  data_.save(columns);
+}
+
 }  // namespace csvzall::pipeline::commands

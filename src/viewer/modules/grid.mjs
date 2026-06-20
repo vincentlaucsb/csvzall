@@ -9,6 +9,16 @@ export function currentGridColumns(api, columns) {
   return columnIds.filter((column) => knownColumns.has(column));
 }
 
+export function rowsToObjects(columns, rows, offset = 0) {
+  return rows.map((values, index) => {
+    const row = { _csvzallRowId: offset + index };
+    columns.forEach((column, columnIndex) => {
+      row[column] = values[columnIndex] ?? '';
+    });
+    return row;
+  });
+}
+
 export function rowInsertionIndex(anchorRow, rowCount, offset) {
   const count = Number.isInteger(rowCount) && rowCount > 0 ? rowCount : 0;
   if (!Number.isInteger(anchorRow)) {
