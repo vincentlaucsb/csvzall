@@ -37,6 +37,7 @@ option(CSVZALL_FETCH_ZLIB "Fetch zlib when not found on system" ON)
 option(CSVZALL_FETCH_SIMDJSON "Fetch simdjson when not found on system" ON)
 option(CSVZALL_FETCH_NLOHMANN_JSON "Fetch nlohmann/json when not found on system" ON)
 option(CSVZALL_ENABLE_SVGPLOT "Enable SVG chart output through svgplot" ON)
+option(CSVZALL_ENABLE_VIEWER_WASM "Build the experimental CSV viewer WASM target when using Emscripten" ON)
 option(CSVZALL_FETCH_SVGPLOT "Fetch svgplot from GitHub when not found on system or locally" ON)
 set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT ON)
 if(MSVC)
@@ -145,6 +146,33 @@ endif()
 
 if(NOT TARGET csv)
   message(FATAL_ERROR "csv-parser target 'csv' was not created. Check CSV_PARSER_ROOT and version.")
+endif()
+
+if((EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten") AND CSVZALL_ENABLE_VIEWER_WASM)
+  message(STATUS "Configuring experimental WASM viewer target only")
+  add_executable(csvzall_viewer_wasm
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/viewer_wasm/viewer_wasm.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/viewer_core/indexed_csv.cpp)
+  target_link_libraries(csvzall_viewer_wasm PRIVATE csv)
+  target_include_directories(csvzall_viewer_wasm
+    PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/src"
+      "${CMAKE_CURRENT_SOURCE_DIR}")
+  set_property(TARGET csvzall_viewer_wasm PROPERTY CXX_STANDARD ${CSVZALL_CXX_STANDARD})
+  set_property(TARGET csvzall_viewer_wasm PROPERTY CXX_STANDARD_REQUIRED ON)
+  set_property(TARGET csvzall_viewer_wasm PROPERTY CXX_EXTENSIONS OFF)
+  target_compile_options(csvzall_viewer_wasm PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_options(csvzall_viewer_wasm
+    PRIVATE
+      -lembind
+      -sMODULARIZE=1
+      -sEXPORT_ES6=1
+      -sENVIRONMENT=web,worker
+      -sEXPORT_NAME=createCsvzallViewerModule
+      -sALLOW_MEMORY_GROWTH=1
+      -sFORCE_FILESYSTEM=1
+      "-sEXPORTED_RUNTIME_METHODS=['FS']")
+  return()
 endif()
 
 # argparse (header-only)
@@ -390,7 +418,15 @@ else()
   message(STATUS "SVG chart output disabled (CSVZALL_ENABLE_SVGPLOT=OFF)")
 endif()
 
-find_package(Threads REQUIRED)
+set(CSVZALL_TARGET_IS_EMSCRIPTEN OFF)
+if(EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+  set(CSVZALL_TARGET_IS_EMSCRIPTEN ON)
+endif()
+message(STATUS "Emscripten target: ${CSVZALL_TARGET_IS_EMSCRIPTEN}")
+
+if(NOT CSVZALL_TARGET_IS_EMSCRIPTEN)
+  find_package(Threads REQUIRED)
+endif()
 
 # gzip input support. Prefer a system zlib on Unix-like platforms, but default
 # to an in-tree zlib build on MSVC so it uses the same CRT settings as csvzall.
@@ -682,6 +718,7 @@ set(CSVZALL_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/row_utils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/sqlite/sqlite_db.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/sqlite/csv_loader.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/viewer_core/indexed_csv.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/append.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/CsvInputCommand.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/CsvTransformCommand.cpp
@@ -735,8 +772,11 @@ function(csvzall_core_link_libraries out_var)
     ${CSVZALL_NLOHMANN_JSON_TARGET}
     csv
     SQLiteCpp
-    Threads::Threads
     ${CSVZALL_ZLIB_TARGET})
+
+  if(NOT CSVZALL_TARGET_IS_EMSCRIPTEN)
+    list(APPEND LINK_LIBS Threads::Threads)
+  endif()
 
   if(CSVZALL_HAVE_POSTGRESQL)
     list(APPEND LINK_LIBS ${CSVZALL_LIBPQXX_TARGET})

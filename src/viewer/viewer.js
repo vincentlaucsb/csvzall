@@ -714,8 +714,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
           recordCountNode.textContent = `${schema.totalRows.toLocaleString()} rows, ${schema.columns.length.toLocaleString()} columns`;
           const rowData = rowsToObjects(schema.columns, page.rows, page.offset);
           const loadedThrough = page.offset + page.rows.length;
-          const lastRow = loadedThrough >= page.totalRows ? page.totalRows : undefined;
-          params.successCallback(rowData, lastRow);
+          params.successCallback(rowData, page.totalRows);
           statusNode.textContent = `Loaded rows ${page.offset + 1}-${loadedThrough} of ${page.totalRows}.`;
         } catch (error) {
           params.failCallback();

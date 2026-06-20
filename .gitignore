@@ -77,3 +77,7 @@ third_party/
 node_modules/
 package-lock.json
 yarn.lock
+
+# WASM viewer web app build outputs
+src/viewer_wasm/web/dist/
+src/viewer_wasm/web/src/generated/
