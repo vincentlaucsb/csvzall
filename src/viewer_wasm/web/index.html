@@ -17,12 +17,20 @@
         <span>Open CSV</span>
         <input id="file-input" type="file" accept=".csv,text/csv">
       </label>
+      <button id="insert-menu" class="menu-button" type="button" disabled>
+        <span>Insert</span>
+        <span class="dropdown-chevron" aria-hidden="true">v</span>
+      </button>
+      <button id="delete-menu" class="menu-button" type="button" disabled>
+        <span>Delete</span>
+        <span class="dropdown-chevron" aria-hidden="true">v</span>
+      </button>
       <button id="reset" type="button" disabled>Reset</button>
       <button id="save" type="button" disabled>Download CSV</button>
     </div>
   </header>
   <main>
-    <div id="grid" class="ag-theme-quartz"></div>
+    <div id="grid" class="ag-theme-quartz-auto-dark"></div>
   </main>
   <footer>
     <span id="record-count"></span>
@@ -35,6 +43,34 @@
         <p id="loading-detail">The parser is starting in a background worker.</p>
       </div>
     </div>
+  </dialog>
+  <dialog id="insert-column-dialog" class="csvzall-dialog">
+    <form id="insert-column-form" class="dialog-form">
+      <h2>Insert column</h2>
+      <label>
+        <span>Column name</span>
+        <input id="insert-column-name" type="text" autocomplete="off" required>
+      </label>
+      <p id="insert-column-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancel-insert-column" type="button">Cancel</button>
+        <button type="submit">Insert</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="rename-column-dialog" class="csvzall-dialog">
+    <form id="rename-column-form" class="dialog-form">
+      <h2>Rename column</h2>
+      <label>
+        <span>Column name</span>
+        <input id="rename-column-name" type="text" autocomplete="off" required>
+      </label>
+      <p id="rename-column-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="cancel-rename-column" type="button">Cancel</button>
+        <button type="submit">Rename</button>
+      </div>
+    </form>
   </dialog>
   <script type="module" src="/src/main.js"></script>
 </body>

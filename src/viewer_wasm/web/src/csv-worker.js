@@ -29,6 +29,14 @@ function rowsVectorToArrays(rowsVector) {
   return rows;
 }
 
+function arrayToVector(values) {
+  const vector = new moduleInstance.StringList();
+  for (const value of values ?? []) {
+    vector.push_back(value ?? '');
+  }
+  return vector;
+}
+
 function ensureReady() {
   if (!moduleInstance) {
     throw new Error('CSV engine is still loading');
@@ -44,6 +52,10 @@ function ensureView() {
 
 function safeFileName(name) {
   return String(name || '').replace(/[^A-Za-z0-9_.-]+/g, '_') || 'input.csv';
+}
+
+function toIndex(value, fallback = 0) {
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : fallback;
 }
 
 function schema() {
@@ -97,6 +109,47 @@ const handlers = {
     ensureView();
     view.editCell(rowIndex, column, value ?? '');
     return { ok: true };
+  },
+
+  insertRow({ row, values }) {
+    ensureView();
+    const rowValues = arrayToVector(values);
+    try {
+      view.insertRow(toIndex(row, view.rowCount()), rowValues);
+    } finally {
+      rowValues.delete?.();
+    }
+    return schema();
+  },
+
+  deleteRow({ row }) {
+    ensureView();
+    view.deleteRow(toIndex(row));
+    return schema();
+  },
+
+  swapRows({ first, second }) {
+    ensureView();
+    view.swapRows(toIndex(first), toIndex(second));
+    return { ok: true };
+  },
+
+  insertColumn({ column, name, value }) {
+    ensureView();
+    view.insertColumn(toIndex(column, vectorToArray(view.headers()).length), name ?? '', value ?? '');
+    return schema();
+  },
+
+  renameColumn({ column, name }) {
+    ensureView();
+    view.renameColumn(column ?? '', name ?? '');
+    return schema();
+  },
+
+  deleteColumn({ column }) {
+    ensureView();
+    view.deleteColumn(column ?? '');
+    return schema();
   },
 
   reset() {

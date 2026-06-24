@@ -8,10 +8,12 @@
     "dev": "npm run copy:wasm && vite --host 127.0.0.1",
     "build": "npm run copy:wasm && vite build",
     "artifact": "npm run build && node ../../../scripts/package_wasm_viewer.mjs",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "ag-grid-community": "^32.3.3"
+    "ag-grid-community": "^32.3.3",
+    "popright": "file:../../../vendor/popright"
   },
   "devDependencies": {
     "vite": "^6.0.0"

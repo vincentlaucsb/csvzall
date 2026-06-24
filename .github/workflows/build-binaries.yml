@@ -191,6 +191,7 @@ jobs:
         working-directory: src/viewer_wasm/web
         run: |
           npm install
+          npm test
           npm run build
 
       - name: Package WASM viewer release asset

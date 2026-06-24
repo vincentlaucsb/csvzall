@@ -4,8 +4,10 @@ on:
   push:
     branches: [ main, master ]
     paths:
+      - CMakeLists.txt
       - Doxyfile
       - README.md
+      - cmake/**
       - src/**
       - .github/workflows/docs.yml
   workflow_dispatch:
@@ -22,11 +24,13 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      EMSDK_VERSION: 6.0.0
 
     steps:
       - uses: actions/checkout@v6.0.2
         with:
-          submodules: true
+          submodules: recursive
 
       - name: Install documentation tools
         run: |
@@ -39,12 +43,42 @@ jobs:
       - name: Generate Doxygen documentation
         run: |
           doxygen Doxyfile
-          touch docs/doxygen/html/.nojekyll
+
+      - name: Install Emscripten SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
+
+      - name: Build WASM target
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          emcmake cmake -S . -B out/build/wasm -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build out/build/wasm --target csvzall_viewer_wasm --parallel
+
+      - name: Build viewer web app
+        working-directory: src/viewer_wasm/web
+        run: |
+          npm install
+          npm run build
+
+      - name: Compose GitHub Pages site
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/pages/viewer
+          cp -a docs/doxygen/html/. dist/pages/
+          cp -a src/viewer_wasm/web/dist/. dist/pages/viewer/
+          touch dist/pages/.nojekyll
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          path: docs/doxygen/html
+          path: dist/pages
 
   deploy:
     runs-on: ubuntu-latest

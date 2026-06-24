@@ -1,8 +1,37 @@
 :root {
-  color-scheme: light dark;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: Canvas;
-  color: CanvasText;
+  color-scheme: light;
+  --csvzall-font-family: var(--font-interface, ui-sans-serif), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --csvzall-background-primary: var(--background-primary, #ffffff);
+  --csvzall-background-secondary: var(--background-secondary, #f6f7f8);
+  --csvzall-background-hover: var(--background-modifier-hover, #f2f3f5);
+  --csvzall-border: var(--background-modifier-border, #d6d6d6);
+  --csvzall-text-normal: var(--text-normal, #2e3338);
+  --csvzall-text-muted: var(--text-muted, #6f7680);
+  --csvzall-accent: var(--interactive-accent, #7c3aed);
+  --popright-bg: var(--csvzall-background-primary);
+  --popright-color: var(--csvzall-text-normal);
+  --popright-border: var(--csvzall-border);
+  --popright-active-bg: var(--csvzall-background-hover);
+  --popright-danger-color: var(--text-error, #dc2626);
+  --popright-shadow: 0 10px 28px color-mix(in srgb, #000 24%, transparent);
+  --popright-z-index: 20;
+  background: var(--csvzall-background-primary);
+  color: var(--csvzall-text-normal);
+  font-family: var(--csvzall-font-family);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --csvzall-background-primary: var(--background-primary, #111317);
+    --csvzall-background-secondary: var(--background-secondary, #191c22);
+    --csvzall-background-hover: var(--background-modifier-hover, #252a33);
+    --csvzall-border: var(--background-modifier-border, #343a46);
+    --csvzall-text-normal: var(--text-normal, #e6e9ef);
+    --csvzall-text-muted: var(--text-muted, #a6adbb);
+    --csvzall-accent: var(--interactive-accent, #9b8cff);
+    --popright-danger-color: var(--text-error, #f87171);
+  }
 }
 
 body {
@@ -10,6 +39,8 @@ body {
   margin: 0;
   display: grid;
   grid-template-rows: auto 1fr auto;
+  background: var(--csvzall-background-primary);
+  color: var(--csvzall-text-normal);
 }
 
 .topbar {
@@ -18,7 +49,8 @@ body {
   justify-content: space-between;
   gap: 1rem;
   padding: 0.85rem 1rem;
-  border-bottom: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-bottom: 1px solid var(--csvzall-border);
+  background: var(--csvzall-background-primary);
 }
 
 h1 {
@@ -29,7 +61,7 @@ h1 {
 
 p {
   margin: 0.25rem 0 0;
-  color: color-mix(in srgb, CanvasText 68%, transparent);
+  color: var(--csvzall-text-muted);
   font-size: 0.86rem;
 }
 
@@ -42,17 +74,40 @@ p {
 
 button,
 .file-picker span {
-  border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+  border: 1px solid var(--csvzall-border);
   border-radius: 6px;
-  background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
-  color: CanvasText;
+  background: var(--csvzall-background-secondary);
+  color: var(--csvzall-text-normal);
   padding: 0.45rem 0.7rem;
   font: inherit;
   font-size: 0.88rem;
 }
 
+button {
+  cursor: pointer;
+}
+
+button:not(:disabled):hover,
+.file-picker:hover span {
+  border-color: color-mix(in srgb, var(--csvzall-accent) 48%, var(--csvzall-border));
+  background: var(--csvzall-background-hover);
+}
+
 button:disabled {
   opacity: 0.45;
+  cursor: default;
+}
+
+.menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.dropdown-chevron {
+  color: var(--csvzall-text-muted);
+  font-size: 0.8rem;
+  line-height: 1;
 }
 
 .file-picker {
@@ -69,6 +124,7 @@ button:disabled {
 
 main {
   min-height: 0;
+  background: var(--csvzall-background-primary);
 }
 
 #grid {
@@ -76,26 +132,72 @@ main {
   height: 100%;
 }
 
+.ag-theme-quartz,
+.ag-theme-quartz-auto-dark {
+  --ag-font-family: var(--csvzall-font-family);
+  --ag-font-size: 13px;
+  --ag-background-color: var(--csvzall-background-primary);
+  --ag-foreground-color: var(--csvzall-text-normal);
+  --ag-data-color: var(--csvzall-text-normal);
+  --ag-header-foreground-color: var(--csvzall-text-normal);
+  --ag-secondary-foreground-color: var(--csvzall-text-muted);
+  --ag-header-background-color: var(--csvzall-background-secondary);
+  --ag-odd-row-background-color: var(--csvzall-background-primary);
+  --ag-row-hover-color: var(--csvzall-background-hover);
+  --ag-selected-row-background-color: color-mix(in srgb, var(--csvzall-accent) 14%, transparent);
+  --ag-border-color: var(--csvzall-border);
+  --ag-row-border-color: var(--csvzall-border);
+  --ag-header-column-separator-color: var(--csvzall-border);
+  --ag-input-border-color: var(--csvzall-border);
+  --ag-input-focus-border-color: var(--csvzall-accent);
+  --ag-control-panel-background-color: var(--csvzall-background-secondary);
+  --ag-menu-background-color: var(--csvzall-background-primary);
+  --ag-modal-overlay-background-color: color-mix(in srgb, var(--csvzall-background-primary) 70%, transparent);
+}
+
+.ag-theme-quartz .ag-root-wrapper,
+.ag-theme-quartz .ag-header,
+.ag-theme-quartz .ag-row,
+.ag-theme-quartz .ag-center-cols-viewport,
+.ag-theme-quartz .ag-center-cols-container,
+.ag-theme-quartz-auto-dark .ag-root-wrapper,
+.ag-theme-quartz-auto-dark .ag-header,
+.ag-theme-quartz-auto-dark .ag-row,
+.ag-theme-quartz-auto-dark .ag-center-cols-viewport,
+.ag-theme-quartz-auto-dark .ag-center-cols-container {
+  background-color: var(--ag-background-color);
+  color: var(--ag-foreground-color);
+  font-family: var(--ag-font-family);
+}
+
+.ag-theme-quartz .ag-header,
+.ag-theme-quartz-auto-dark .ag-header {
+  background-color: var(--ag-header-background-color);
+}
+
 footer {
   min-height: 1.3rem;
   padding: 0.45rem 1rem;
-  border-top: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
-  color: color-mix(in srgb, CanvasText 68%, transparent);
+  border-top: 1px solid var(--csvzall-border);
+  background: var(--csvzall-background-secondary);
+  color: var(--csvzall-text-muted);
   font-size: 0.84rem;
 }
 
-#loading-dialog {
+#loading-dialog,
+.csvzall-dialog {
   width: min(28rem, calc(100vw - 2rem));
-  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border: 1px solid var(--csvzall-border);
   border-radius: 8px;
   padding: 0;
-  background: Canvas;
-  color: CanvasText;
-  box-shadow: 0 1.25rem 4rem color-mix(in srgb, CanvasText 22%, transparent);
+  background: var(--csvzall-background-primary);
+  color: var(--csvzall-text-normal);
+  box-shadow: 0 1.25rem 4rem color-mix(in srgb, #000 24%, transparent);
 }
 
-#loading-dialog::backdrop {
-  background: color-mix(in srgb, CanvasText 28%, transparent);
+#loading-dialog::backdrop,
+.csvzall-dialog::backdrop {
+  background: color-mix(in srgb, #000 45%, transparent);
 }
 
 .loading-panel {
@@ -116,9 +218,58 @@ footer {
   width: 2rem;
   height: 2rem;
   border-radius: 999px;
-  border: 3px solid color-mix(in srgb, CanvasText 18%, transparent);
-  border-top-color: CanvasText;
+  border: 3px solid color-mix(in srgb, var(--csvzall-text-normal) 18%, transparent);
+  border-top-color: var(--csvzall-text-normal);
   animation: csvzall-spin 0.9s linear infinite;
+}
+
+.dialog-form {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+}
+
+.dialog-form h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.dialog-form label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--csvzall-text-muted);
+  font-size: 0.84rem;
+}
+
+.dialog-form input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--csvzall-border);
+  border-radius: 6px;
+  background: var(--csvzall-background-primary);
+  color: var(--csvzall-text-normal);
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+}
+
+.dialog-form input:focus {
+  outline: 2px solid color-mix(in srgb, var(--csvzall-accent) 32%, transparent);
+  border-color: var(--csvzall-accent);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.dialog-error {
+  color: var(--popright-danger-color);
+}
+
+[data-popright-menu] {
+  font-family: var(--csvzall-font-family);
 }
 
 @keyframes csvzall-spin {
