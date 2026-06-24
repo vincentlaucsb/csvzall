@@ -110,7 +110,7 @@ struct ViewServer::Impl {
   }
 
   bool RequireEditable(httplib::Response& response) const {
-    if (editable && data.mode() == CsvViewDataMode::Materialized) {
+    if (editable) {
       return true;
     }
     response.status = 405;
@@ -260,9 +260,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                         BadRequest(response, "offset and limit must be non-negative integers; limit must be greater than 0");
                         return;
                       }
-                      if (impl_->data.mode() == CsvViewDataMode::Paged) {
+                      if (impl_->data.mode() == CsvViewDataMode::Paged && !impl_->editable) {
                         limit = std::min<std::uint64_t>(limit, kMaxRowsPerPage);
-                      } else if (offset < impl_->data.row_count()) {
+                      }
+                      if (offset < impl_->data.row_count()) {
                         limit = std::min<std::uint64_t>(limit, impl_->data.row_count() - offset);
                       }
 

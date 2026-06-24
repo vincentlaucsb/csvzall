@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>csvzall WASM host harness</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+
+    header,
+    footer {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem;
+      border-block: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+    }
+
+    button {
+      font: inherit;
+    }
+
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+
+    output {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <button id="open-file" type="button">Open sample CSV</button>
+    <button id="open-file-early" type="button">Open sample before ready</button>
+    <output id="status">Waiting for viewer...</output>
+  </header>
+  <iframe id="viewer" src="./index.html" title="csvzall WASM viewer"></iframe>
+  <footer>
+    <output id="messages"></output>
+    <output id="saved"></output>
+  </footer>
+  <script type="module">
+    const viewer = document.getElementById('viewer');
+    const statusNode = document.getElementById('status');
+    const messagesNode = document.getElementById('messages');
+    const savedNode = document.getElementById('saved');
+    let ready = false;
+    let savedBytes = null;
+
+    function csvBuffer() {
+      return new TextEncoder().encode('name,count\nAda,1\nGrace,2\n').buffer;
+    }
+
+    function postOpen() {
+      const buffer = csvBuffer();
+      viewer.contentWindow.postMessage({
+        source: 'obsidian-csvzall',
+        type: 'open-file',
+        name: 'host-sample.csv',
+        buffer,
+      }, '*', [buffer]);
+    }
+
+    function renderMessage(message) {
+      messagesNode.textContent = JSON.stringify({
+        type: message.type,
+        dirty: message.dirty,
+        name: message.name,
+        byteLength: message.byteLength,
+      });
+    }
+
+    window.addEventListener('message', (event) => {
+      const message = event.data ?? {};
+      if (message.source !== 'csvzall-wasm-viewer') {
+        return;
+      }
+      renderMessage(message);
+      if (message.type === 'ready') {
+        ready = true;
+        statusNode.textContent = 'Viewer ready.';
+      }
+      if (message.type === 'dirty-state') {
+        statusNode.textContent = `Dirty: ${message.dirty}`;
+      }
+      if (message.type === 'save-file') {
+        savedBytes = new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
+        savedNode.textContent = `Last save: ${savedBytes.byteLength} bytes`;
+        statusNode.textContent = `Saved ${savedBytes.byteLength} bytes from viewer.`;
+      }
+    });
+
+    document.getElementById('open-file').addEventListener('click', () => {
+      if (!ready) {
+        statusNode.textContent = 'Viewer is not ready yet.';
+        return;
+      }
+      postOpen();
+    });
+
+    document.getElementById('open-file-early').addEventListener('click', () => {
+      ready = false;
+      viewer.src = './index.html';
+      setTimeout(postOpen, 25);
+      statusNode.textContent = 'Posted sample CSV before ready.';
+    });
+
+    window.csvzallHostHarness = {
+      postOpen,
+      savedBytes: () => savedBytes,
+    };
+  </script>
+</body>
+</html>

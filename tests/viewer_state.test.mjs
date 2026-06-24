@@ -7,7 +7,7 @@ import {
   installUnsavedChangesBeforeUnload,
   postDirtyState,
 } from '../src/viewer/modules/dirty-state.mjs';
-import { currentGridColumns, rowInsertionIndex } from '../src/viewer/modules/grid.mjs';
+import { currentGridColumns, rowInsertionIndex, rowsToObjects } from '../src/viewer/modules/grid.mjs';
 import { rowsToMarkdownTable } from '../src/viewer/modules/markdown.mjs';
 import { buildSavePayload, saveViewerState } from '../src/viewer/modules/save.mjs';
 import { createViewStateStore } from '../src/viewer/modules/state.mjs';
@@ -24,6 +24,7 @@ const internals = {
   installUnsavedChangesBeforeUnload,
   postDirtyState,
   rowsToMarkdownTable,
+  rowsToObjects,
   rowInsertionIndex,
   saveViewerState,
 };
@@ -98,6 +99,16 @@ test('rowInsertionIndex preserves before-first-row insertion', () => {
   assert.equal(internals.rowInsertionIndex(0, 3, 1), 1);
   assert.equal(internals.rowInsertionIndex(2, 3, 1), 3);
   assert.equal(internals.rowInsertionIndex(undefined, 3, 0), 3);
+});
+
+test('rowsToObjects assigns absolute source row ids for paged rows', () => {
+  assert.deepEqual(internals.rowsToObjects(['name', 'value'], [
+    ['Ada', '10'],
+    ['Ben'],
+  ], 500), [
+    { _csvzallRowId: 500, name: 'Ada', value: '10' },
+    { _csvzallRowId: 501, name: 'Ben', value: '' },
+  ]);
 });
 
 test('default SQL query uses the viewer table name', () => {

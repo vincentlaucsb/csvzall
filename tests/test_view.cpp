@@ -201,22 +201,21 @@ TEST_CASE("view: indexed reader returns requested row windows without storing al
   std::filesystem::remove(path);
 }
 
-TEST_CASE("view: auto mode materializes ordinary files for client-side operations") {
+TEST_CASE("view: auto mode uses row-offset paging for ordinary files") {
   const auto csv = tests::MakeTestCsv(
       {"name", "value"},
       {{"alice", "10"}, {"bob", "20"}, {"charlie", "30"}});
-  const auto path = WriteTempCsv(csv, "csvzall_view_materialized.csv");
+  const auto path = WriteTempCsv(csv, "csvzall_view_auto_paged.csv");
 
   pipeline::RunOptions options;
   options.input_path = path.string();
   options.view_mode = pipeline::ViewModeSelection::Auto;
-  options.view_materialize_threshold_mb = 200;
   pipeline::RunStats stats;
   const auto data = pipeline::commands::CsvViewData::Open(
       path.string(), options, tests::MakeNullLogger(), stats);
 
-  REQUIRE(data.mode() == pipeline::commands::CsvViewDataMode::Materialized);
-  REQUIRE(data.mode_name() == "materialized");
+  REQUIRE(data.mode() == pipeline::commands::CsvViewDataMode::Paged);
+  REQUIRE(data.mode_name() == "paged");
   REQUIRE(data.headers() == std::vector<std::string>{"name", "value"});
   REQUIRE(data.row_count() == 3);
   REQUIRE(data.read_rows(0, 3) == std::vector<std::vector<std::string>>{
@@ -332,8 +331,10 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer_js->status == 200);
   REQUIRE(viewer_js->body.find("csvzallViewBootstrap") != std::string::npos);
   REQUIRE(viewer_js->body.find("/api/chart-config/heatmap") != std::string::npos);
-  REQUIRE(viewer_js->body.find("/api/sql-query") != std::string::npos);
   REQUIRE(viewer_js->body.find("VIEWER_SQL_TABLE_NAME") != std::string::npos);
+  REQUIRE(viewer_js->body.find("rowModelType = 'infinite'") != std::string::npos);
+  REQUIRE(viewer_js->body.find("purgeInfiniteCache") != std::string::npos);
+  REQUIRE(viewer_js->body.find("_csvzallRowId") != std::string::npos);
   REQUIRE(viewer_js->body.find("chartType.value") != std::string::npos);
   REQUIRE(viewer_js->body.find("markdown-table") != std::string::npos);
   REQUIRE(viewer_js->body.find("populateColumnChecklist") != std::string::npos);
@@ -403,7 +404,7 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   const auto clamped_rows = client.Get("/api/rows?offset=0&limit=999999", headers);
   REQUIRE(clamped_rows);
   REQUIRE(clamped_rows->status == 200);
-  REQUIRE(clamped_rows->body.find("\"limit\":5000") != std::string::npos);
+  REQUIRE(clamped_rows->body.find("\"limit\":3") != std::string::npos);
 
   const auto invalid_rows = client.Get("/api/rows?offset=-1&limit=1", headers);
   REQUIRE(invalid_rows);
@@ -956,15 +957,15 @@ TEST_CASE("view: developer asset directory resolves relative to source tree") {
   std::filesystem::remove(path);
 }
 
-TEST_CASE("view: materialized server returns all rows for client-side grid") {
+TEST_CASE("view: compatibility materialized mode uses paged backend") {
   const auto csv = tests::MakeTestCsv(
       {"name", "value"},
       {{"alice", "10"}, {"bob", "20"}, {"charlie", "30"}});
-  const auto path = WriteTempCsv(csv, "csvzall_view_materialized_server.csv");
+  const auto path = WriteTempCsv(csv, "csvzall_view_materialized_alias_server.csv");
 
   pipeline::RunOptions options;
   options.input_path = path.string();
-  options.view_mode = pipeline::ViewModeSelection::Materialized;
+  options.view_mode = pipeline::ViewModeSelection::Paged;
   pipeline::RunStats stats;
   const auto data = pipeline::commands::CsvViewData::Open(
       path.string(), options, tests::MakeNullLogger(), stats);
@@ -981,7 +982,7 @@ TEST_CASE("view: materialized server returns all rows for client-side grid") {
   const auto schema = client.Get("/api/schema", headers);
   REQUIRE(schema);
   REQUIRE(schema->status == 200);
-  REQUIRE(schema->body.find(R"("mode":"materialized")") != std::string::npos);
+  REQUIRE(schema->body.find(R"("mode":"paged")") != std::string::npos);
 
   const auto rows = client.Get("/api/rows?offset=0&limit=999999", headers);
   REQUIRE(rows);
@@ -1053,7 +1054,7 @@ TEST_CASE("view edit: save follows a source file renamed on disk") {
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"after.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2,"sqlTableName":"data"})");
+      R"({"file":"after.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data"})");
 
   const auto edit = client.Post(
       "/api/edit-cell", headers, R"({"row":1,"column":"value","value":"25"})",
@@ -1301,7 +1302,7 @@ TEST_CASE("view edit: save applies column order with pending edits atomically") 
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_edit_reorder_column.csv","columns":["value","name","note"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2,"sqlTableName":"data"})");
+      R"({"file":"csvzall_view_edit_reorder_column.csv","columns":["value","name","note"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data"})");
 
   const auto rows = client.Get("/api/rows?offset=0&limit=2", headers);
   REQUIRE(rows);
@@ -1354,7 +1355,7 @@ TEST_CASE("view edit: reset reloads source from disk and discards unsaved change
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_edit_reset.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"materialized","totalRows":2,"sqlTableName":"data"})");
+      R"({"file":"csvzall_view_edit_reset.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data"})");
 
   const auto rows = client.Get("/api/rows?offset=0&limit=2", headers);
   REQUIRE(rows);

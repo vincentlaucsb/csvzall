@@ -201,32 +201,30 @@ process. Pass `--startup-json` to print `{"url":"http://127.0.0.1:..."}` for
 host integrations such as
 [obsidian-csvzall](https://github.com/vincentlaucsb/obsidian-csvzall).
 
-In auto mode, files at or below `--materialize-threshold-mb` (default: 200) are
-materialized once so AG Grid can provide client-side sorting, column filters,
-and quick filtering for ordinary CSVs. Larger files build a compact row-offset
-index and serve rows through paged `/api/rows?offset=...&limit=...` requests
-instead of loading the whole table in the browser. AG Grid Community handles
-column resizing and virtual scrolling, while the local API (`/api/schema`,
-`/api/rows`, `/api/health`) keeps the default experience read-only by design.
-Viewer HTML, CSS, JavaScript, and AG Grid assets are embedded in the binary.
-The view is a startup-time snapshot of the CSV; reopen the viewer to pick up
-on-disk file changes.
+The viewer builds a compact row-offset index and serves rows through paged
+`/api/rows?offset=...&limit=...` requests for all file sizes instead of loading
+the whole table in the server. AG Grid Community handles column resizing and
+virtual scrolling, while the local API (`/api/schema`, `/api/rows`,
+`/api/health`) keeps the default experience read-only by design. Viewer HTML,
+CSS, JavaScript, and AG Grid assets are embedded in the binary. The view is a
+startup-time snapshot of the CSV; reopen the viewer to pick up on-disk file
+changes.
 
 For viewer development, pass `--viewer-assets <dir>` or set
 `CSVZALL_VIEWER_ASSETS=<dir>` to serve first-party `index.html`, `viewer.css`,
 and `viewer.js` from disk on every request. AG Grid and Popright remain
 embedded.
 
-Pass `--edit` to enable explicit editable mode. Editable mode materializes the
-CSV, allows cell edits plus row/column insert/delete in the browser, tracks
+Pass `--edit` to enable explicit editable mode. Editable mode uses the same
+row-offset index, keeps unsaved cell/row/column changes in an overlay, tracks
 dirty state, supports reset from disk, and saves by writing a temporary sibling
 CSV before atomically replacing the source. Save refuses if the source file size
 or mtime changed after the viewer opened.
 
 Current limitation: `view` is optimized for plain local CSV files. stdin,
 `.gz`, and `.zip` inputs are rejected in this pass. Server-side global
-sort/search/filter are deferred for paged mode; the UI only enables full-table
-sort/filter when the table is materialized.
+sort/search/filter are deferred for paged mode. Edit mode uses the same paged
+row loading path and applies visible-row edits through the backend overlay.
 
 ```sh
 csvzall view todoist_activities.csv
@@ -477,28 +475,63 @@ For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 
 ## Dependencies
 
+### Core runtime
+
 | Library | Author / maintainer | Role | How it's sourced |
 |---|---|---|---|
 | [csv-parser](https://github.com/vincentlaucsb/csv-parser) | [Vincent La](https://github.com/vincentlaucsb) | CSV parsing, writing, and scalar type classification | Local checkout preferred; in-repo submodule for CI/release builds; pinned FetchContent fallback |
 | [simdjson](https://github.com/simdjson/simdjson) v3.13.0 | [Daniel Lemire](https://github.com/lemire), [Geoff Langdale](https://github.com/geofflangdale), and contributors | JSON parsing for mapping-driven `json extract` | System package if available; FetchContent fallback |
 | [JSON for Modern C++](https://github.com/nlohmann/json) v3.12.0 | [Niels Lohmann](https://github.com/nlohmann) and contributors | JSON serialization and configuration helpers | System package if available; FetchContent fallback |
-| [svgplot](https://github.com/vincentlaucsb/svgplot) v0.4.0 | [Vincent La](https://github.com/vincentlaucsb) | SVG chart rendering for `heatmap`, `bar`, and `line` chart outputs | CMake package if available; local checkout via `SVGPLOT_ROOT` or sibling `../svgplot`; pinned FetchContent fallback |
 | [argparse](https://github.com/p-ranav/argparse) v3.1 | [Pranav](https://github.com/p-ranav) | CLI argument parsing | FetchContent |
-| [cpp-httplib](https://github.com/yhirose/cpp-httplib) v0.18.5 | [Yuji Hirose](https://github.com/yhirose) and contributors | Embedded local HTTP server for the `view` command | Vendored single header under `vendor/httplib` |
 | [indicators](https://github.com/p-ranav/indicators) v2.3 | [Pranav](https://github.com/p-ranav) | Terminal progress bars for long-running imports | FetchContent |
-| [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) v32.3.9 | [AG Grid Ltd.](https://www.ag-grid.com/) | Interactive browser table for the `view` command | Vendored browser assets under `vendor/ag-grid`, embedded into csvzall at build time |
-| [Popright](https://github.com/vincentlaucsb/popright) v0.1.0 | [Vincent La](https://github.com/vincentlaucsb) | Context menu and dropdown menu primitives for the `view` command | Vendored npm package under `vendor/popright`, embedded into csvzall at build time |
-| [Tabler Icons](https://github.com/tabler/tabler-icons) | [Paweł Kuna](https://github.com/codecalm) and contributors | Viewer toolbar and context menu icons | Selected inline SVG paths in `src/viewer/viewer.js` |
 | [zlib](https://github.com/madler/zlib) v1.3.1 | [Mark Adler](https://github.com/madler) and contributors | gzip and ZIP/deflate decompression for compressed CSV inputs | System package if available; FetchContent fallback |
 | [keychain](https://github.com/hrantzsch/keychain) v1.3.1 | [hrantzsch](https://github.com/hrantzsch) | Optional OS credential storage for PostgreSQL passwords | System package if available; FetchContent fallback; Linux requires libsecret |
 | [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite | FetchContent, with a local CMake patch |
 | [libpqxx](https://github.com/jtv/libpqxx) v7.10.1 | [Jeroen T. Vermeulen](https://pqxx.org/libpqxx/) | PostgreSQL C++ client API used by the `postgres` command | System package if available; FetchContent fallback |
 | [PostgreSQL libpq](https://www.postgresql.org/docs/current/libpq.html) | [PostgreSQL Global Development Group](https://www.postgresql.org/community/) | PostgreSQL client C library required by libpqxx | System PostgreSQL installation |
+
+### Charts
+
+| Library | Author / maintainer | Role | How it's sourced |
+|---|---|---|---|
+| [svgplot](https://github.com/vincentlaucsb/svgplot) v0.4.0 | [Vincent La](https://github.com/vincentlaucsb) | SVG chart rendering for `heatmap`, `bar`, and `line` chart outputs | CMake package if available; local checkout via `SVGPLOT_ROOT` or sibling `../svgplot`; pinned FetchContent fallback |
+
+### Viewer
+
+| Library | Author / maintainer | Role | How it's sourced |
+|---|---|---|---|
+| [cpp-httplib](https://github.com/yhirose/cpp-httplib) v0.18.5 | [Yuji Hirose](https://github.com/yhirose) and contributors | Embedded local HTTP server for the `view` command | Vendored single header under `vendor/httplib` |
+| [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) v32.3.9 | [AG Grid Ltd.](https://www.ag-grid.com/) | Interactive browser table for the `view` command | Vendored browser assets under `vendor/ag-grid`, embedded into csvzall at build time |
+| [Popright](https://github.com/vincentlaucsb/popright) v0.1.0 | [Vincent La](https://github.com/vincentlaucsb) | Context menu and dropdown menu primitives for the native `view` command and WASM viewer web app | Vendored npm package under `vendor/popright`, embedded into csvzall at build time and linked into the WASM viewer Vite app via a local file dependency |
+| [Tabler Icons](https://github.com/tabler/tabler-icons) | [Paweł Kuna](https://github.com/codecalm) and contributors | Viewer toolbar and context menu icons | Selected inline SVG paths in `src/viewer/viewer.js` |
+
+### WASM viewer
+
+| Library | Author / maintainer | Role | How it's sourced |
+|---|---|---|---|
+| [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) ^32.3.3 | [AG Grid Ltd.](https://www.ag-grid.com/) | Interactive grid for the experimental WASM viewer web app | npm dependency under `src/viewer_wasm/web` |
+| [Vite](https://vite.dev/) ^6.0.0 | [Evan You](https://github.com/yyx990803) and contributors | Bundles the experimental WASM viewer web app for local preview and GitHub Pages deployment | npm dev dependency under `src/viewer_wasm/web` |
+| [Emscripten](https://emscripten.org/) | [Emscripten contributors](https://github.com/emscripten-core/emscripten) | Builds the experimental WASM CSV viewer release asset | Local Emscripten SDK for development; GitHub Actions clones `emscripten-core/emsdk` for CI/release builds |
+
+### Tests
+
+| Library | Author / maintainer | Role | How it's sourced |
+|---|---|---|---|
 | [Catch2](https://github.com/catchorg/Catch2) v3.4.0 | [Catch2 contributors](https://github.com/catchorg/Catch2) | Test framework | FetchContent, tests only |
 | [gcovr](https://github.com/gcovr/gcovr) | [gcovr contributors](https://github.com/gcovr/gcovr/graphs/contributors) | Coverage report generation for CI | GitHub Actions coverage workflow only |
+
+### CI and release
+
+| Library | Author / maintainer | Role | How it's sourced |
+|---|---|---|---|
 | [actions/cache](https://github.com/actions/cache) v5.0.5 | [GitHub](https://github.com/actions) | Cache CMake FetchContent dependencies in CI | GitHub Actions workflows only |
 | [lukka/get-cmake](https://github.com/lukka/get-cmake) v4.3.3 | [Luca K.](https://github.com/lukka) and contributors | Install CMake for release binary builds | GitHub Actions release workflow only |
 | [Codecov GitHub Action](https://github.com/codecov/codecov-action) v6.0.1 | [Codecov](https://about.codecov.io/) | Upload coverage reports to Codecov | GitHub Actions coverage workflow only |
+
+### Documentation
+
+| Library | Author / maintainer | Role | How it's sourced |
+|---|---|---|---|
 | [Doxygen](https://www.doxygen.nl/) | [Dimitri van Heesch](https://github.com/doxygen) and contributors | Generate C++ API documentation | Optional local tool; installed in the GitHub Pages documentation workflow |
 | [actions/configure-pages](https://github.com/actions/configure-pages) v5 | [GitHub](https://github.com/actions) | Configure GitHub Pages metadata for API docs publishing | GitHub Actions documentation workflow only |
 | [actions/upload-pages-artifact](https://github.com/actions/upload-pages-artifact) v4 | [GitHub](https://github.com/actions) | Upload generated Doxygen HTML for GitHub Pages deployment | GitHub Actions documentation workflow only |
@@ -519,11 +552,3 @@ For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 ## License
 
 csvzall is licensed under the MIT License. See [LICENSE](LICENSE).
-
-## Roadmap
-
-- [x] Case-insensitive column matching by default (`filter`, `derive`, `summarize`)
-- [ ] Test suite (Google Test / Catch2 via CTest)
-- [ ] Throughput stats on `--verbose` (rows/s, MiB/s)
-- [ ] Richer `summarize` aggregations: `--min`, `--mean`, `--sum`, `--count`
-- [ ] Optional JSON mapping discovery helper, e.g. `json paths <input.json> --rows <path>`

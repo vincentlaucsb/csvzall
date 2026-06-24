@@ -67,3 +67,43 @@ jobs:
       - name: Test
         working-directory: build
         run: ctest -C Release --output-on-failure
+
+  wasm-viewer:
+    runs-on: ubuntu-latest
+    env:
+      EMSDK_VERSION: 6.0.0
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          submodules: recursive
+
+      - name: Install Emscripten SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
+
+      - name: Build WASM target
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+          emcmake cmake -S . -B out/build/wasm -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build out/build/wasm --target csvzall_viewer_wasm --parallel
+
+      - name: Build web app
+        working-directory: src/viewer_wasm/web
+        run: |
+          npm install
+          npm test
+          npm run build
+
+      - name: Stage release artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref_name="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          node scripts/package_wasm_viewer.mjs --source-ref "$ref_name" --out-dir dist/csvzall-wasm-viewer
