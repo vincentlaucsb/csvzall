@@ -1,8 +1,8 @@
-# WASM CSV Viewer Prototype
+# csvzall Browser Prototype
 
-The experimental WASM target exposes the reusable indexed CSV viewer core to a
-browser through Emscripten embind. It is intentionally scoped to plain local CSV
-viewing/editing:
+csvzall Browser is the experimental WASM CSV editor built from the reusable
+indexed CSV viewer core and exposed to a browser through Emscripten embind. It
+is intentionally scoped to plain local CSV viewing/editing:
 
 - upload a CSV into Emscripten's virtual filesystem;
 - open it with `CsvViewData.open(path)`;
@@ -43,7 +43,7 @@ build directory.
 
 ## Web App
 
-The browser demo is a small Vite app under `src/viewer_wasm/web`. Its build
+csvzall Browser is a small Vite app under `src/viewer_wasm/web`. Its build
 script copies the generated Emscripten `.js` and `.wasm` outputs from
 `out/build/wasm` into an ignored `src/generated` directory before bundling.
 

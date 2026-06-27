@@ -3,16 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>csvzall WASM viewer</title>
+  <title>csvzall Browser</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%231f6f5b'/%3E%3Cpath d='M14 18h36v28H14z' fill='white'/%3E%3Cpath d='M14 26h36M14 34h36M24 18v28M36 18v28' stroke='%231f6f5b' stroke-width='3'/%3E%3C/svg%3E">
 </head>
 <body>
   <header class="topbar">
     <div>
-      <h1>csvzall WASM viewer</h1>
+      <h1>csvzall Browser</h1>
       <p id="status">Loading WASM module...</p>
     </div>
     <div class="actions">
+      <a class="repo-link" href="https://github.com/vincentlaucsb/csvzall" target="_blank" rel="noopener noreferrer" aria-label="Open csvzall on GitHub" title="Open csvzall on GitHub">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 .5a12 12 0 0 0-3.8 23.39c.6.11.82-.26.82-.58v-2.02c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.77.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23A11.5 11.5 0 0 1 12 5.81c1.02 0 2.04.14 3 .41 2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.49 5.93.43.37.81 1.1.81 2.22v3.29c0 .32.22.69.83.57A12 12 0 0 0 12 .5Z"/>
+        </svg>
+      </a>
       <label class="file-picker">
         <span>Open CSV</span>
         <input id="file-input" type="file" accept=".csv,text/csv">

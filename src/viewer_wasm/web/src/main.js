@@ -167,6 +167,9 @@ const gridOptions = {
   rowModelType: 'infinite',
   rowSelection: {
     mode: 'singleRow',
+    checkboxes: false,
+    headerCheckbox: false,
+    enableClickSelection: true,
   },
   cacheBlockSize: 500,
   maxBlocksInCache: 8,
@@ -182,6 +185,10 @@ const gridOptions = {
 };
 
 const gridApi = createGrid(gridElement, gridOptions);
+
+document.addEventListener('contextmenu', (event) => {
+  event.preventDefault();
+}, { capture: true });
 
 function setGridColumnDefs(columns) {
   gridApi.setGridOption('columnDefs', columns.map((column) => ({

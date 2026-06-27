@@ -1,9 +1,15 @@
 # csvzall
 
-<img src="assets/csvzall-logo-theme-safe.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
+<img src="https://raw.githubusercontent.com/vincentlaucsb/csvzall/master/assets/csvzall-logo-theme-safe.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
 
 A fast, single-binary CSV transformation CLI for Unix-style pipelines. Pipe CSVs through `filter`, `derive`, `summarize`, and `head` — each command reads stdin, writes stdout, logs to stderr.
 For local inspection workflows, `csvzall view <file.csv>` starts a read-only browser table view backed by the same CSV parser.
+
+Useful links:
+
+- [csvzall Browser](https://vincentlaucsb.github.io/csvzall/viewer/) opens and edits local CSVs in the browser through the experimental browser editor.
+- [obsidian-csvzall](https://github.com/vincentlaucsb/obsidian-csvzall) integrates csvzall workflows with Obsidian notes.
+- [Source repository](https://github.com/vincentlaucsb/csvzall) hosts the CLI, native viewer, and browser editor code.
 
 ## Quick example
 
@@ -502,16 +508,16 @@ For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 |---|---|---|---|
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) v0.18.5 | [Yuji Hirose](https://github.com/yhirose) and contributors | Embedded local HTTP server for the `view` command | Vendored single header under `vendor/httplib` |
 | [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) v32.3.9 | [AG Grid Ltd.](https://www.ag-grid.com/) | Interactive browser table for the `view` command | Vendored browser assets under `vendor/ag-grid`, embedded into csvzall at build time |
-| [Popright](https://github.com/vincentlaucsb/popright) v0.1.0 | [Vincent La](https://github.com/vincentlaucsb) | Context menu and dropdown menu primitives for the native `view` command and WASM viewer web app | Vendored npm package under `vendor/popright`, embedded into csvzall at build time and linked into the WASM viewer Vite app via a local file dependency |
+| [Popright](https://github.com/vincentlaucsb/popright) v0.1.0 | [Vincent La](https://github.com/vincentlaucsb) | Context menu and dropdown menu primitives for the native `view` command and csvzall Browser web app | Vendored npm package under `vendor/popright`, embedded into csvzall at build time and linked into the browser editor Vite app via a local file dependency |
 | [Tabler Icons](https://github.com/tabler/tabler-icons) | [Paweł Kuna](https://github.com/codecalm) and contributors | Viewer toolbar and context menu icons | Selected inline SVG paths in `src/viewer/viewer.js` |
 
-### WASM viewer
+### Browser editor
 
 | Library | Author / maintainer | Role | How it's sourced |
 |---|---|---|---|
-| [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) ^32.3.3 | [AG Grid Ltd.](https://www.ag-grid.com/) | Interactive grid for the experimental WASM viewer web app | npm dependency under `src/viewer_wasm/web` |
-| [Vite](https://vite.dev/) ^6.0.0 | [Evan You](https://github.com/yyx990803) and contributors | Bundles the experimental WASM viewer web app for local preview and GitHub Pages deployment | npm dev dependency under `src/viewer_wasm/web` |
-| [Emscripten](https://emscripten.org/) | [Emscripten contributors](https://github.com/emscripten-core/emscripten) | Builds the experimental WASM CSV viewer release asset | Local Emscripten SDK for development; GitHub Actions clones `emscripten-core/emsdk` for CI/release builds |
+| [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) ^32.3.3 | [AG Grid Ltd.](https://www.ag-grid.com/) | Interactive grid for the experimental csvzall Browser web app | npm dependency under `src/viewer_wasm/web` |
+| [Vite](https://vite.dev/) ^6.0.0 | [Evan You](https://github.com/yyx990803) and contributors | Bundles csvzall Browser for local preview and GitHub Pages deployment | npm dev dependency under `src/viewer_wasm/web` |
+| [Emscripten](https://emscripten.org/) | [Emscripten contributors](https://github.com/emscripten-core/emscripten) | Builds the experimental browser CSV editor release asset | Local Emscripten SDK for development; GitHub Actions clones `emscripten-core/emsdk` for CI/release builds |
 
 ### Tests
 

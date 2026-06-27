@@ -73,7 +73,8 @@ p {
 }
 
 button,
-.file-picker span {
+.file-picker span,
+.repo-link {
   border: 1px solid var(--csvzall-border);
   border-radius: 6px;
   background: var(--csvzall-background-secondary);
@@ -83,12 +84,30 @@ button,
   font-size: 0.88rem;
 }
 
+.repo-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 2.15rem;
+  min-height: 2.05rem;
+  padding: 0.4rem;
+  text-decoration: none;
+}
+
+.repo-link svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  fill: currentColor;
+}
+
 button {
   cursor: pointer;
 }
 
 button:not(:disabled):hover,
-.file-picker:hover span {
+.file-picker:hover span,
+.repo-link:hover {
   border-color: color-mix(in srgb, var(--csvzall-accent) 48%, var(--csvzall-border));
   background: var(--csvzall-background-hover);
 }
@@ -290,7 +309,8 @@ footer {
 
   button,
   .file-picker,
-  .file-picker span {
+  .file-picker span,
+  .repo-link {
     flex: 1 1 auto;
   }
 
