@@ -276,6 +276,7 @@ jobs:
           cmake -B build-obsidian -S .
           -DCMAKE_BUILD_TYPE=Release
           -DCSVZALL_CXX_STANDARD=23
+          -DCSVZALL_OBSIDIAN_BUILD=ON
           -DCSVZALL_ENABLE_POSTGRESQL=OFF
           -DCSVZALL_ENABLE_KEYCHAIN=OFF
           -DCSVZALL_ENABLE_COMPRESSED_INPUT=OFF
@@ -302,14 +303,13 @@ jobs:
           }
           Copy-Item -LiteralPath $binary -Destination "$packageDir/csvzall.exe"
 
-          $runtimeFiles = @(
-            "build-obsidian/*.dll",
-            "build-obsidian/Release/*.dll",
-            "build-obsidian/RelWithDebInfo/*.dll"
+          $dlls = @(
+            Get-ChildItem -Path "build-obsidian" -Recurse -Filter "*.dll" -File -ErrorAction SilentlyContinue
+            Get-ChildItem -Path $packageDir -Recurse -Filter "*.dll" -File -ErrorAction SilentlyContinue
           )
-          foreach ($pattern in $runtimeFiles) {
-            Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue |
-              Copy-Item -Destination $packageDir -Force
+          if ($dlls.Count -gt 0) {
+            $names = ($dlls | ForEach-Object { $_.FullName }) -join "`n"
+            throw "Obsidian helper package must not contain DLLs. Found:`n$names"
           }
 
           $safeTag = $env:RELEASE_TAG -replace '[\\/]', '-'

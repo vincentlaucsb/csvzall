@@ -26,6 +26,7 @@ if(DOXYGEN_FOUND)
 endif()
 
 option(CSVZALL_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(CSVZALL_OBSIDIAN_BUILD "Build the Obsidian helper release variant and reject non-system runtime DLL dependencies" OFF)
 option(CSVZALL_ENABLE_POSTGRESQL "Enable PostgreSQL export support" ON)
 option(CSVZALL_FETCH_LIBPQXX "Fetch libpqxx from GitHub when not found on system" ON)
 option(CSVZALL_REQUIRE_POSTGRESQL "Fail configure if PostgreSQL support cannot be enabled" OFF)
@@ -40,6 +41,23 @@ option(CSVZALL_FETCH_NLOHMANN_JSON "Fetch nlohmann/json when not found on system
 option(CSVZALL_ENABLE_SVGPLOT "Enable SVG chart output through svgplot" ON)
 option(CSVZALL_ENABLE_VIEWER_WASM "Build the experimental CSV viewer WASM target when using Emscripten" ON)
 option(CSVZALL_FETCH_SVGPLOT "Fetch svgplot from GitHub when not found on system or locally" ON)
+
+if(CSVZALL_OBSIDIAN_BUILD)
+  if(CSVZALL_ENABLE_POSTGRESQL)
+    message(FATAL_ERROR "CSVZALL_OBSIDIAN_BUILD=ON requires CSVZALL_ENABLE_POSTGRESQL=OFF")
+  endif()
+  if(CSVZALL_ENABLE_KEYCHAIN)
+    message(FATAL_ERROR "CSVZALL_OBSIDIAN_BUILD=ON requires CSVZALL_ENABLE_KEYCHAIN=OFF")
+  endif()
+  if(CSVZALL_ENABLE_COMPRESSED_INPUT)
+    message(FATAL_ERROR "CSVZALL_OBSIDIAN_BUILD=ON requires CSVZALL_ENABLE_COMPRESSED_INPUT=OFF")
+  endif()
+  if(NOT CSVZALL_ENABLE_SVGPLOT)
+    message(FATAL_ERROR "CSVZALL_OBSIDIAN_BUILD=ON requires CSVZALL_ENABLE_SVGPLOT=ON")
+  endif()
+  message(STATUS "Configuring Obsidian helper build: PostgreSQL, keychain, and compressed input disabled; non-system runtime DLLs forbidden")
+endif()
+
 set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT ON)
 if(MSVC)
   set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT OFF)
@@ -536,8 +554,13 @@ set(CSVZALL_RUNTIME_DEPENDENCY_SCRIPT
 
 function(csvzall_copy_runtime_dependencies target_name)
   if(WIN32)
+    set(_csvzall_runtime_dependency_mode "copy")
+    if(CSVZALL_OBSIDIAN_BUILD)
+      set(_csvzall_runtime_dependency_mode "assert-no-non-system-dlls")
+    endif()
     add_custom_command(TARGET ${target_name} POST_BUILD
       COMMAND ${CMAKE_COMMAND}
+        -D "mode=${_csvzall_runtime_dependency_mode}"
         -D "exe=$<TARGET_FILE:${target_name}>"
         -D "dest=$<TARGET_FILE_DIR:${target_name}>"
         -D "dirs=${CSVZALL_RUNTIME_DEPENDENCY_DIRS}"

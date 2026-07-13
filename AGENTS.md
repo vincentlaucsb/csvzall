@@ -73,6 +73,14 @@ This file is the canonical AI reference for this repository.
 - When preparing a release bump, update all three source markers in the same commit, then create the matching Git tag after that commit.
 - Do not update unrelated dependency version references, such as the README dependency table, when bumping csvzall itself.
 
+## Release artifacts
+
+- The Obsidian helper release asset is intentionally narrower than the full CLI release. It supports CSV editing, viewing, charting/SVGPlot, and SQLite-backed workflows.
+- Obsidian helper builds must be configured with `CSVZALL_OBSIDIAN_BUILD=ON`.
+- `CSVZALL_OBSIDIAN_BUILD=ON` must keep PostgreSQL support, keychain support, and compressed input support disabled.
+- The Windows Obsidian helper asset must contain `csvzall.exe` only and must not package DLLs. The executable may depend on Windows system DLLs, but it must not require non-system runtime DLLs such as PostgreSQL, OpenSSL, zlib, libintl/iconv, or MinGW runtime DLLs.
+- If an Obsidian build or package check reports a non-system runtime DLL dependency, do not copy the DLL into the Obsidian asset. Disable the feature, switch the dependency to a static build, or stop and report that the Obsidian artifact contract would change.
+
 ## Local CMake workflow
 
 - Prefer the local, ignored `CMakeUserPresets.json` when it exists; it is the workspace-specific record of the preferred generator and build directory.
