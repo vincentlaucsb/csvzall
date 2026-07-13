@@ -60,15 +60,26 @@ This file is the canonical AI reference for this repository.
 - When adding, removing, or materially changing a third-party dependency, update the README dependency table in the same change.
 - Include the dependency name, author or maintainer with a link, role in csvzall, and how it is sourced (local checkout, FetchContent, system package, test-only, optional, etc.).
 
-## Release versioning
+## Versioning
 
 - Git tags are the canonical release markers.
-- Keep source version markers in sync with the intended release tag:
+- The csvzall source version lives in exactly these source markers:
   - `CMakeLists.txt`: `project(csvzall VERSION ...)`
   - `Doxyfile`: `PROJECT_NUMBER`
   - `src/main.cpp`: `argparse::ArgumentParser program("csvzall", "...")`
+- Keep all three source version markers in sync with each other and with the intended release tag.
+- Before bumping, releasing, or stating the current csvzall version, verify the three source markers directly. Do not rely on memory, issue text, branch names, release notes, or previous conversation context.
+- If the source markers disagree with each other or with the requested/current release tag, stop and report the mismatch before choosing a new version.
 - When preparing a release bump, update all three source markers in the same commit, then create the matching Git tag after that commit.
 - Do not update unrelated dependency version references, such as the README dependency table, when bumping csvzall itself.
+
+## Release artifacts
+
+- The Obsidian helper release asset is intentionally narrower than the full CLI release. It supports CSV editing, viewing, charting/SVGPlot, and SQLite-backed workflows.
+- Obsidian helper builds must be configured with `CSVZALL_OBSIDIAN_BUILD=ON`.
+- `CSVZALL_OBSIDIAN_BUILD=ON` must keep PostgreSQL support, keychain support, and compressed input support disabled.
+- The Windows Obsidian helper asset must contain `csvzall.exe` only and must not package DLLs. The executable may depend on Windows system DLLs, but it must not require non-system runtime DLLs such as PostgreSQL, OpenSSL, zlib, libintl/iconv, or MinGW runtime DLLs.
+- If an Obsidian build or package check reports a non-system runtime DLL dependency, do not copy the DLL into the Obsidian asset. Disable the feature, switch the dependency to a static build, or stop and report that the Obsidian artifact contract would change.
 
 ## Local CMake workflow
 

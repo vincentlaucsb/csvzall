@@ -479,6 +479,15 @@ For a per-user install that does not require elevation:
 
 For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 
+### Release build flavors
+
+Release builds publish the full CLI artifacts for each desktop platform. Windows
+releases also publish `csvzall-<version>-obsidian-windows-<arch>.zip`, a slim
+helper build intended for the Obsidian plugin's managed install path. That
+helper keeps CSV viewing/editing, SVG charting, and SQLite-backed workflows, but
+disables PostgreSQL export, OS keychain integration, and compressed `.gz`/`.zip`
+CSV input.
+
 ## Dependencies
 
 ### Core runtime
@@ -490,7 +499,7 @@ For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 | [JSON for Modern C++](https://github.com/nlohmann/json) v3.12.0 | [Niels Lohmann](https://github.com/nlohmann) and contributors | JSON serialization and configuration helpers | System package if available; FetchContent fallback |
 | [argparse](https://github.com/p-ranav/argparse) v3.1 | [Pranav](https://github.com/p-ranav) | CLI argument parsing | FetchContent |
 | [indicators](https://github.com/p-ranav/indicators) v2.3 | [Pranav](https://github.com/p-ranav) | Terminal progress bars for long-running imports | FetchContent |
-| [zlib](https://github.com/madler/zlib) v1.3.1 | [Mark Adler](https://github.com/madler) and contributors | gzip and ZIP/deflate decompression for compressed CSV inputs | System package if available; FetchContent fallback |
+| [zlib](https://github.com/madler/zlib) v1.3.1 | [Mark Adler](https://github.com/madler) and contributors | Optional gzip and ZIP/deflate decompression for compressed CSV inputs | System package if available; FetchContent fallback; omitted when `CSVZALL_ENABLE_COMPRESSED_INPUT=OFF` |
 | [keychain](https://github.com/hrantzsch/keychain) v1.3.1 | [hrantzsch](https://github.com/hrantzsch) | Optional OS credential storage for PostgreSQL passwords | System package if available; FetchContent fallback; Linux requires libsecret |
 | [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite | FetchContent, with a local CMake patch |
 | [libpqxx](https://github.com/jtv/libpqxx) v7.10.1 | [Jeroen T. Vermeulen](https://pqxx.org/libpqxx/) | PostgreSQL C++ client API used by the `postgres` command | System package if available; FetchContent fallback |

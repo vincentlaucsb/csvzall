@@ -220,3 +220,107 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$RELEASE_TAG" "$WASM_VIEWER_ASSET_PATH" "$WASM_VIEWER_CHECKSUM_PATH" --clobber
+
+  obsidian-windows:
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          submodules: recursive
+
+      - name: Install CMake
+        uses: lukka/get-cmake@v4.3.3
+
+      - name: Detect CMake toolchain cache key
+        id: cmake-cache-key
+        shell: pwsh
+        run: |
+          function Convert-CachePart($value) {
+            $part = [string]$value
+            if ([string]::IsNullOrWhiteSpace($part)) {
+              return "unknown"
+            }
+            return ($part -replace '[^A-Za-z0-9_.-]+', '-').Trim('-')
+          }
+
+          $cmakeVersion = (cmake --version | Select-Object -First 1)
+          $defaultGenerator = (cmake --help | Where-Object { $_ -match '^\* ' } | Select-Object -First 1)
+          $defaultGenerator = $defaultGenerator -replace '^\*\s*', ''
+          $defaultGenerator = ($defaultGenerator -split '\s+=\s+', 2)[0].Trim()
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $toolchain = if (Test-Path $vswhere) { & $vswhere -latest -property installationVersion } else { $env:VisualStudioVersion }
+          $toolchain = "vs-$toolchain"
+
+          $id = @(
+            Convert-CachePart $cmakeVersion
+            Convert-CachePart $defaultGenerator
+            Convert-CachePart $toolchain
+            "obsidian"
+          ) -join '-'
+          "id=$id" >> $env:GITHUB_OUTPUT
+
+      - name: Cache CMake dependencies
+        uses: actions/cache@v5.0.5
+        with:
+          path: out/fetchcontent
+          key: ${{ runner.os }}-${{ runner.arch }}-cmake-fetchcontent-${{ steps.cmake-cache-key.outputs.id }}-${{ hashFiles('CMakeLists.txt', 'cmake/**') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-cmake-fetchcontent-${{ steps.cmake-cache-key.outputs.id }}-
+
+      - name: Configure Obsidian helper build
+        run: >
+          cmake -B build-obsidian -S .
+          -DCMAKE_BUILD_TYPE=Release
+          -DCSVZALL_CXX_STANDARD=23
+          -DCSVZALL_OBSIDIAN_BUILD=ON
+          -DCSVZALL_ENABLE_POSTGRESQL=OFF
+          -DCSVZALL_ENABLE_KEYCHAIN=OFF
+          -DCSVZALL_ENABLE_COMPRESSED_INPUT=OFF
+          -DCSVZALL_ENABLE_SVGPLOT=ON
+          -DBUILD_TESTING=OFF
+
+      - name: Build Obsidian helper
+        run: cmake --build build-obsidian --config Release --parallel --target csvzall
+
+      - name: Package Obsidian helper
+        shell: pwsh
+        run: |
+          $packageDir = "dist/obsidian-package"
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
+
+          $candidates = @(
+            "build-obsidian/csvzall.exe",
+            "build-obsidian/Release/csvzall.exe",
+            "build-obsidian/RelWithDebInfo/csvzall.exe"
+          )
+          $binary = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $binary) {
+            throw "csvzall.exe was not found in the Obsidian helper build output."
+          }
+          Copy-Item -LiteralPath $binary -Destination "$packageDir/csvzall.exe"
+
+          $dlls = @(
+            Get-ChildItem -Path "build-obsidian" -Recurse -Filter "*.dll" -File -ErrorAction SilentlyContinue
+            Get-ChildItem -Path $packageDir -Recurse -Filter "*.dll" -File -ErrorAction SilentlyContinue
+          )
+          if ($dlls.Count -gt 0) {
+            $names = ($dlls | ForEach-Object { $_.FullName }) -join "`n"
+            throw "Obsidian helper package must not contain DLLs. Found:`n$names"
+          }
+
+          $safeTag = $env:RELEASE_TAG -replace '[\\/]', '-'
+          $arch = [string]$env:RUNNER_ARCH
+          $arch = $arch.ToLowerInvariant()
+          $assetPath = "dist/csvzall-$safeTag-obsidian-windows-$arch.zip"
+          Compress-Archive -Path "$packageDir/*" -DestinationPath $assetPath -Force
+          "OBSIDIAN_ASSET_PATH=$assetPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Attach Obsidian helper to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" "$OBSIDIAN_ASSET_PATH" --clobber

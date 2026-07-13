@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(csvzall VERSION 0.2.2 LANGUAGES CXX)
+project(csvzall VERSION 0.3.1 LANGUAGES CXX)
 
 set(CSVZALL_CXX_STANDARD 23 CACHE STRING "C++ standard used by csvzall and in-tree dependencies")
 
@@ -26,6 +26,7 @@ if(DOXYGEN_FOUND)
 endif()
 
 option(CSVZALL_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(CSVZALL_OBSIDIAN_BUILD "Build the Obsidian helper release variant and reject non-system runtime DLL dependencies" OFF)
 option(CSVZALL_ENABLE_POSTGRESQL "Enable PostgreSQL export support" ON)
 option(CSVZALL_FETCH_LIBPQXX "Fetch libpqxx from GitHub when not found on system" ON)
 option(CSVZALL_REQUIRE_POSTGRESQL "Fail configure if PostgreSQL support cannot be enabled" OFF)
@@ -33,12 +34,30 @@ option(CSVZALL_FETCH_CSV_PARSER "Fetch csv-parser when no explicit or preferred 
 option(CSVZALL_PREFER_SIBLING_CSV_PARSER "Prefer ../csv-parser over other csv-parser sources when it exists" ON)
 option(CSVZALL_ENABLE_KEYCHAIN "Enable OS keychain credential storage when available" ON)
 option(CSVZALL_FETCH_KEYCHAIN "Fetch hrantzsch/keychain when not found on system" ON)
+option(CSVZALL_ENABLE_COMPRESSED_INPUT "Enable gzip and ZIP CSV input support through zlib" ON)
 option(CSVZALL_FETCH_ZLIB "Fetch zlib when not found on system" ON)
 option(CSVZALL_FETCH_SIMDJSON "Fetch simdjson when not found on system" ON)
 option(CSVZALL_FETCH_NLOHMANN_JSON "Fetch nlohmann/json when not found on system" ON)
 option(CSVZALL_ENABLE_SVGPLOT "Enable SVG chart output through svgplot" ON)
 option(CSVZALL_ENABLE_VIEWER_WASM "Build the experimental CSV viewer WASM target when using Emscripten" ON)
 option(CSVZALL_FETCH_SVGPLOT "Fetch svgplot from GitHub when not found on system or locally" ON)
+
+if(CSVZALL_OBSIDIAN_BUILD)
+  if(CSVZALL_ENABLE_POSTGRESQL)
+    message(FATAL_ERROR "CSVZALL_OBSIDIAN_BUILD=ON requires CSVZALL_ENABLE_POSTGRESQL=OFF")
+  endif()
+  if(CSVZALL_ENABLE_KEYCHAIN)
+    message(FATAL_ERROR "CSVZALL_OBSIDIAN_BUILD=ON requires CSVZALL_ENABLE_KEYCHAIN=OFF")
+  endif()
+  if(CSVZALL_ENABLE_COMPRESSED_INPUT)
+    message(FATAL_ERROR "CSVZALL_OBSIDIAN_BUILD=ON requires CSVZALL_ENABLE_COMPRESSED_INPUT=OFF")
+  endif()
+  if(NOT CSVZALL_ENABLE_SVGPLOT)
+    message(FATAL_ERROR "CSVZALL_OBSIDIAN_BUILD=ON requires CSVZALL_ENABLE_SVGPLOT=ON")
+  endif()
+  message(STATUS "Configuring Obsidian helper build: PostgreSQL, keychain, and compressed input disabled; non-system runtime DLLs forbidden")
+endif()
+
 set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT ON)
 if(MSVC)
   set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT OFF)
@@ -428,51 +447,55 @@ if(NOT CSVZALL_TARGET_IS_EMSCRIPTEN)
   find_package(Threads REQUIRED)
 endif()
 
-# gzip input support. Prefer a system zlib on Unix-like platforms, but default
-# to an in-tree zlib build on MSVC so it uses the same CRT settings as csvzall.
-if(CSVZALL_PREFER_SYSTEM_ZLIB AND WIN32 AND NOT DEFINED ZLIB_ROOT)
-  set(_csvzall_zlib_roots
-    "C:/Program Files/PostgreSQL/18"
-    "C:/Program Files/PostgreSQL/17"
-    "C:/Program Files/PostgreSQL/16"
-    "C:/Program Files/PostgreSQL/15")
-
-  foreach(_candidate_root IN LISTS _csvzall_zlib_roots)
-    if(EXISTS "${_candidate_root}/include/zlib.h" AND EXISTS "${_candidate_root}/lib")
-      set(ZLIB_ROOT "${_candidate_root}" CACHE PATH "zlib installation root" FORCE)
-      message(STATUS "Using ZLIB_ROOT hint: ${ZLIB_ROOT}")
-      break()
-    endif()
-  endforeach()
-endif()
-
-if(CSVZALL_PREFER_SYSTEM_ZLIB)
-  find_package(ZLIB QUIET)
-endif()
-if(NOT ZLIB_FOUND AND CSVZALL_FETCH_ZLIB)
-  message(STATUS "zlib not found on system; using FetchContent cache/fetch")
-  FetchContent_Declare(
-    zlib
-    GIT_REPOSITORY https://github.com/madler/zlib.git
-    GIT_TAG v1.3.1
-    GIT_SHALLOW TRUE
-    UPDATE_DISCONNECTED TRUE
-  )
-  set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "Disable zlib examples" FORCE)
-  FetchContent_MakeAvailable(zlib)
-endif()
-
 set(CSVZALL_ZLIB_TARGET "")
-if(TARGET ZLIB::ZLIB)
-  set(CSVZALL_ZLIB_TARGET ZLIB::ZLIB)
-elseif(TARGET zlibstatic)
-  set(CSVZALL_ZLIB_TARGET zlibstatic)
-elseif(TARGET zlib)
-  set(CSVZALL_ZLIB_TARGET zlib)
-endif()
+if(CSVZALL_ENABLE_COMPRESSED_INPUT)
+  # gzip input support. Prefer a system zlib on Unix-like platforms, but default
+  # to an in-tree zlib build on MSVC so it uses the same CRT settings as csvzall.
+  if(CSVZALL_PREFER_SYSTEM_ZLIB AND WIN32 AND NOT DEFINED ZLIB_ROOT)
+    set(_csvzall_zlib_roots
+      "C:/Program Files/PostgreSQL/18"
+      "C:/Program Files/PostgreSQL/17"
+      "C:/Program Files/PostgreSQL/16"
+      "C:/Program Files/PostgreSQL/15")
 
-if(CSVZALL_ZLIB_TARGET STREQUAL "")
-  message(FATAL_ERROR "zlib is required for gzip CSV input support. Install zlib or enable CSVZALL_FETCH_ZLIB.")
+    foreach(_candidate_root IN LISTS _csvzall_zlib_roots)
+      if(EXISTS "${_candidate_root}/include/zlib.h" AND EXISTS "${_candidate_root}/lib")
+        set(ZLIB_ROOT "${_candidate_root}" CACHE PATH "zlib installation root" FORCE)
+        message(STATUS "Using ZLIB_ROOT hint: ${ZLIB_ROOT}")
+        break()
+      endif()
+    endforeach()
+  endif()
+
+  if(CSVZALL_PREFER_SYSTEM_ZLIB)
+    find_package(ZLIB QUIET)
+  endif()
+  if(NOT ZLIB_FOUND AND CSVZALL_FETCH_ZLIB)
+    message(STATUS "zlib not found on system; using FetchContent cache/fetch")
+    FetchContent_Declare(
+      zlib
+      GIT_REPOSITORY https://github.com/madler/zlib.git
+      GIT_TAG v1.3.1
+      GIT_SHALLOW TRUE
+      UPDATE_DISCONNECTED TRUE
+    )
+    set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "Disable zlib examples" FORCE)
+    FetchContent_MakeAvailable(zlib)
+  endif()
+
+  if(TARGET ZLIB::ZLIB)
+    set(CSVZALL_ZLIB_TARGET ZLIB::ZLIB)
+  elseif(TARGET zlibstatic)
+    set(CSVZALL_ZLIB_TARGET zlibstatic)
+  elseif(TARGET zlib)
+    set(CSVZALL_ZLIB_TARGET zlib)
+  endif()
+
+  if(CSVZALL_ZLIB_TARGET STREQUAL "")
+    message(FATAL_ERROR "zlib is required for gzip CSV input support. Install zlib or enable CSVZALL_FETCH_ZLIB.")
+  endif()
+else()
+  message(STATUS "Compressed CSV input disabled (CSVZALL_ENABLE_COMPRESSED_INPUT=OFF)")
 endif()
 
 # Optional OS credential storage. This is deliberately soft: if the library or
@@ -531,8 +554,13 @@ set(CSVZALL_RUNTIME_DEPENDENCY_SCRIPT
 
 function(csvzall_copy_runtime_dependencies target_name)
   if(WIN32)
+    set(_csvzall_runtime_dependency_mode "copy")
+    if(CSVZALL_OBSIDIAN_BUILD)
+      set(_csvzall_runtime_dependency_mode "assert-no-non-system-dlls")
+    endif()
     add_custom_command(TARGET ${target_name} POST_BUILD
       COMMAND ${CMAKE_COMMAND}
+        -D "mode=${_csvzall_runtime_dependency_mode}"
         -D "exe=$<TARGET_FILE:${target_name}>"
         -D "dest=$<TARGET_FILE_DIR:${target_name}>"
         -D "dirs=${CSVZALL_RUNTIME_DEPENDENCY_DIRS}"
@@ -771,8 +799,11 @@ function(csvzall_core_link_libraries out_var)
     ${CSVZALL_SIMDJSON_TARGET}
     ${CSVZALL_NLOHMANN_JSON_TARGET}
     csv
-    SQLiteCpp
-    ${CSVZALL_ZLIB_TARGET})
+    SQLiteCpp)
+
+  if(CSVZALL_ENABLE_COMPRESSED_INPUT)
+    list(APPEND LINK_LIBS ${CSVZALL_ZLIB_TARGET})
+  endif()
 
   if(NOT CSVZALL_TARGET_IS_EMSCRIPTEN)
     list(APPEND LINK_LIBS Threads::Threads)
@@ -833,6 +864,9 @@ function(csvzall_configure_core target_name)
   if(CSVZALL_HAVE_SVGPLOT)
     target_compile_definitions(${target_name} PUBLIC CSVZALL_HAVE_SVGPLOT=1)
   endif()
+  if(CSVZALL_ENABLE_COMPRESSED_INPUT)
+    target_compile_definitions(${target_name} PUBLIC CSVZALL_HAVE_COMPRESSED_INPUT=1)
+  endif()
 endfunction()
 
 function(csvzall_configure_cli target_name core_target)
@@ -872,6 +906,9 @@ function(csvzall_configure_app target_name)
   endif()
   if(CSVZALL_HAVE_SVGPLOT)
     target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_SVGPLOT=1)
+  endif()
+  if(CSVZALL_ENABLE_COMPRESSED_INPUT)
+    target_compile_definitions(${target_name} PRIVATE CSVZALL_HAVE_COMPRESSED_INPUT=1)
   endif()
 endfunction()
 

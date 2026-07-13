@@ -2,11 +2,16 @@ if(POLICY CMP0207)
   cmake_policy(SET CMP0207 NEW)
 endif()
 
-if(NOT DEFINED exe OR NOT EXISTS "${exe}")
-  message(FATAL_ERROR "Runtime dependency copy requires an existing executable")
+set(_runtime_dependency_mode "copy")
+if(DEFINED mode AND NOT mode STREQUAL "")
+  set(_runtime_dependency_mode "${mode}")
 endif()
 
-if(NOT DEFINED dest OR NOT IS_DIRECTORY "${dest}")
+if(NOT DEFINED exe OR NOT EXISTS "${exe}")
+  message(FATAL_ERROR "Runtime dependency scan requires an existing executable")
+endif()
+
+if(_runtime_dependency_mode STREQUAL "copy" AND (NOT DEFINED dest OR NOT IS_DIRECTORY "${dest}"))
   message(FATAL_ERROR "Runtime dependency copy requires an existing destination directory")
 endif()
 
@@ -37,6 +42,24 @@ file(GET_RUNTIME_DEPENDENCIES
   POST_EXCLUDE_REGEXES
     ".*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][\\/][Ss]ystem32[\\/].*"
     ".*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][\\/][Ss][Yy][Ss][Ww][Oo][Ww]64[\\/].*")
+
+if(_runtime_dependency_mode STREQUAL "assert-no-non-system-dlls")
+  if(_resolved_deps OR _unresolved_deps)
+    list(SORT _resolved_deps)
+    list(SORT _unresolved_deps)
+    string(REPLACE ";" "\n  " _resolved_report "${_resolved_deps}")
+    string(REPLACE ";" "\n  " _unresolved_report "${_unresolved_deps}")
+    message(FATAL_ERROR
+      "Obsidian helper build must not require non-system runtime DLLs.\n"
+      "Resolved non-system runtime dependencies:\n  ${_resolved_report}\n"
+      "Unresolved runtime dependencies:\n  ${_unresolved_report}\n"
+      "Disable the feature that introduced the dependency, or make it static before publishing the Obsidian asset.")
+  endif()
+  message(STATUS "Obsidian helper runtime dependency check passed: no non-system DLLs required")
+  return()
+elseif(NOT _runtime_dependency_mode STREQUAL "copy")
+  message(FATAL_ERROR "Unknown runtime dependency mode: ${_runtime_dependency_mode}")
+endif()
 
 foreach(_dep IN LISTS _resolved_deps)
   file(COPY "${_dep}" DESTINATION "${dest}")
