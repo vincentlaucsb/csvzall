@@ -78,6 +78,7 @@ This file is the canonical AI reference for this repository.
 - Obsidian helper release assets are intentionally narrower than the full CLI release and are published for each native desktop platform. They support CSV editing, viewing, charting/SVGPlot, and SQLite-backed workflows.
 - Obsidian helper builds must be configured with `CSVZALL_OBSIDIAN_BUILD=ON`.
 - `CSVZALL_OBSIDIAN_BUILD=ON` must keep PostgreSQL support, keychain support, and compressed input support disabled.
+- Obsidian helper builds must prefer in-tree/static dependencies over system shared packages for compiled/runtime dependencies. In particular, keep `CSVZALL_PREFER_SYSTEM_SIMDJSON=OFF`, `CSVZALL_PREFER_SYSTEM_NLOHMANN_JSON=OFF`, and `CSVZALL_PREFER_SYSTEM_SVGPLOT=OFF` for Obsidian release assets.
 - Obsidian helper assets must contain only the native `csvzall` executable (`csvzall.exe` on Windows, `csvzall` on Unix-like platforms). Do not package DLLs, `.so` files, `.so.*` files, or `.dylib` files.
 - The executable may depend on OS-provided system libraries, but it must not require non-system runtime shared libraries such as PostgreSQL, OpenSSL, zlib, libintl/iconv, MinGW runtime DLLs, or Homebrew/shared-library equivalents.
 - If an Obsidian build or package check reports a non-system runtime shared library dependency, do not copy the library into the Obsidian asset. Disable the feature, switch the dependency to a static build, or stop and report that the Obsidian artifact contract would change.
