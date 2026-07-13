@@ -41,21 +41,26 @@ file(GET_RUNTIME_DEPENDENCIES
     "[Ww][Ss]2_32\\.dll"
   POST_EXCLUDE_REGEXES
     ".*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][\\/][Ss]ystem32[\\/].*"
-    ".*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][\\/][Ss][Yy][Ss][Ww][Oo][Ww]64[\\/].*")
+    ".*[Ww][Ii][Nn][Dd][Oo][Ww][Ss][\\/][Ss][Yy][Ss][Ww][Oo][Ww]64[\\/].*"
+    "^/lib/.*"
+    "^/lib64/.*"
+    "^/usr/lib/.*"
+    "^/usr/lib64/.*"
+    "^/System/Library/.*")
 
-if(_runtime_dependency_mode STREQUAL "assert-no-non-system-dlls")
+if(_runtime_dependency_mode STREQUAL "assert-no-non-system-shared-libs")
   if(_resolved_deps OR _unresolved_deps)
     list(SORT _resolved_deps)
     list(SORT _unresolved_deps)
     string(REPLACE ";" "\n  " _resolved_report "${_resolved_deps}")
     string(REPLACE ";" "\n  " _unresolved_report "${_unresolved_deps}")
     message(FATAL_ERROR
-      "Obsidian helper build must not require non-system runtime DLLs.\n"
-      "Resolved non-system runtime dependencies:\n  ${_resolved_report}\n"
+      "Obsidian helper build must not require non-system runtime shared libraries.\n"
+      "Resolved non-system runtime shared libraries:\n  ${_resolved_report}\n"
       "Unresolved runtime dependencies:\n  ${_unresolved_report}\n"
       "Disable the feature that introduced the dependency, or make it static before publishing the Obsidian asset.")
   endif()
-  message(STATUS "Obsidian helper runtime dependency check passed: no non-system DLLs required")
+  message(STATUS "Obsidian helper runtime dependency check passed: no non-system shared libraries required")
   return()
 elseif(NOT _runtime_dependency_mode STREQUAL "copy")
   message(FATAL_ERROR "Unknown runtime dependency mode: ${_runtime_dependency_mode}")
