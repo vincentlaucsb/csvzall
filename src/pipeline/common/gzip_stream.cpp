@@ -30,6 +30,7 @@ bool HasSuffixCi(std::string_view path, std::string_view suffix) {
   return true;
 }
 
+#ifdef CSVZALL_HAVE_COMPRESSED_INPUT
 std::uint16_t ReadLe16(const std::vector<unsigned char>& data, std::size_t offset) {
   if (offset + 2 > data.size()) {
     throw std::runtime_error("Invalid ZIP archive: truncated field");
@@ -241,6 +242,7 @@ std::string InflateRawDeflate(const std::vector<unsigned char>& data,
 
   return output;
 }
+#endif
 
 }  // namespace
 
@@ -253,6 +255,7 @@ bool IsZipPath(std::string_view path) {
 }
 
 std::string ReadZipEntry(const std::string& path, const std::string& requested_entry) {
+#ifdef CSVZALL_HAVE_COMPRESSED_INPUT
   const auto data = ReadWholeFile(path);
   const auto entries = ReadCentralDirectory(data);
   const auto& entry = SelectEntry(entries, requested_entry);
@@ -282,8 +285,14 @@ std::string ReadZipEntry(const std::string& path, const std::string& requested_e
   }
 
   return output;
+#else
+  (void)path;
+  (void)requested_entry;
+  throw std::runtime_error("ZIP CSV input is disabled in this build");
+#endif
 }
 
+#ifdef CSVZALL_HAVE_COMPRESSED_INPUT
 GzipStreambuf::GzipStreambuf(const std::string& path) {
   file_ = gzopen(path.c_str(), "rb");
   if (!file_) {
@@ -321,5 +330,6 @@ GzipInputStream::GzipInputStream(const std::string& path)
     : std::istream(nullptr), buffer_(path) {
   rdbuf(&buffer_);
 }
+#endif
 
 }  // namespace csvzall::pipeline::common
