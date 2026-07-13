@@ -221,8 +221,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$RELEASE_TAG" "$WASM_VIEWER_ASSET_PATH" "$WASM_VIEWER_CHECKSUM_PATH" --clobber
 
-  obsidian-windows:
-    runs-on: windows-latest
+  obsidian-native:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            archive-extension: tar.gz
+
+          - os: windows-latest
+            platform: windows
+            archive-extension: zip
+
+          - os: macos-latest
+            platform: macos
+            archive-extension: tar.gz
+
+    runs-on: ${{ matrix.os }}
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name }}
 
@@ -251,9 +266,14 @@ jobs:
           $defaultGenerator = $defaultGenerator -replace '^\*\s*', ''
           $defaultGenerator = ($defaultGenerator -split '\s+=\s+', 2)[0].Trim()
 
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $toolchain = if (Test-Path $vswhere) { & $vswhere -latest -property installationVersion } else { $env:VisualStudioVersion }
-          $toolchain = "vs-$toolchain"
+          if ($env:RUNNER_OS -eq 'Windows') {
+            $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+            $toolchain = if (Test-Path $vswhere) { & $vswhere -latest -property installationVersion } else { $env:VisualStudioVersion }
+            $toolchain = "vs-$toolchain"
+          } else {
+            $compiler = if ($env:CXX) { $env:CXX } else { "c++" }
+            $toolchain = (& $compiler --version | Select-Object -First 1)
+          }
 
           $id = @(
             Convert-CachePart $cmakeVersion
@@ -286,7 +306,8 @@ jobs:
       - name: Build Obsidian helper
         run: cmake --build build-obsidian --config Release --parallel --target csvzall
 
-      - name: Package Obsidian helper
+      - name: Package Obsidian helper (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $packageDir = "dist/obsidian-package"
@@ -315,9 +336,41 @@ jobs:
           $safeTag = $env:RELEASE_TAG -replace '[\\/]', '-'
           $arch = [string]$env:RUNNER_ARCH
           $arch = $arch.ToLowerInvariant()
-          $assetPath = "dist/csvzall-$safeTag-obsidian-windows-$arch.zip"
+          $assetPath = "dist/csvzall-$safeTag-obsidian-${{ matrix.platform }}-$arch.${{ matrix.archive-extension }}"
           Compress-Archive -Path "$packageDir/*" -DestinationPath $assetPath -Force
           "OBSIDIAN_ASSET_PATH=$assetPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Package Obsidian helper (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="dist/obsidian-package"
+          mkdir -p "$package_dir"
+
+          if [[ ! -f build-obsidian/csvzall ]]; then
+            echo "csvzall was not found in the Obsidian helper build output." >&2
+            exit 1
+          fi
+          cp build-obsidian/csvzall "$package_dir/csvzall"
+          chmod +x "$package_dir/csvzall"
+
+          shared_libs="$(
+            find build-obsidian "$package_dir" \
+              \( -name '*.so' -o -name '*.so.*' -o -name '*.dylib' \) \
+              -print
+          )"
+          if [[ -n "$shared_libs" ]]; then
+            echo "Obsidian helper package must not contain shared libraries. Found:" >&2
+            printf '%s\n' "$shared_libs" >&2
+            exit 1
+          fi
+
+          safe_tag="${RELEASE_TAG//\//-}"
+          arch="$(printf '%s' "$RUNNER_ARCH" | tr '[:upper:]' '[:lower:]')"
+          asset_path="dist/csvzall-${safe_tag}-obsidian-${{ matrix.platform }}-${arch}.${{ matrix.archive-extension }}"
+          tar -czf "$asset_path" -C "$package_dir" .
+          echo "OBSIDIAN_ASSET_PATH=$asset_path" >> "$GITHUB_ENV"
 
       - name: Attach Obsidian helper to release
         shell: bash

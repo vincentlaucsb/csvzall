@@ -75,11 +75,12 @@ This file mirrors [AGENTS.md](AGENTS.md).
 
 ## Release artifacts
 
-- The Obsidian helper release asset is intentionally narrower than the full CLI release. It supports CSV editing, viewing, charting/SVGPlot, and SQLite-backed workflows.
+- Obsidian helper release assets are intentionally narrower than the full CLI release and are published for each native desktop platform. They support CSV editing, viewing, charting/SVGPlot, and SQLite-backed workflows.
 - Obsidian helper builds must be configured with `CSVZALL_OBSIDIAN_BUILD=ON`.
 - `CSVZALL_OBSIDIAN_BUILD=ON` must keep PostgreSQL support, keychain support, and compressed input support disabled.
-- The Windows Obsidian helper asset must contain `csvzall.exe` only and must not package DLLs. The executable may depend on Windows system DLLs, but it must not require non-system runtime DLLs such as PostgreSQL, OpenSSL, zlib, libintl/iconv, or MinGW runtime DLLs.
-- If an Obsidian build or package check reports a non-system runtime DLL dependency, do not copy the DLL into the Obsidian asset. Disable the feature, switch the dependency to a static build, or stop and report that the Obsidian artifact contract would change.
+- Obsidian helper assets must contain only the native `csvzall` executable (`csvzall.exe` on Windows, `csvzall` on Unix-like platforms). Do not package DLLs, `.so` files, `.so.*` files, or `.dylib` files.
+- The executable may depend on OS-provided system libraries, but it must not require non-system runtime shared libraries such as PostgreSQL, OpenSSL, zlib, libintl/iconv, MinGW runtime DLLs, or Homebrew/shared-library equivalents.
+- If an Obsidian build or package check reports a non-system runtime shared library dependency, do not copy the library into the Obsidian asset. Disable the feature, switch the dependency to a static build, or stop and report that the Obsidian artifact contract would change.
 
 ## Local CMake workflow
 

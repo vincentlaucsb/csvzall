@@ -481,12 +481,14 @@ For intentionally minimal installs without chart rendering, pass `-AllowNoSvg`.
 
 ### Release build flavors
 
-Release builds publish the full CLI artifacts for each desktop platform. Windows
-releases also publish `csvzall-<version>-obsidian-windows-<arch>.zip`, a slim
-helper build intended for the Obsidian plugin's managed install path. That
-helper keeps CSV viewing/editing, SVG charting, and SQLite-backed workflows, but
-disables PostgreSQL export, OS keychain integration, and compressed `.gz`/`.zip`
-CSV input.
+Release builds publish the full CLI artifacts for each desktop platform.
+Releases also publish slim Obsidian helper artifacts named
+`csvzall-<version>-obsidian-<platform>-<arch>.<ext>` for native desktop
+platforms. Those helpers are intended for the Obsidian plugin's managed install
+path and keep CSV viewing/editing, SVG charting, and SQLite-backed workflows,
+but disable PostgreSQL export, OS keychain integration, and compressed
+`.gz`/`.zip` CSV input. Obsidian helper artifacts are checked so they package
+only the native `csvzall` executable and no bundled runtime shared libraries.
 
 ## Dependencies
 

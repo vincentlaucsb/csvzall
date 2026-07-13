@@ -26,7 +26,7 @@ if(DOXYGEN_FOUND)
 endif()
 
 option(CSVZALL_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
-option(CSVZALL_OBSIDIAN_BUILD "Build the Obsidian helper release variant and reject non-system runtime DLL dependencies" OFF)
+option(CSVZALL_OBSIDIAN_BUILD "Build the Obsidian helper release variant and reject non-system runtime shared library dependencies" OFF)
 option(CSVZALL_ENABLE_POSTGRESQL "Enable PostgreSQL export support" ON)
 option(CSVZALL_FETCH_LIBPQXX "Fetch libpqxx from GitHub when not found on system" ON)
 option(CSVZALL_REQUIRE_POSTGRESQL "Fail configure if PostgreSQL support cannot be enabled" OFF)
@@ -55,7 +55,7 @@ if(CSVZALL_OBSIDIAN_BUILD)
   if(NOT CSVZALL_ENABLE_SVGPLOT)
     message(FATAL_ERROR "CSVZALL_OBSIDIAN_BUILD=ON requires CSVZALL_ENABLE_SVGPLOT=ON")
   endif()
-  message(STATUS "Configuring Obsidian helper build: PostgreSQL, keychain, and compressed input disabled; non-system runtime DLLs forbidden")
+  message(STATUS "Configuring Obsidian helper build: PostgreSQL, keychain, and compressed input disabled; non-system runtime shared libraries forbidden")
 endif()
 
 set(CSVZALL_PREFER_SYSTEM_ZLIB_DEFAULT ON)
@@ -553,20 +553,23 @@ set(CSVZALL_RUNTIME_DEPENDENCY_SCRIPT
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/copy_runtime_dependencies.cmake")
 
 function(csvzall_copy_runtime_dependencies target_name)
-  if(WIN32)
-    set(_csvzall_runtime_dependency_mode "copy")
-    if(CSVZALL_OBSIDIAN_BUILD)
-      set(_csvzall_runtime_dependency_mode "assert-no-non-system-dlls")
-    endif()
-    add_custom_command(TARGET ${target_name} POST_BUILD
-      COMMAND ${CMAKE_COMMAND}
-        -D "mode=${_csvzall_runtime_dependency_mode}"
-        -D "exe=$<TARGET_FILE:${target_name}>"
-        -D "dest=$<TARGET_FILE_DIR:${target_name}>"
-        -D "dirs=${CSVZALL_RUNTIME_DEPENDENCY_DIRS}"
-        -P "${CSVZALL_RUNTIME_DEPENDENCY_SCRIPT}"
-      VERBATIM)
+  if(NOT WIN32 AND NOT CSVZALL_OBSIDIAN_BUILD)
+    return()
   endif()
+
+  set(_csvzall_runtime_dependency_mode "copy")
+  if(CSVZALL_OBSIDIAN_BUILD)
+    set(_csvzall_runtime_dependency_mode "assert-no-non-system-shared-libs")
+  endif()
+
+  add_custom_command(TARGET ${target_name} POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+      -D "mode=${_csvzall_runtime_dependency_mode}"
+      -D "exe=$<TARGET_FILE:${target_name}>"
+      -D "dest=$<TARGET_FILE_DIR:${target_name}>"
+      -D "dirs=${CSVZALL_RUNTIME_DEPENDENCY_DIRS}"
+      -P "${CSVZALL_RUNTIME_DEPENDENCY_SCRIPT}"
+    VERBATIM)
 endfunction()
 
 # PostgreSQL support via libpqxx (modern C++ wrapper around libpq).
