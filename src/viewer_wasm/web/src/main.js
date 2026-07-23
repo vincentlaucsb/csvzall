@@ -8,6 +8,7 @@ import './styles.css';
 import { setupFileDrop } from './file-drop.js';
 import { createHostBridge } from './host-bridge.js';
 import { createIcon } from './icons.js';
+import { readLocalFile } from './local-file.js';
 import { setupPwa } from './pwa.js';
 
 const fileInput = document.getElementById('file-input');
@@ -316,9 +317,18 @@ async function openBuffer(name, buffer, sourceLabel) {
 }
 
 async function openFile(file) {
-  const name = file.name || 'input.csv';
-  const buffer = await file.arrayBuffer();
-  await openBuffer(name, buffer, name);
+  try {
+    const { name, buffer } = await readLocalFile(file, {
+      onStart(name) {
+        showLoading('Opening CSV', `${name} is being read from your device.`);
+        setStatus(`Opening ${name}...`);
+      },
+    });
+    await openBuffer(name, buffer, name);
+  } catch (error) {
+    hideLoading();
+    setStatus(error instanceof Error ? error.message : 'Could not read the selected file.');
+  }
 }
 
 async function openFileWhenReady(file) {
