@@ -41,6 +41,10 @@ This file mirrors [AGENTS.md](AGENTS.md).
 
 ```text
 index.html
+manifest.webmanifest
+sw.js
+icon-192.png
+icon-512.png
 assets/
   *.js
   *.css
@@ -49,6 +53,7 @@ csvzall-wasm-viewer.json
 ```
 
 - `csvzall-wasm-viewer.json` must include source repository, commit, ref, version, build timestamp, build target, and source dist path.
+- The web app is installable as a PWA when served over HTTPS. Keep the service worker build-generated so its precache list matches the hashed Vite assets, and keep browser file handling as a progressive enhancement.
 - Release workflows must publish `csvzall-wasm-viewer-<version>.zip` and a SHA-256 checksum beside existing native release assets without changing native asset names or packaging.
 
 ## Theme Contract

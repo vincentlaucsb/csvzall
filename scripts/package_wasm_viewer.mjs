@@ -5,6 +5,13 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const webRootFiles = [
+  'index.html',
+  'manifest.webmanifest',
+  'sw.js',
+  'icon-192.png',
+  'icon-512.png',
+];
 
 function parseArgs(argv) {
   const args = {};
@@ -59,10 +66,12 @@ async function csvzallVersion() {
 }
 
 async function validateDist(distDir) {
-  const indexPath = resolve(distDir, 'index.html');
   const assetsDir = resolve(distDir, 'assets');
-  if (!(await pathExists(indexPath))) {
-    throw new Error(`Missing ${indexPath}`);
+  for (const file of webRootFiles) {
+    const path = resolve(distDir, file);
+    if (!(await pathExists(path))) {
+      throw new Error(`Missing ${path}`);
+    }
   }
   if (!(await pathExists(assetsDir))) {
     throw new Error(`Missing ${assetsDir}`);
@@ -92,7 +101,9 @@ const builtAt = args['built-at'] ?? new Date().toISOString();
 await validateDist(distDir);
 await rm(outDir, { recursive: true, force: true });
 await mkdir(outDir, { recursive: true });
-await cp(resolve(distDir, 'index.html'), resolve(outDir, 'index.html'));
+for (const file of webRootFiles) {
+  await cp(resolve(distDir, file), resolve(outDir, file));
+}
 await cp(resolve(distDir, 'assets'), resolve(outDir, 'assets'), { recursive: true });
 
 const metadata = {

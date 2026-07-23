@@ -5,8 +5,10 @@ import 'ag-grid-community/styles/ag-theme-quartz.css';
 import 'popright/styles.css';
 import 'popright/dropdown.css';
 import './styles.css';
+import { setupFileDrop } from './file-drop.js';
 import { createHostBridge } from './host-bridge.js';
 import { createIcon } from './icons.js';
+import { setupPwa } from './pwa.js';
 
 const fileInput = document.getElementById('file-input');
 const filePicker = document.querySelector('.file-picker');
@@ -16,6 +18,8 @@ const saveButton = document.getElementById('save');
 const resetButton = document.getElementById('reset');
 const insertMenuButton = document.getElementById('insert-menu');
 const deleteMenuButton = document.getElementById('delete-menu');
+const installButton = document.getElementById('install-app');
+const dropOverlay = document.getElementById('drop-overlay');
 const gridElement = document.getElementById('grid');
 const loadingDialog = document.getElementById('loading-dialog');
 const loadingTitleNode = document.getElementById('loading-title');
@@ -43,6 +47,8 @@ let dirty = false;
 let pendingInsertColumn = 0;
 let pendingRenameColumn = '';
 let hostBridge = null;
+let wasmReady = false;
+let pendingOpenFile = null;
 
 function setStatus(message) {
   statusNode.textContent = message;
@@ -313,6 +319,23 @@ async function openFile(file) {
   const name = file.name || 'input.csv';
   const buffer = await file.arrayBuffer();
   await openBuffer(name, buffer, name);
+}
+
+async function openFileWhenReady(file) {
+  if (!wasmReady) {
+    pendingOpenFile = file;
+    return;
+  }
+  await openFile(file);
+}
+
+async function requestOpenFile(file) {
+  if (dirty && !window.confirm(
+    `Open ${file.name}? Unsaved changes to ${activeName || 'the current file'} will be lost.`,
+  )) {
+    return;
+  }
+  await openFileWhenReady(file);
 }
 
 async function openHostFile(file) {
@@ -628,8 +651,9 @@ cancelRenameColumn.addEventListener('click', () => {
 
 fileInput.addEventListener('change', () => {
   const file = fileInput.files?.[0];
+  fileInput.value = '';
   if (file) {
-    void openFile(file);
+    void requestOpenFile(file);
   }
 });
 
@@ -709,8 +733,16 @@ async function start() {
   showLoading('Loading CSV Engine', 'The parser is starting in a background worker.');
   try {
     await workerRequest('init');
+    wasmReady = true;
+    if (pendingOpenFile) {
+      const file = pendingOpenFile;
+      pendingOpenFile = null;
+      await openFile(file);
+    }
     if (!hostBridge.isHostMode()) {
-      setStatus('Open a local CSV file to begin.');
+      if (!viewOpen) {
+        setStatus('Open a local CSV file to begin.');
+      }
       fileInput.disabled = false;
     }
   } catch (error) {
@@ -730,6 +762,13 @@ hostBridge = createHostBridge({
   onHostModeChange: setHostMode,
 });
 hostBridge.start();
+setupFileDrop({
+  overlay: dropOverlay,
+  enabled: () => !hostBridge.isHostMode(),
+  onFile: requestOpenFile,
+  onStatus: setStatus,
+});
+setupPwa({ installButton, onLaunchFile: requestOpenFile });
 fileInput.disabled = true;
 refreshActionState();
 setStatus('Loading CSV engine...');

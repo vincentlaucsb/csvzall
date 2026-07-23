@@ -203,6 +203,43 @@ footer {
   font-size: 0.84rem;
 }
 
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  margin: 1rem;
+  border: 3px dashed color-mix(in srgb, var(--csvzall-accent) 72%, var(--csvzall-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--csvzall-background-primary) 90%, transparent);
+  color: var(--csvzall-text-normal);
+  pointer-events: none;
+}
+
+.drop-overlay[hidden],
+body[data-host-mode] .drop-overlay {
+  display: none;
+}
+
+.drop-overlay-content {
+  display: grid;
+  gap: 0.45rem;
+  max-width: min(32rem, calc(100vw - 4rem));
+  text-align: center;
+}
+
+.drop-overlay-content strong {
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.drop-overlay-content span {
+  color: var(--csvzall-text-muted);
+  font-size: 0.9rem;
+}
+
 #loading-dialog,
 .csvzall-dialog {
   width: min(28rem, calc(100vw - 2rem));
