@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(csvzall VERSION 0.3.1 LANGUAGES CXX)
+project(csvzall VERSION 0.4.0 LANGUAGES CXX)
 
 set(CSVZALL_CXX_STANDARD 23 CACHE STRING "C++ standard used by csvzall and in-tree dependencies")
 
@@ -686,61 +686,9 @@ endif()
 set(CSVZALL_VIEWER_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/viewer")
 set(CSVZALL_VIEWER_ASSET_CPP "${CSVZALL_VIEWER_GENERATED_DIR}/viewer_assets.cpp")
 set(CSVZALL_VIEWER_ASSET_HPP "${CSVZALL_VIEWER_GENERATED_DIR}/viewer_assets.hpp")
-set(CSVZALL_VIEWER_ASSET_INPUTS
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/index.html"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/viewer.css"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/viewer.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/dirty-state.mjs"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/fallback-menu.mjs"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/grid.mjs"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/icons.mjs"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/markdown.mjs"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/save.mjs"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/sql.mjs"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/viewer/modules/state.mjs"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-grid-community.min.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-grid.css"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid/ag-theme-alpine.css"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/constants.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/ContextMenu.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/DropdownMenu.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/index.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/MenuController.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/positioning.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render/items.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render/root.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/render/types.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/dropdown.css"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/styles.css"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/theme-utils.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/theme.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/ThemeStore.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/types.js"
-  "${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist/utils.js")
-
-add_custom_command(
-  OUTPUT "${CSVZALL_VIEWER_ASSET_CPP}" "${CSVZALL_VIEWER_ASSET_HPP}"
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${CSVZALL_VIEWER_GENERATED_DIR}"
-  COMMAND ${CMAKE_COMMAND}
-    -D "OUTPUT_CPP=${CSVZALL_VIEWER_ASSET_CPP}"
-    -D "OUTPUT_HPP=${CSVZALL_VIEWER_ASSET_HPP}"
-    -D "VIEWER_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/src/viewer"
-    -D "AG_GRID_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/vendor/ag-grid"
-    -D "POPRIGHT_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/vendor/popright/dist"
-    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_viewer_assets.cmake"
-  DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_viewer_assets.cmake"
-    ${CSVZALL_VIEWER_ASSET_INPUTS}
-  VERBATIM)
-
-set_source_files_properties(
-  "${CSVZALL_VIEWER_ASSET_CPP}"
-  "${CSVZALL_VIEWER_ASSET_HPP}"
-  PROPERTIES GENERATED TRUE)
-
-add_custom_target(csvzall_viewer_assets
-  DEPENDS "${CSVZALL_VIEWER_ASSET_CPP}" "${CSVZALL_VIEWER_ASSET_HPP}")
+include(cmake/viewer_assets.cmake)
+csvzall_add_viewer_assets(csvzall_viewer_assets
+  "${CMAKE_CURRENT_SOURCE_DIR}" "${CSVZALL_VIEWER_GENERATED_DIR}")
 
 set(CSVZALL_CORE_SOURCES
   ${CSVZALL_VIEWER_ASSET_CPP}

@@ -1,5 +1,12 @@
 export const HOST_SOURCE = 'obsidian-csvzall';
 export const VIEWER_SOURCE = 'csvzall-wasm-viewer';
+export const HOST_CAPABILITIES = Object.freeze([
+  'csvzall-host-integration-v1',
+  'csvzall-save-ack-v1',
+  'csvzall-edit-revision-v1',
+  'csvzall-obsidian-keyboard-lifecycle-v2',
+  'csvzall-obsidian-viewport-resize-v2',
+]);
 
 function isArrayBuffer(value) {
   return value instanceof ArrayBuffer;
@@ -22,6 +29,7 @@ export function createHostBridge({
   windowRef = window,
   onOpenFile,
   onHostModeChange = () => {},
+  onViewportResize = () => {},
 } = {}) {
   if (typeof onOpenFile !== 'function') {
     throw new TypeError('createHostBridge requires onOpenFile');
@@ -35,6 +43,8 @@ export function createHostBridge({
   let hostMode = false;
   let lastDirty;
   let runningOpen = Promise.resolve();
+  const pendingSaves = new Map();
+  let nextSaveId = 0;
 
   function post(message, transfer = []) {
     if (!targetWindow) {
@@ -71,6 +81,23 @@ export function createHostBridge({
   }
 
   function handleMessage(event) {
+    if (!targetWindow || event.source !== targetWindow || event.data?.source !== HOST_SOURCE) {
+      return;
+    }
+    const data = event.data;
+    if (data.type === 'save-result') {
+      const pending = pendingSaves.get(data.requestId);
+      if (pending && typeof data.success === 'boolean') {
+        pendingSaves.delete(data.requestId);
+        if (data.success) pending.resolve(true);
+        else pending.reject(new Error(data.error || 'Save failed'));
+      }
+      return;
+    }
+    if (data.type === 'viewport-resized') {
+      if (hostMode) onViewportResize();
+      return;
+    }
     const file = cloneOpenFileMessage(event.data);
     if (!file) {
       return;
@@ -85,11 +112,15 @@ export function createHostBridge({
 
     destroy() {
       windowRef.removeEventListener('message', handleMessage);
+      for (const pending of pendingSaves.values()) {
+        pending.reject(new Error('Host bridge closed before save completed'));
+      }
+      pendingSaves.clear();
     },
 
     async markReady() {
       initialized = true;
-      post({ type: 'ready' });
+      post({ type: 'ready', capabilities: HOST_CAPABILITIES });
       await flushQueuedOpenFiles();
     },
 
@@ -106,14 +137,20 @@ export function createHostBridge({
         return false;
       }
       const buffer = result.buffer;
-      post({
-        type: 'save-file',
-        name,
-        buffer,
-        byteOffset: result.byteOffset ?? 0,
-        byteLength: result.byteLength ?? buffer.byteLength,
-      }, [buffer]);
-      return true;
+      return new Promise((resolve, reject) => {
+        const requestId = ++nextSaveId;
+        pendingSaves.set(requestId, { resolve, reject });
+        try {
+          post({
+            type: 'save-file', requestId, name, buffer,
+            byteOffset: result.byteOffset ?? 0,
+            byteLength: result.byteLength ?? buffer.byteLength,
+          }, [buffer]);
+        } catch (error) {
+          pendingSaves.delete(requestId);
+          reject(error);
+        }
+      });
     },
 
     isHostMode() {

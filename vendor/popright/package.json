@@ -1,6 +1,6 @@
 {
   "name": "popright",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "A tiny, typed, data-driven context menu primitive for modern web apps.",
   "type": "module",
   "homepage": "https://github.com/vincentlaucsb/popright#readme",

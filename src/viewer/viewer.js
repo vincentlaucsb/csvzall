@@ -1,3 +1,5 @@
+import './modules/host-theme.mjs';
+import './modules/dialog-dismiss.mjs';
 import {
   createDirtyStateEmitter,
   dirtyStateMessage,

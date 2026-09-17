@@ -95,8 +95,16 @@ This file is the canonical AI reference for this repository.
 - The production `view` command serves embedded first-party viewer assets plus embedded AG Grid and Popright assets.
 - For vanilla JS/CSS/HTML iteration, use `csvzall view <file.csv> --viewer-assets src/viewer` or set `CSVZALL_VIEWER_ASSETS=<absolute-or-relative-src/viewer-path>`.
 - Developer asset mode reloads `src/viewer/index.html`, `src/viewer/viewer.css`, and `src/viewer/viewer.js` from disk on each request. Refreshing the browser is enough after editing those files; rebuilding C++ is not required.
+- Every native build checks embedded asset content hashes, including the generator script, so vendor updates with preserved archive timestamps are detected. Unchanged content preserves generated output timestamps and avoids recompilation. Keep this check in the shared `cmake/viewer_assets.cmake` target; do not replace it with timestamp-only file dependencies.
 - AG Grid and Popright vendor files remain embedded in developer asset mode. Changes to `vendor/ag-grid/*`, `vendor/popright/*`, or `cmake/embed_viewer_assets.cmake` still require regenerating/rebuilding.
 - Keep the viewer framework-free. Prefer small vanilla JS modules/helpers for modals, context menus, grid adapters, and API calls.
+
+## Viewer theme design
+
+- Embedded Obsidian viewers intentionally follow the host's resolved colors, accent, interface font, and light/dark mode, including live changes. Keep this behavior shared between native and WASM viewers through `src/viewer/modules/host-theme.mjs`.
+- Host theming is optional. Standalone viewers must remain usable without Obsidian and retain their system-aware appearance when no host theme is supplied. Do not introduce an Obsidian runtime dependency, persisted theme file, or required handshake for startup.
+- Keep the versioned parent-window `postMessage` protocol and its allowlist validation. Theme updates must preserve active edits and focus without reloading CSV data or recreating the grid.
+- Preserve regression coverage for both hosted theme updates and the standalone fallback.
 
 ## csv-parser feedback loop
 
