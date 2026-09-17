@@ -1,13 +1,13 @@
-# Project Guidance (Mirror)
+# Project Guidance
 
-This file mirrors [AGENTS.md](AGENTS.md).
+This file is the canonical AI reference for this repository.
 
-`AGENTS.md` is canonical. Keep both files in sync in the same commit.
+`CLAUDE.md` must stay in sync with this file in the same commit.
 
 ## Structure
 
-- Keep pipeline orchestration in `src/transform_pipeline.*`.
-- Keep shared helpers in `src/pipeline/common/`.
+- Keep public pipeline orchestration in `src/transform_pipeline.*`.
+- Keep reusable helpers in `src/pipeline/common/`.
 - Keep reusable CSV-to-chart config and rendering helpers in `src/charts/`; SVGPlot remains the general-purpose chart drawing library.
 - Keep reusable SQLite integration (CSV loader, query execution, memory strategy) in `src/sqlite/`.
 - Keep reusable PostgreSQL integration (connection, schema inference, row loading, export orchestration) in `src/postgres/`.
@@ -33,20 +33,20 @@ This file mirrors [AGENTS.md](AGENTS.md).
 
 - Use [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) with its bundled internal SQLite.
 - CSV input is scanned with csv-parser scalar type inference before SQLite load.
-- Columns containing only integer/real values load as `NUMERIC`; columns containing text, booleans, timestamps, or `CSV_BIGINT` values load as `TEXT` to preserve exact lexical identifiers. Numeric comparisons in WHERE work correctly for inferred numeric columns.
-- All column names quoted with `"` in generated SQL.
-- Memory strategy: in-memory below threshold, temp-file database above it.
+- Columns that contain only integer/real values are loaded as `NUMERIC`; columns that contain text, booleans, timestamps, or `CSV_BIGINT` values are loaded as `TEXT` to preserve exact lexical identifiers. Numeric comparisons in WHERE work correctly for inferred numeric columns.
+- All column names are quoted with `"` in generated SQL.
+- Memory strategy: in-memory (`:memory:`) below threshold, temp-file database above it.
 - Default threshold: 256 MB (`RunOptions::sqlite_threshold_mb`). Not yet exposed as a CLI flag.
-- Stdin always uses in-memory. Explicit file path can be set via `RunOptions::sqlite_db_path`. Not yet exposed as a CLI flag.
-- Temp-file databases: unique name, deleted on exit via RAII.
+- Stdin input always uses in-memory. Explicit file path can be set via `RunOptions::sqlite_db_path`. Not yet exposed as a CLI flag.
+- Temp-file databases use a unique name (`csvzall_<pid>_<random>.db`) and are deleted on exit via RAII.
 
-## Rules
+## Design rules
 
-- Target C++23 and prefer modern features.
-- Use `std::string_view` at safe API boundaries.
-- Do not store `std::string_view` in persistent structures.
-- Keep stdout for data and stderr for diagnostics.
-- Keep `RunOptions` as the shared cross-command behavior point (including SQLite threshold).
+- Target C++23 and prefer modern language features.
+- Use `std::string_view` at API boundaries where lifetimes are safe.
+- Never store `std::string_view` in persistent data structures; store `std::string` instead.
+- Keep stdout for data output and stderr for diagnostics.
+- Keep `RunOptions` as the shared flow point for cross-command behavior (for example exact matching and SQLite threshold).
 - Avoid duplicating logic. Move shared helpers to `src/pipeline/common/` (general), `src/sqlite/` (SQLite-specific), or another top-level reusable module when appropriate. If no clean home exists, add a `// TODO(dedup):` comment rather than copying.
 
 ## CLI help quality
@@ -98,6 +98,13 @@ This file mirrors [AGENTS.md](AGENTS.md).
 - AG Grid and Popright vendor files remain embedded in developer asset mode. Changes to `vendor/ag-grid/*`, `vendor/popright/*`, or `cmake/embed_viewer_assets.cmake` still require regenerating/rebuilding.
 - Keep the viewer framework-free. Prefer small vanilla JS modules/helpers for modals, context menus, grid adapters, and API calls.
 
+## Viewer theme design
+
+- Embedded Obsidian viewers intentionally follow the host's resolved colors, accent, interface font, and light/dark mode, including live changes. Keep this behavior shared between native and WASM viewers through `src/viewer/modules/host-theme.mjs`.
+- Host theming is optional. Standalone viewers must remain usable without Obsidian and retain their system-aware appearance when no host theme is supplied. Do not introduce an Obsidian runtime dependency, persisted theme file, or required handshake for startup.
+- Keep the versioned parent-window `postMessage` protocol and its allowlist validation. Theme updates must preserve active edits and focus without reloading CSV data or recreating the grid.
+- Preserve regression coverage for both hosted theme updates and the standalone fallback.
+
 ## csv-parser feedback loop
 
 - `CSV_PARSER_TODOS.md` is a committed working log for issues discovered while csvzall exercises csv-parser in real workflows.
@@ -107,10 +114,11 @@ This file mirrors [AGENTS.md](AGENTS.md).
 
 ## Testing docs location
 
-- `tests/AGENTS.md` is canonical for tests.
-- `tests/CLAUDE.md` is the tests mirror.
+Testing-specific concerns live in:
+- `tests/AGENTS.md` (canonical)
+- `tests/CLAUDE.md` (mirror)
 
 ## Sync requirement
 
-If this file changes, update [AGENTS.md](AGENTS.md).
-If [AGENTS.md](AGENTS.md) changes, update this file.
+`AGENTS.md` is canonical. `CLAUDE.md` is the mirror.
+If one changes, update the other in the same commit.
