@@ -522,7 +522,7 @@ release runner.
 |---|---|---|---|
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) v0.18.5 | [Yuji Hirose](https://github.com/yhirose) and contributors | Embedded local HTTP server for the `view` command | Vendored single header under `vendor/httplib` |
 | [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) v32.3.9 | [AG Grid Ltd.](https://www.ag-grid.com/) | Interactive browser table for the `view` command | Vendored browser assets under `vendor/ag-grid`, embedded into csvzall at build time |
-| [Popright](https://github.com/vincentlaucsb/popright) v0.1.0 | [Vincent La](https://github.com/vincentlaucsb) | Context menu and dropdown menu primitives for the native `view` command and csvzall Browser web app | Vendored npm package under `vendor/popright`, embedded into csvzall at build time and linked into the browser editor Vite app via a local file dependency |
+| [Popright](https://github.com/vincentlaucsb/popright) v0.1.2 | [Vincent La](https://github.com/vincentlaucsb) | Context menu and dropdown menu primitives for the native `view` command and csvzall Browser web app | Vendored npm package under `vendor/popright`, embedded into csvzall at build time and linked into the browser editor Vite app via a local file dependency |
 | [Tabler Icons](https://github.com/tabler/tabler-icons) | [Paweł Kuna](https://github.com/codecalm) and contributors | Viewer toolbar and context menu icons | Selected inline SVG paths in `src/viewer/viewer.js` |
 
 ### Browser editor

@@ -189,6 +189,9 @@ class ContextMenu {
     containsTarget(target) {
         return this.targets.some((candidate) => (0, utils_js_1.containsEventTarget)(candidate, target));
     }
+    containsCurrentTarget(target) {
+        return Boolean(this.currentContext?.target && (0, utils_js_1.containsEventTarget)(this.currentContext.target, target));
+    }
     getTargetDepth(eventTarget) {
         if (!eventTarget) {
             return -1;
@@ -324,6 +327,10 @@ class ContextMenu {
                 if (type === "contextmenu") {
                     event.preventDefault();
                 }
+                if (type === "click" && this.isOpen && this.containsCurrentTarget(event.currentTarget)) {
+                    this.close("manual", event);
+                    return;
+                }
                 const pointerEvent = event;
                 this.requestOpen({
                     x: pointerEvent.clientX ?? 0,
@@ -344,6 +351,14 @@ class ContextMenu {
         const root = this.root;
         const ownerDocument = root.ownerDocument;
         const pointerListener = (event) => {
+            /**
+             * Browser clicks dispatch pointerdown before click. For click-triggered
+             * menus, the trigger click owns the toggle close; treating the preceding
+             * pointerdown as outside would close first and let click reopen.
+             */
+            if (this.options.trigger === "click" && this.containsTarget(event.target)) {
+                return;
+            }
             if (this.options.closeOnBlur &&
                 this.root &&
                 !this.root.contains(event.target) &&
@@ -356,6 +371,9 @@ class ContextMenu {
                 return;
             }
             const next = event.relatedTarget;
+            if (this.options.trigger === "click" && this.containsTarget(next)) {
+                return;
+            }
             if (next instanceof Node && (this.root.contains(next) || this.childMenu?.containsRoot(next))) {
                 return;
             }

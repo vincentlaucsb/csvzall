@@ -55,6 +55,7 @@ export declare class ContextMenu {
     update(options: Partial<ContextMenuOptions>): void;
     destroy(): void;
     containsTarget(target: EventTarget | null): boolean;
+    containsCurrentTarget(target: EventTarget | null): boolean;
     getTargetDepth(eventTarget: EventTarget | null): number;
     hasTargets(): boolean;
     canOpenFromNativeEvent(event: Event): boolean;
