@@ -1,3 +1,4 @@
+import './modules/host-theme.mjs';
 import {
   createDirtyStateEmitter,
   dirtyStateMessage,
