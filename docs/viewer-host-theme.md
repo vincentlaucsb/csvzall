@@ -31,3 +31,13 @@ host also retain their existing styles.
 The native asset generator includes the receiver module, and Vite bundles the
 same source for WASM. Older Obsidian mobile bundles can vendor this source as
 a separate module script until they are refreshed from a new WASM release.
+
+## Dialog dismissal
+
+Both viewers also import `modules/dialog-dismiss.mjs`. A primary pointer press
+and click on the backdrop of a `dialog.csvzall-dialog` dispatches a cancelable
+`cancel` event, then closes with return value `cancel`. Existing close handlers
+still run, including the unsaved-changes prompt's resolution. Clicks within the
+dialog bounds, drags starting inside, canceled pointers, and secondary clicks
+do not dismiss. Loading/progress dialogs are excluded. This behavior also works
+when the viewer runs standalone.

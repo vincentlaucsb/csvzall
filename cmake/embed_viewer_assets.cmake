@@ -13,6 +13,7 @@ set(_assets
   "/assets/viewer.js|${VIEWER_SOURCE_DIR}/viewer.js|application/javascript|viewer_js"
   "/assets/modules/dirty-state.mjs|${VIEWER_SOURCE_DIR}/modules/dirty-state.mjs|application/javascript|viewer_module_dirty_state_mjs"
   "/assets/modules/host-theme.mjs|${VIEWER_SOURCE_DIR}/modules/host-theme.mjs|application/javascript|viewer_module_host_theme_mjs"
+  "/assets/modules/dialog-dismiss.mjs|${VIEWER_SOURCE_DIR}/modules/dialog-dismiss.mjs|application/javascript|viewer_module_dialog_dismiss_mjs"
   "/assets/modules/fallback-menu.mjs|${VIEWER_SOURCE_DIR}/modules/fallback-menu.mjs|application/javascript|viewer_module_fallback_menu_mjs"
   "/assets/modules/grid.mjs|${VIEWER_SOURCE_DIR}/modules/grid.mjs|application/javascript|viewer_module_grid_mjs"
   "/assets/modules/icons.mjs|${VIEWER_SOURCE_DIR}/modules/icons.mjs|application/javascript|viewer_module_icons_mjs"

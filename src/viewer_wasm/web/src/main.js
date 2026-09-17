@@ -1,4 +1,5 @@
 import '../../../viewer/modules/host-theme.mjs';
+import '../../../viewer/modules/dialog-dismiss.mjs';
 import { createGrid } from 'ag-grid-community';
 import { createContextMenu, createDropdownMenu } from 'popright';
 import 'ag-grid-community/styles/ag-grid.css';
