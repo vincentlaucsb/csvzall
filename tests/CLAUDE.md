@@ -38,6 +38,16 @@ To run it directly, use `node --test tests/viewer_assets_build.test.mjs`.
 selects the generator (default: Ninja). On Windows, use a Visual Studio developer
 shell so MSVC, Ninja, and the SDK are available.
 
+Compiled fixtures must live under the build tree, not the operating system's
+temporary directory: MSBuild warns with MSB8029 and can relink unchanged outputs
+under a short-path TEMP alias. CTest supplies `CSVZALL_TEST_WORK_DIR`; direct runs
+default to `out/build/viewer-asset-tests`. Keep the no-op timestamp assertions,
+and retain build output in assertion failures for diagnosing generator issues.
+
+The fixture separates simulated content edits from the preceding compilation by
+a timestamp tick because older Make versions compare whole seconds. Keep this
+separation when adding mutations; input mtimes must still be reset to old values.
+
 ## Sync requirement
 
 If this file changes, update `tests/AGENTS.md`.
