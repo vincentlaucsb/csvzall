@@ -86,7 +86,7 @@
 
     window.addEventListener('message', (event) => {
       const message = event.data ?? {};
-      if (message.source !== 'csvzall-wasm-viewer') {
+      if (event.source !== viewer.contentWindow || message.source !== 'csvzall-wasm-viewer') {
         return;
       }
       renderMessage(message);
@@ -101,6 +101,7 @@
         savedBytes = new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
         savedNode.textContent = `Last save: ${savedBytes.byteLength} bytes`;
         statusNode.textContent = `Saved ${savedBytes.byteLength} bytes from viewer.`;
+        viewer.contentWindow.postMessage({ source: 'obsidian-csvzall', type: 'save-result', requestId: message.requestId, success: true }, '*');
       }
     });
 

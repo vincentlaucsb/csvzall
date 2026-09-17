@@ -9,6 +9,8 @@ import 'popright/dropdown.css';
 import './styles.css';
 import { setupFileDrop } from './file-drop.js';
 import { createHostBridge } from './host-bridge.js';
+import { createHostGridAdapter } from './host-grid.js';
+import { createSaveState } from './save-state.js';
 import { createIcon } from './icons.js';
 import { readLocalFile } from './local-file.js';
 import { setupPwa } from './pwa.js';
@@ -52,6 +54,11 @@ let pendingRenameColumn = '';
 let hostBridge = null;
 let wasmReady = false;
 let pendingOpenFile = null;
+const saveState = createSaveState();
+const hostGrid = createHostGridAdapter({
+  getGrid: () => gridApi,
+  isHostMode: () => hostBridge?.isHostMode() ?? false,
+});
 
 function setStatus(message) {
   statusNode.textContent = message;
@@ -125,6 +132,7 @@ function refreshActionState() {
 }
 
 function setDirty(nextDirty, { force = false } = {}) {
+  if (nextDirty) saveState.changed();
   const changed = dirty !== nextDirty;
   dirty = nextDirty;
   refreshActionState();
@@ -185,6 +193,8 @@ const gridOptions = {
   blockLoadDebounceMillis: 40,
   animateRows: false,
   suppressColumnVirtualisation: false,
+  onCellEditingStarted: hostGrid.onCellEditingStarted,
+  onCellEditingStopped: hostGrid.onCellEditingStopped,
   onCellValueChanged(event) {
     if (!viewOpen || !event.colDef.field || event.colDef.field === '_csvzallRowId') {
       return;
@@ -301,6 +311,7 @@ function loadView(schema, name) {
 }
 
 async function openBuffer(name, buffer, sourceLabel) {
+  saveState.changed();
   viewOpen = false;
   rowCount = 0;
   activeColumns = [];
@@ -676,18 +687,20 @@ saveButton.addEventListener('click', () => {
   void (async () => {
     showLoading('Preparing Download', `${activeName} is being rewritten with your edits.`);
     try {
-      const result = await workerRequest('save');
-      if (await hostBridge.saveFile({ name: activeName, result })) {
-        setDirty(false);
-        refreshRows();
-        setStatus(`Saved ${activeName} to host.`);
-        return;
-      }
-      const bytes = new Uint8Array(result.buffer, result.byteOffset, result.byteLength);
-      downloadBytes(activeName, bytes);
-      setDirty(false);
-      refreshRows();
-      setStatus(`Downloaded ${activeName}.`);
+      const name = activeName;
+      const hosted = await saveState.save({
+        prepare: () => workerRequest('save'),
+        async persist(result) {
+          if (await hostBridge.saveFile({ name, result })) return true;
+          downloadBytes(name, new Uint8Array(result.buffer, result.byteOffset, result.byteLength));
+          return false;
+        },
+        onSaved() {
+          setDirty(false);
+          refreshRows();
+        },
+      });
+      setStatus(hosted ? `Saved ${name} to host.` : `Downloaded ${name}.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Download failed');
     } finally {
@@ -704,6 +717,7 @@ resetButton.addEventListener('click', () => {
     showLoading('Resetting CSV', `${activeName} is being restored from the original bytes.`);
     try {
       const schema = await workerRequest('reset');
+      saveState.changed();
       applySchema(schema);
       setGridColumnDefs(activeColumns);
       setDirty(false);
@@ -772,6 +786,7 @@ async function start() {
 hostBridge = createHostBridge({
   onOpenFile: openHostFile,
   onHostModeChange: setHostMode,
+  onViewportResize: hostGrid.onViewportResize,
 });
 hostBridge.start();
 setupFileDrop({

@@ -32,6 +32,8 @@ This file is the canonical AI reference for the experimental WASM CSV viewer.
 - Keep the plain CSV editing surface aligned with native `csvzall view`: cell editing, insert/delete row, insert/rename/delete column, and row move actions should remain available through the same Popright menu patterns unless a browser limitation is documented.
 - Use the vendored `vendor/popright` package through the Vite app's local file dependency instead of manually copying menu code into `src/viewer_wasm/web`.
 - Keep the Obsidian iframe protocol implemented in source, not by patching built Vite output. The viewer accepts `{ source: "obsidian-csvzall", type: "open-file", name, buffer }`, queues early files until WASM initialization completes, and replies with `ready`, `dirty-state`, and `save-file` messages from source `"csvzall-wasm-viewer"`.
+- Host saves carry a unique `requestId`; wait for the parent's matching `{ source: "obsidian-csvzall", type: "save-result", requestId, success, error? }` before clearing dirty state. Preserve edits made during byte preparation or host writes using `save-state.js` revision checkpoints. `ready.capabilities` advertises the source integration contract for downstream packaging checks.
+- Keep Android keyboard handling in `host-grid.js`, wired to AG Grid edit lifecycle hooks and the parent's `viewport-resized` message. Scroll the active edited cell after settling delays; never recreate the grid, change layout, or move focus in response to keyboard/focus events. Standalone mode must remain independent of these host hooks.
 - `host-harness.html` is a source-only development harness for exercising iframe host mode; do not include it in the canonical release zip.
 
 ## Release Artifact
