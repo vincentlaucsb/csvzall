@@ -27,15 +27,18 @@ test('keyboard settling preserves active edit cell using visibility refreshes on
   adapter.onCellEditingStarted({ rowIndex: 3, column: 'edited' });
   assert.deepEqual([...jobs.values()].map(job => job.delay), [40, 140, 320, 650]);
   flush();
-  assert.deepEqual(calls, Array(4).fill([['event', 'resize'], ['row', 3, 'middle'], ['column', 'edited']]).flat());
+  assert.deepEqual(calls, Array(4).fill([['row', 3, 'middle'], ['column', 'edited']]).flat());
   calls.length = 0;
   adapter.onViewportResize();
   flush();
-  assert.deepEqual(calls, [['event', 'resize'], ['row', 3, 'middle'], ['column', 'edited']]);
+  assert.deepEqual(calls, [['row', 3, 'middle'], ['column', 'edited']]);
   calls.length = 0;
   adapter.onCellEditingStopped();
   flush();
-  assert.deepEqual(calls, [['event', 'resize'], ['row', 99, 'middle'], ['column', 'focused']]);
+  assert.deepEqual(calls, []);
+  adapter.onViewportResize();
+  flush();
+  assert.deepEqual(calls, [['row', 99, 'middle'], ['column', 'focused']]);
 });
 
 test('a delayed stop from an earlier edit cannot clear the next editor', () => {
@@ -66,7 +69,7 @@ test('settling callbacks tolerate a missing or destroyed grid', () => {
   destroyed.adapter.onCellEditingStarted({ rowIndex: 3, column: 'x' });
   destroyed.grid.isDestroyed = () => true;
   destroyed.flush();
-  assert(destroyed.calls.every(call => call[0] === 'event'));
+  assert.deepEqual(destroyed.calls, []);
   const jobs = [];
   const absent = createHostGridAdapter({
     windowRef: { Event, dispatchEvent() {}, setTimeout(fn) { jobs.push(fn); return jobs.length; } },
@@ -75,4 +78,13 @@ test('settling callbacks tolerate a missing or destroyed grid', () => {
   });
   absent.onCellEditingStarted({ rowIndex: 3, column: 'x' });
   assert.doesNotThrow(() => jobs.forEach(fn => fn()));
+});
+
+test('edit-stop settling neither resizes nor scrolls after focus moves to a menu', () => {
+  const { adapter, calls, flush } = fixture();
+  adapter.onCellEditingStarted({ rowIndex: 3, column: 'old' });
+  adapter.onCellEditingStopped();
+  // All old settling timers may fire while the newly opened menu has focus.
+  flush();
+  assert.deepEqual(calls, []);
 });

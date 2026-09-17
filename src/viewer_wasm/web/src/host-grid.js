@@ -15,7 +15,8 @@ export function createHostGridAdapter({ windowRef = window, getGrid, isHostMode 
 
   function refresh() {
     if (!isHostMode()) return;
-    windowRef.dispatchEvent(new windowRef.Event('resize'));
+    // Never synthesize window resize: menu libraries interpret it as a reason
+    // to dismiss open menus. AG Grid already observes real viewport changes.
     const grid = getGrid();
     if (!grid || grid.isDestroyed?.()) return;
     const cell = activeEditCell || grid.getFocusedCell?.();
@@ -40,7 +41,7 @@ export function createHostGridAdapter({ windowRef = window, getGrid, isHostMode 
       later(() => {
         if (generation !== editGeneration) return;
         activeEditCell = null;
-        refresh();
+        // Focus may now belong to a menu. Do not scroll the previous grid cell.
       }, 180);
     },
     destroy() {
