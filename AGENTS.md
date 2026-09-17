@@ -95,6 +95,7 @@ This file is the canonical AI reference for this repository.
 - The production `view` command serves embedded first-party viewer assets plus embedded AG Grid and Popright assets.
 - For vanilla JS/CSS/HTML iteration, use `csvzall view <file.csv> --viewer-assets src/viewer` or set `CSVZALL_VIEWER_ASSETS=<absolute-or-relative-src/viewer-path>`.
 - Developer asset mode reloads `src/viewer/index.html`, `src/viewer/viewer.css`, and `src/viewer/viewer.js` from disk on each request. Refreshing the browser is enough after editing those files; rebuilding C++ is not required.
+- Every native build checks embedded asset content hashes, including the generator script, so vendor updates with preserved archive timestamps are detected. Unchanged content preserves generated output timestamps and avoids recompilation. Keep this check in the shared `cmake/viewer_assets.cmake` target; do not replace it with timestamp-only file dependencies.
 - AG Grid and Popright vendor files remain embedded in developer asset mode. Changes to `vendor/ag-grid/*`, `vendor/popright/*`, or `cmake/embed_viewer_assets.cmake` still require regenerating/rebuilding.
 - Keep the viewer framework-free. Prefer small vanilla JS modules/helpers for modals, context menus, grid adapters, and API calls.
 
