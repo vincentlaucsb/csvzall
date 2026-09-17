@@ -44,6 +44,10 @@ under a short-path TEMP alias. CTest supplies `CSVZALL_TEST_WORK_DIR`; direct ru
 default to `out/build/viewer-asset-tests`. Keep the no-op timestamp assertions,
 and retain build output in assertion failures for diagnosing generator issues.
 
+The fixture separates simulated content edits from the preceding compilation by
+a timestamp tick because older Make versions compare whole seconds. Keep this
+separation when adding mutations; input mtimes must still be reset to old values.
+
 ## Sync requirement
 
 `tests/AGENTS.md` is canonical. `tests/CLAUDE.md` is the mirror.

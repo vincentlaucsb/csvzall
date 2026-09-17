@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, statSync, utimesSy
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { setTimeout } from 'node:timers/promises';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const cmake = process.env.CSVZALL_TEST_CMAKE || 'cmake';
@@ -12,7 +13,7 @@ const cmakePath = value => value.replaceAll('\\', '/');
 
 // Uses the production target and generator, a real compiler, and a tiny asset set.
 // Run from the compiler's developer environment (also required for normal builds).
-test('embedded assets track content rather than archive timestamps', () => {
+test('embedded assets track content rather than archive timestamps', async () => {
   // MSBuild does not reliably track outputs under TEMP (MSB8029), especially
   // when Windows exposes TEMP through an 8.3 alias such as RUNNER~1.
   // Keep compiled fixtures in the build tree, with canonical directory names.
@@ -64,6 +65,13 @@ int main(int argc, char** argv) {
     const cpp = path.join(build, 'generated/viewer_assets.cpp');
     const hpp = path.join(build, 'generated/viewer_assets.hpp');
     const snapshot = () => [cpp, hpp, exe].map(file => statSync(file).mtimeMs);
+    // Older Make versions (including macOS's) compare whole-second mtimes.
+    // Separate simulated edits from the preceding compilation so the fixture
+    // tests content invalidation rather than the build tool's clock precision.
+    const nextTimestampTick = async () => {
+      const nextTick = (Math.floor(Math.max(...snapshot()) / 1000) + 1) * 1000;
+      while (Date.now() <= nextTick) await setTimeout(Math.max(1, nextTick - Date.now() + 1));
+    };
     const noOp = () => {
       const before = snapshot();
       const output = rebuild();
@@ -76,6 +84,7 @@ int main(int argc, char** argv) {
       ['src/viewer/viewer.js', '/assets/viewer.js'],
       ['vendor/ag-grid/ag-grid.css', '/assets/ag-grid.css'],
     ]) {
+      await nextTimestampTick();
       const changed = path.join(source, file);
       const originalTime = statSync(changed).mtime;
       const headerTime = statSync(hpp).mtimeMs;
@@ -95,6 +104,7 @@ int main(int argc, char** argv) {
       noOp();
     }
     // Generator/route changes invalidate the cache even with an old timestamp.
+    await nextTimestampTick();
     const scriptPath = path.join(source, 'cmake/embed_viewer_assets.cmake');
     writeFileSync(scriptPath, script.replace('/assets/viewer.js|', '/assets/renamed.js|'));
     utimesSync(scriptPath, new Date(0), new Date(0));
@@ -102,6 +112,7 @@ int main(int argc, char** argv) {
     assert.match(run(exe, ['/assets/renamed.js']), /^changed src\/viewer\/viewer.js/);
     noOp();
     // Clean or partially deleted generated files recover without touching inputs.
+    await nextTimestampTick();
     rmSync(hpp);
     rebuild();
     assert.match(run(exe, ['/assets/renamed.js']), /^changed/);
