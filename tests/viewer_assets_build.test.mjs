@@ -60,7 +60,16 @@ int main(int argc, char** argv) {
     const cpp = path.join(build, 'generated/viewer_assets.cpp');
     const hpp = path.join(build, 'generated/viewer_assets.hpp');
     const snapshot = () => [cpp, hpp, exe].map(file => statSync(file).mtimeMs);
-    const noOp = () => { const before = snapshot(); rebuild(); assert.deepEqual(snapshot(), before); };
+    const noOp = () => {
+      const before = snapshot();
+      const output = rebuild();
+      const after = snapshot();
+      if (generator.startsWith('Visual Studio') && after.some((value, i) => value !== before[i])) {
+        const diagnostic = spawnSync(cmake, ['--build', build, '--config', 'Release', '--', '/v:diag'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+        console.log(diagnostic.stdout?.split(/\r?\n/).filter(line => /out.of.date|up.to.date|newer|does not exist|tracking|tlog|rebuild|relink/i.test(line)).join('\n'));
+      }
+      assert.deepEqual(after, before, output);
+    };
     noOp();
     for (const [file, route] of [
       ['vendor/popright/dist/ContextMenu.js', '/assets/popright/ContextMenu.js'],

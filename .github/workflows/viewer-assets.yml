@@ -1,0 +1,25 @@
+name: Viewer asset incremental build
+
+on:
+  pull_request:
+    paths:
+      - "cmake/*viewer*"
+      - "tests/viewer_assets_build.test.mjs"
+      - ".github/workflows/viewer-assets.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-assets:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Test native default generator
+        shell: pwsh
+        run: |
+          cmake --version
+          $generator = (cmake --help | Where-Object { $_ -match '^\* ' }) -replace '^\*\s*', ''
+          $env:CSVZALL_TEST_GENERATOR = ($generator -split '\s+=\s+', 2)[0].Trim()
+          node --test tests/viewer_assets_build.test.mjs
