@@ -14,8 +14,12 @@ permissions:
   contents: read
 
 jobs:
-  windows-assets:
-    runs-on: windows-latest
+  assets-default:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6.0.2
       - name: Test native default generator

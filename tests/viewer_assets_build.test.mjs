@@ -82,8 +82,12 @@ int main(int argc, char** argv) {
       const content = `changed ${file} @PRESERVE_THIS_LITERAL@`;
       writeFileSync(changed, content);
       utimesSync(changed, new Date(0), new Date(0));
-      rebuild();
-      assert.equal(run(exe, [route]), content);
+      const beforeBuild = snapshot();
+      const output = rebuild();
+      assert.equal(run(exe, [route]), content, JSON.stringify({
+        beforeBuild, afterBuild: snapshot(),
+        generatedContainsChange: readFileSync(cpp, 'utf8').includes(content), output,
+      }, null, 2));
       assert.equal(statSync(hpp).mtimeMs, headerTime);
       noOp();
       // A timestamp-only change must not regenerate or relink.
