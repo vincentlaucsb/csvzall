@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, statSync, utimesSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, statSync, utimesSync, rmSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -14,7 +13,12 @@ const cmakePath = value => value.replaceAll('\\', '/');
 // Uses the production target and generator, a real compiler, and a tiny asset set.
 // Run from the compiler's developer environment (also required for normal builds).
 test('embedded assets track content rather than archive timestamps', () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'csvzall-assets-'));
+  // MSBuild does not reliably track outputs under TEMP (MSB8029), especially
+  // when Windows exposes TEMP through an 8.3 alias such as RUNNER~1.
+  // Keep compiled fixtures in the build tree, with canonical directory names.
+  const fixtureBase = path.resolve(process.env.CSVZALL_TEST_WORK_DIR || path.join(repository, 'out/build/viewer-asset-tests'));
+  mkdirSync(fixtureBase, { recursive: true });
+  const root = mkdtempSync(path.join(realpathSync.native(fixtureBase), 'fixture-'));
   const source = path.join(root, 'source');
   const build = path.join(root, 'build');
   const run = (exe, args) => {
@@ -64,10 +68,6 @@ int main(int argc, char** argv) {
       const before = snapshot();
       const output = rebuild();
       const after = snapshot();
-      if (generator.startsWith('Visual Studio') && after.some((value, i) => value !== before[i])) {
-        const diagnostic = spawnSync(cmake, ['--build', build, '--config', 'Release', '--', '/v:diag'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
-        console.log(diagnostic.stdout?.split(/\r?\n/).filter(line => /out.of.date|up.to.date|newer|does not exist|tracking|tlog|rebuild|relink/i.test(line)).join('\n'));
-      }
       assert.deepEqual(after, before, output);
     };
     noOp();

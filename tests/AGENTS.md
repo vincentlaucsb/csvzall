@@ -38,6 +38,12 @@ To run it directly, use `node --test tests/viewer_assets_build.test.mjs`.
 selects the generator (default: Ninja). On Windows, use a Visual Studio developer
 shell so MSVC, Ninja, and the SDK are available.
 
+Compiled fixtures must live under the build tree, not the operating system's
+temporary directory: MSBuild warns with MSB8029 and can relink unchanged outputs
+under a short-path TEMP alias. CTest supplies `CSVZALL_TEST_WORK_DIR`; direct runs
+default to `out/build/viewer-asset-tests`. Keep the no-op timestamp assertions,
+and retain build output in assertion failures for diagnosing generator issues.
+
 ## Sync requirement
 
 `tests/AGENTS.md` is canonical. `tests/CLAUDE.md` is the mirror.

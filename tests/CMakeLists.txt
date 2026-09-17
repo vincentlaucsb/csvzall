@@ -76,6 +76,7 @@ if(CSVZALL_NODE_EXE)
     COMMAND "${CMAKE_COMMAND}" -E env
       "CSVZALL_TEST_CMAKE=${CMAKE_COMMAND}"
       "CSVZALL_TEST_GENERATOR=${CMAKE_GENERATOR}"
+      "CSVZALL_TEST_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/viewer-asset-fixtures"
       "${CSVZALL_NODE_EXE}" --test "${CMAKE_CURRENT_SOURCE_DIR}/viewer_assets_build.test.mjs")
   add_test(
     NAME csvzall_viewer_state_tests
