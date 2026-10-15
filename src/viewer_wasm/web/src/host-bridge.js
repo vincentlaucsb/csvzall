@@ -6,6 +6,7 @@ export const HOST_CAPABILITIES = Object.freeze([
   'csvzall-edit-revision-v1',
   'csvzall-obsidian-keyboard-lifecycle-v2',
   'csvzall-obsidian-viewport-resize-v2',
+  'csvzall-host-save-request-v1',
 ]);
 
 function isArrayBuffer(value) {
@@ -30,6 +31,8 @@ export function createHostBridge({
   onOpenFile,
   onHostModeChange = () => {},
   onViewportResize = () => {},
+  onSaveRequested = async () => { throw new Error('Saving is unavailable.'); },
+  getDirty = () => true,
 } = {}) {
   if (typeof onOpenFile !== 'function') {
     throw new TypeError('createHostBridge requires onOpenFile');
@@ -45,6 +48,7 @@ export function createHostBridge({
   let runningOpen = Promise.resolve();
   const pendingSaves = new Map();
   let nextSaveId = 0;
+  let savingFromHost = false;
 
   function post(message, transfer = []) {
     if (!targetWindow) {
@@ -85,6 +89,19 @@ export function createHostBridge({
       return;
     }
     const data = event.data;
+    if (data.type === 'save-request' && data.version === 1 && Number.isSafeInteger(data.requestId)) {
+      if (!hostMode || !initialized || savingFromHost) return;
+      savingFromHost = true;
+      void (async () => {
+        try {
+          await onSaveRequested();
+          post({ type: 'save-response', version: 1, requestId: data.requestId, success: true, dirty: getDirty() });
+        } catch (error) {
+          post({ type: 'save-response', version: 1, requestId: data.requestId, success: false, dirty: getDirty(), error: error instanceof Error ? error.message : String(error) });
+        } finally { savingFromHost = false; }
+      })();
+      return;
+    }
     if (data.type === 'save-result') {
       const pending = pendingSaves.get(data.requestId);
       if (pending && typeof data.success === 'boolean') {

@@ -53,8 +53,14 @@ class SqliteDb {
 //   4. otherwise -> temp-file database in system temp dir (deleted on exit).
 SqliteDb OpenSqliteDb(const SqliteDbOpenOptions& options);
 
-// Register csvzall SQLite scalar functions that must be available anywhere
-// CSV-backed SQL executes.
+/**
+ * @brief Register REGEXP, regexp(pattern, value), and regexp_like(value, pattern).
+ *
+ * Uses ECMAScript std::regex search semantics with an optional leading (?i)
+ * prefix for case-insensitive matching. Returns 1 or 0; NULL arguments return
+ * 0, and invalid patterns report a SQLite error.
+ * @see @ref sqlite_capabilities "SQLite capabilities" for SQL examples and limits.
+ */
 void RegisterSqliteRegexFunctions(SQLite::Database& db);
 
 }  // namespace csvzall::sqlite

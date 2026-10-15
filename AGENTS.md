@@ -4,6 +4,13 @@ This file is the canonical AI reference for this repository.
 
 `CLAUDE.md` must stay in sync with this file in the same commit.
 
+## Git synchronization
+
+- When working on `master` or `main`, pull from `origin` before editing if the last successful pull is unknown or more than one hour old. Use `git pull --ff-only origin master` (or `main`, matching the current branch). A fetch alone does not update the working branch.
+- During long sessions, refresh again before starting a new independent task once that window has elapsed. Do not assume a checkout is current because an earlier task fetched it.
+- Preserve uncommitted and untracked work, and coordinate with other agents using the checkout before pulling. Never reset, discard changes, or force-update a branch to make a pull succeed; inspect and reconcile any overlap or divergence.
+- On a feature branch, keep its intended upstream and do not switch branches or merge the default branch merely to satisfy this rule.
+
 ## Structure
 
 - Keep public pipeline orchestration in `src/transform_pipeline.*`.

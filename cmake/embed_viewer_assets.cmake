@@ -18,6 +18,7 @@ set(_assets
   "/assets/modules/grid.mjs|${VIEWER_SOURCE_DIR}/modules/grid.mjs|application/javascript|viewer_module_grid_mjs"
   "/assets/modules/icons.mjs|${VIEWER_SOURCE_DIR}/modules/icons.mjs|application/javascript|viewer_module_icons_mjs"
   "/assets/modules/markdown.mjs|${VIEWER_SOURCE_DIR}/modules/markdown.mjs|application/javascript|viewer_module_markdown_mjs"
+  "/assets/modules/table-form.mjs|${VIEWER_SOURCE_DIR}/modules/table-form.mjs|application/javascript|viewer_module_table_form_mjs"
   "/assets/modules/save.mjs|${VIEWER_SOURCE_DIR}/modules/save.mjs|application/javascript|viewer_module_save_mjs"
   "/assets/modules/sql.mjs|${VIEWER_SOURCE_DIR}/modules/sql.mjs|application/javascript|viewer_module_sql_mjs"
   "/assets/modules/state.mjs|${VIEWER_SOURCE_DIR}/modules/state.mjs|application/javascript|viewer_module_state_mjs"

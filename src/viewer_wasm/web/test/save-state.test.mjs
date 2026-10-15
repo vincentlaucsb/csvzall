@@ -1,6 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createSaveState } from '../src/save-state.js';
+import { createMutationTracker } from '../../../viewer/modules/save.mjs';
+
+test('pending mutation dispatch invalidates a save before its worker response arrives', async () => {
+  const state = createSaveState();
+  const tracker = createMutationTracker(() => state.changed());
+  let finishSave, finishEdit;
+  let cleaned = false;
+  const saving = state.save({ prepare: async () => ({}), persist: () => new Promise(resolve => { finishSave = resolve; }), onSaved() { cleaned = true; } });
+  await Promise.resolve();
+  const edit = tracker.run(() => new Promise(resolve => { finishEdit = resolve; }));
+  await Promise.resolve();
+  finishSave(true); await saving;
+  assert.equal(cleaned, false);
+  let settled = false;
+  const waiting = tracker.settle().then(() => { settled = true; });
+  await Promise.resolve(); assert.equal(settled, false);
+  finishEdit(); await edit; await waiting;
+  assert.equal(settled, true);
+});
 
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 

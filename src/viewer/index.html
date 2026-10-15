@@ -15,25 +15,9 @@
         <h1 id="file-name">Loading…</h1>
         <span id="summary" class="summary" aria-hidden="true"></span>
       </div>
-      <div class="query-control" id="query-control">
-        <div class="query-input-row">
-          <div class="query-mode-toggle" role="group" aria-label="Filter mode">
-            <button id="query-mode-search" type="button" class="active" aria-pressed="true">Search</button>
-            <button id="query-mode-sql" type="button" aria-pressed="false">SQL</button>
-          </div>
-          <div class="query-input-shell">
-            <textarea id="quick-filter" rows="1" autocomplete="off" spellcheck="false" placeholder="Type to filter loaded table..."></textarea>
-            <button id="clear-query" type="button" aria-label="Clear filter" title="Clear filter">Clear</button>
-          </div>
-        </div>
-        <p id="sql-error" class="sql-error" hidden></p>
-      </div>
-      <div class="chart-toolbar">
+      <div id="viewer-tools" class="feature-toolbar" role="group" aria-label="CSV tools">
+        <button id="open-sql-query" type="button" aria-expanded="false" aria-controls="sqlite-query-toolbar">SQLite query</button>
         <button id="add-chart" type="button" hidden>Charts</button>
-      </div>
-      <div id="sql-toolbar" class="sql-toolbar" hidden>
-        <button id="run-sql" type="button">Run</button>
-        <button id="copy-markdown" type="button" disabled>Copy Markdown</button>
       </div>
       <div id="edit-toolbar" class="edit-toolbar" hidden>
         <button id="insert-menu" type="button">Insert</button>
@@ -42,8 +26,24 @@
         <button id="save" type="button" disabled>Save</button>
       </div>
     </header>
+    <section id="sqlite-query-toolbar" class="sqlite-query-toolbar" aria-label="SQLite query" hidden>
+      <div class="query-input-shell">
+        <textarea id="sql-query" rows="3" autocomplete="off" spellcheck="false" placeholder="SELECT * FROM data"></textarea>
+        <button id="clear-query" type="button" aria-label="Clear query" title="Clear query">Clear</button>
+      </div>
+      <div class="query-actions">
+        <div class="sql-toolbar">
+          <button id="run-sql" type="button">Run query</button>
+          <button id="copy-markdown" type="button" disabled>Copy Markdown</button>
+          <button id="exit-sql-query" type="button">Exit query</button>
+        </div>
+        <p class="sql-help">Use SQLite syntax with table <code>data</code>, including unsaved edits. Ctrl/Cmd+Enter to run. Queries load the CSV into memory. <a id="sqlite-documentation" href="https://vincentlaucsb.github.io/csvzall/sqlite_capabilities.html" target="_blank" rel="noopener noreferrer">SQLite reference</a></p>
+      </div>
+      <p id="sql-error" class="sql-error" role="alert" hidden></p>
+    </section>
     <main class="grid-wrap">
       <div id="grid" class="ag-theme-alpine-auto-dark"></div>
+      <div id="sql-grid" class="ag-theme-alpine-auto-dark" aria-label="SQLite query results" hidden></div>
     </main>
     <footer class="footer">
       <span id="status">Connecting…</span>
@@ -138,15 +138,7 @@
           </div>
           <fieldset id="chart-markdown-table-section" class="chart-range" hidden>
             <legend>Markdown table</legend>
-            <div class="form-field">
-              <span>Columns</span>
-              <div id="chart-markdown-columns" class="checklist" role="group" aria-label="Markdown table columns"></div>
-            </div>
-            <label>
-              <span>SQL</span>
-              <textarea id="chart-markdown-sql" rows="4" autocomplete="off" placeholder="SELECT * FROM data"></textarea>
-            </label>
-            <p class="field-help">Use table name <code>data</code> in SQL queries.</p>
+            <div id="chart-table-form"></div>
           </fieldset>
           <fieldset id="chart-layout-section" class="chart-range">
             <legend>Layout</legend>

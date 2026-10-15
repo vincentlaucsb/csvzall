@@ -8,7 +8,7 @@ import {
   postDirtyState,
 } from './modules/dirty-state.mjs';
 import { createFallbackContextMenu } from './modules/fallback-menu.mjs';
-import { currentGridColumns, rowInsertionIndex, rowsToObjects } from './modules/grid.mjs';
+import { currentGridColumns, installColumnContextMenu, rowInsertionIndex, rowsToObjects } from './modules/grid.mjs';
 import {
   createTablerIcon,
   decorateButton,
@@ -16,9 +16,10 @@ import {
   decorateMenuButton,
 } from './modules/icons.mjs';
 import { rowsToMarkdownTable } from './modules/markdown.mjs';
-import { buildSavePayload, saveViewerState } from './modules/save.mjs';
+import { mountTableForm, tableQuery } from './modules/table-form.mjs';
+import { buildSavePayload, saveViewerState, installHostSaveRequests, createMutationTracker } from './modules/save.mjs';
 import { createViewStateStore } from './modules/state.mjs';
-import { defaultSqlQuery, VIEWER_SQL_TABLE_NAME } from './modules/sql.mjs';
+import { defaultSqlQuery, installSqlViewer, waitForViewerEdits, VIEWER_SQL_TABLE_NAME } from './modules/sql.mjs';
 
 if (typeof globalThis !== 'undefined') {
   globalThis.csvzallViewerInternals = {
@@ -44,8 +45,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
   const summaryNode = document.getElementById('summary');
   const recordCountNode = document.getElementById('record-count');
   const fileNode = document.getElementById('file-name');
-  const quickFilterNode = document.getElementById('quick-filter');
-  const queryControl = document.getElementById('query-control');
+  const sqlQueryNode = document.getElementById('sql-query');
   const clearQueryButton = document.getElementById('clear-query');
   const runSqlButton = document.getElementById('run-sql');
   const copyMarkdownButton = document.getElementById('copy-markdown');
@@ -58,6 +58,10 @@ async function csvzallViewBootstrap(dependencies = {}) {
   }
 
   const headers = { 'X-Session-Token': token };
+  let onCsvMutation = () => {};
+  const csvMutations = createMutationTracker(() => onCsvMutation());
+  const mutationPaths = new Set(['/api/edit-cell', '/api/insert-column', '/api/insert-row',
+    '/api/delete-row', '/api/swap-rows', '/api/delete-column', '/api/rename-column', '/api/reset']);
 
   async function fetchJson(path, params = {}) {
     const url = new URL(path, window.location.origin);
@@ -71,7 +75,11 @@ async function csvzallViewBootstrap(dependencies = {}) {
     return response.json();
   }
 
-  async function postJson(path, body = {}) {
+  function postJson(path, body = {}) {
+    return mutationPaths.has(path) ? csvMutations.run(() => sendJson(path, body)) : sendJson(path, body);
+  }
+
+  async function sendJson(path, body) {
     const response = await fetch(new URL(path, window.location.origin), {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
@@ -138,20 +146,6 @@ async function csvzallViewBootstrap(dependencies = {}) {
     } else if (!optional && columns.length > 0) {
       select.value = columns[0];
     }
-  }
-
-  function populateColumnChecklist(container, columns, selectedColumns = []) {
-    const selected = new Set(selectedColumns);
-    container.textContent = '';
-    columns.forEach((column) => {
-      const label = document.createElement('label');
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.value = column;
-      checkbox.checked = selected.size === 0 || selected.has(column);
-      label.append(checkbox, document.createTextNode(column));
-      container.append(label);
-    });
   }
 
   function guessColumn(columns, patterns) {
@@ -223,8 +217,16 @@ async function csvzallViewBootstrap(dependencies = {}) {
     const chartColorSchemeField = document.getElementById('chart-color-scheme-field');
     const chartColorScheme = document.getElementById('chart-color-scheme');
     const chartMarkdownTableSection = document.getElementById('chart-markdown-table-section');
-    const chartMarkdownColumns = document.getElementById('chart-markdown-columns');
-    const chartMarkdownSql = document.getElementById('chart-markdown-sql');
+    const chartTableRoot = document.getElementById('chart-table-form');
+    const tableForm = mountTableForm(chartTableRoot, {
+      showSource: false,
+      showAutoUpdate: false,
+      columns: schema.columns,
+      preview: async (value) => {
+        const result = await postJson('/api/sql-query', { sql: tableQuery(value, 20) });
+        return rowsToMarkdownTable(result.columns, result.rows);
+      },
+    });
     const chartStart = document.getElementById('chart-start');
     const chartEnd = document.getElementById('chart-end');
     const chartLookbackCount = document.getElementById('chart-lookback-count');
@@ -238,8 +240,10 @@ async function csvzallViewBootstrap(dependencies = {}) {
     decorateMenuButton(deleteMenuButton, 'trash', 'Delete');
     decorateButton(resetButton, 'restore', 'Reset');
     decorateButton(saveButton, 'device-floppy', 'Save');
-    decorateIconButton(clearQueryButton, 'x', 'Clear filter');
-    decorateButton(runSqlButton, 'player-play', 'Run');
+    decorateIconButton(clearQueryButton, 'x', 'Clear query');
+    decorateButton(document.getElementById('open-sql-query'), 'code', 'SQLite query');
+    decorateButton(runSqlButton, 'player-play', 'Run query');
+    decorateButton(document.getElementById('exit-sql-query'), 'x', 'Exit query');
     decorateButton(copyMarkdownButton, 'copy', 'Copy Markdown');
     decorateButton(cancelInsertColumn, 'x', 'Cancel');
     decorateButton(insertColumnForm.querySelector('button[type="submit"]'), 'plus', 'Insert');
@@ -252,15 +256,12 @@ async function csvzallViewBootstrap(dependencies = {}) {
     decorateButton(cancelChart, 'x', 'Cancel');
     decorateButton(generateChartButton, 'chart-bar', 'Create chart');
     decorateButton(chartForm.querySelector('button[type="submit"]'), 'device-floppy', 'Save chart');
-    queryControl.hidden = true;
-    quickFilterNode.disabled = true;
     editToolbar.hidden = !editable;
     addChartButton.hidden = false;
 
     const baseName = stripCsvExtension(schema.file);
     const baseSlug = slugify(baseName);
     const sqlTableName = schema.sqlTableName || VIEWER_SQL_TABLE_NAME;
-    chartMarkdownSql.placeholder = `SELECT * FROM ${sqlTableName}`;
     const guessedDateColumn = () => guessColumn(schema.columns, ['date', 'day', 'attendance_date']);
     const guessedValueColumn = () => guessColumn(schema.columns, ['count', 'value', 'total']);
     const guessedLabelColumn = () => guessColumn(schema.columns, ['content', 'label', 'note', 'description']);
@@ -270,7 +271,6 @@ async function csvzallViewBootstrap(dependencies = {}) {
     populateColumnSelect(chartValueColumn, schema.columns, { optional: true, preferred: guessedValueColumn() });
     populateColumnSelect(chartValueColumn2, schema.columns, { optional: true });
     populateColumnSelect(chartLabelColumn, schema.columns, { optional: true, preferred: guessedLabelColumn() });
-    populateColumnChecklist(chartMarkdownColumns, schema.columns);
 
     const chartValidationFields = [
       chartType,
@@ -282,8 +282,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartOrientation,
       chartPresentation,
       chartColorScheme,
-      chartMarkdownColumns,
-      chartMarkdownSql,
+      chartTableRoot,
       chartStart,
       chartEnd,
       chartLookbackCount,
@@ -314,10 +313,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
       if (message.includes('series column cannot be combined')) {
         return [chartLabelColumn, chartValueColumn, chartValueColumn2];
       }
-      if (message.includes('markdown-table')) return [chartMarkdownSql, chartMarkdownColumns];
-      if (message.includes('no such column')) {
-        return chartMarkdownSql.value.trim() ? [chartMarkdownSql] : [chartMarkdownColumns, chartMarkdownSql];
-      }
+      if (message.includes('markdown-table') || message.includes('no such column')) return [chartTableRoot];
       return [];
     };
     const markChartFieldsForError = (message) => {
@@ -449,25 +445,12 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartColorSchemeField.hidden = !supportsColorScheme || selectedValueColumns().length <= 1;
     };
 
-    const selectedMarkdownColumns = () => {
-      return Array.from(chartMarkdownColumns.querySelectorAll('input[type="checkbox"]:checked'))
-        .map((input) => input.value);
-    };
-
-    const updateMarkdownColumnsAvailability = () => {
-      const disabled = chartMarkdownSql.value.trim().length > 0;
-      chartMarkdownColumns.setAttribute('aria-disabled', String(disabled));
-      chartMarkdownColumns.querySelectorAll('input[type="checkbox"]').forEach((input) => {
-        input.disabled = disabled;
-      });
-    };
-
     const refreshChartColumnOptions = (values = {}) => {
       populateColumnSelect(chartDateColumn, schema.columns, { preferred: values.date ?? guessedDateColumn() });
       populateColumnSelect(chartValueColumn, schema.columns, { optional: true, preferred: values.value ?? guessedValueColumn() });
       populateColumnSelect(chartValueColumn2, schema.columns, { optional: true, preferred: values.value2 ?? '' });
       populateColumnSelect(chartLabelColumn, schema.columns, { optional: true, preferred: values.label ?? guessedLabelColumn() });
-      populateColumnChecklist(chartMarkdownColumns, schema.columns, values.columns ?? []);
+      tableForm.setColumns(schema.columns, values.columns ?? []);
     };
 
     const applyChartValues = (values) => {
@@ -483,8 +466,7 @@ async function csvzallViewBootstrap(dependencies = {}) {
       chartOrientation.value = values.orientation ?? 'months-horizontal';
       chartPresentation.value = values.presentation ?? 'stacked';
       chartColorScheme.value = values.colorScheme ?? 'sequential';
-      chartMarkdownSql.value = values.sql ?? '';
-      updateMarkdownColumnsAvailability();
+      tableForm.setValue({ columns: values.columns ?? [], sql: values.sql ?? '' });
       chartStart.value = values.start ?? '';
       chartEnd.value = values.end ?? '';
       const lookback = values.lookback ?? '';
@@ -611,7 +593,6 @@ async function csvzallViewBootstrap(dependencies = {}) {
     chartRangeRolling.addEventListener('change', () => setRangeMode('rolling'));
     chartValueColumn.addEventListener('change', updateColorSchemeVisibility);
     chartValueColumn2.addEventListener('change', updateColorSchemeVisibility);
-    chartMarkdownSql.addEventListener('input', updateMarkdownColumnsAvailability);
     cancelChart.addEventListener('click', () => {
       chartDialog.close('cancel');
     });
@@ -629,7 +610,13 @@ async function csvzallViewBootstrap(dependencies = {}) {
       event.preventDefault();
       const valueColumns = selectedValueColumns();
       const multiValues = valueColumns.length > 1 ? valueColumns : [];
-      const markdownSql = chartMarkdownSql.value.trim();
+      let markdown = { columns: [], sql: '' };
+      try {
+        if (chartType.value === 'markdown-table') markdown = tableForm.getValue();
+      } catch (error) {
+        showChartError(error.message);
+        return;
+      }
       const payload = {
         type: chartType.value,
         id: chartId.value.trim(),
@@ -646,8 +633,8 @@ async function csvzallViewBootstrap(dependencies = {}) {
         orientation: chartType.value === 'heatmap' ? chartOrientation.value : '',
         presentation: chartType.value === 'bar' ? chartPresentation.value : '',
         colorScheme: (chartType.value === 'bar' || chartType.value === 'line') ? chartColorScheme.value : '',
-        columns: chartType.value === 'markdown-table' && !markdownSql ? selectedMarkdownColumns() : [],
-        sql: chartType.value === 'markdown-table' ? markdownSql : '',
+        columns: markdown.columns,
+        sql: markdown.sql,
         start: chartRangeRolling.checked ? '' : chartStart.value,
         end: chartRangeRolling.checked ? '' : chartEnd.value,
         lookback: chartType.value === 'heatmap' && chartRangeRolling.checked ? currentLookback() : '',
@@ -705,22 +692,28 @@ async function csvzallViewBootstrap(dependencies = {}) {
           return gridOptions.api;
         })();
 
+    let sqlViewer;
+    let columnActions = {};
+    const pendingCellEdits = new Set();
+    let restoreTableStatus = () => {
+      statusNode.textContent = `Ready: ${schema.totalRows.toLocaleString()} rows indexed.`;
+    };
     const pagedDatasource = {
       async getRows(params) {
         const offset = params.startRow;
         const limit = Math.max(params.endRow - params.startRow, 1);
-        statusNode.textContent = `Loading rows ${offset + 1}-${Math.min(params.endRow, schema.totalRows)} of ${schema.totalRows}…`;
+        if (!sqlViewer?.active) statusNode.textContent = `Loading rows ${offset + 1}-${Math.min(params.endRow, schema.totalRows)} of ${schema.totalRows}…`;
         try {
           const page = await fetchJson('/api/rows', { offset, limit });
           schema.totalRows = page.totalRows;
-          recordCountNode.textContent = `${schema.totalRows.toLocaleString()} rows, ${schema.columns.length.toLocaleString()} columns`;
+          if (!sqlViewer?.active) recordCountNode.textContent = `${schema.totalRows.toLocaleString()} rows, ${schema.columns.length.toLocaleString()} columns`;
           const rowData = rowsToObjects(schema.columns, page.rows, page.offset);
           const loadedThrough = page.offset + page.rows.length;
           params.successCallback(rowData, page.totalRows);
-          statusNode.textContent = `Loaded rows ${page.offset + 1}-${loadedThrough} of ${page.totalRows}.`;
+          if (!sqlViewer?.active) statusNode.textContent = `Loaded rows ${page.offset + 1}-${loadedThrough} of ${page.totalRows}.`;
         } catch (error) {
           params.failCallback();
-          statusNode.textContent = error instanceof Error ? error.message : 'Row load failed';
+          if (!sqlViewer?.active) statusNode.textContent = error instanceof Error ? error.message : 'Row load failed';
         }
       },
     };
@@ -746,15 +739,19 @@ async function csvzallViewBootstrap(dependencies = {}) {
       const refreshDirtyUi = () => {
         saveButton.disabled = !viewState.dirty;
         resetButton.disabled = !viewState.dirty;
-        statusNode.textContent = viewState.dirty
-          ? 'Unsaved changes.'
-          : `Ready: ${schema.totalRows.toLocaleString()} rows indexed.`;
+        if (!sqlViewer?.active) {
+          statusNode.textContent = viewState.dirty
+            ? 'Unsaved changes.'
+            : `Ready: ${schema.totalRows.toLocaleString()} rows indexed.`;
+        }
         emitDirtyState();
       };
+      restoreTableStatus = refreshDirtyUi;
       const markDataDirty = () => {
         viewState.markDataDirty();
         refreshDirtyUi();
       };
+      onCsvMutation = markDataDirty;
       const selectedSourceRow = () => {
         const selected = api.getSelectedRows ? api.getSelectedRows() : [];
         if (Number.isInteger(selected[0]?._csvzallRowId)) {
@@ -805,10 +802,17 @@ async function csvzallViewBootstrap(dependencies = {}) {
         });
         return menu;
       };
-      const saveCurrentChanges = async ({ reopenChartsAfterReload = false } = {}) => {
+      let saving = false;
+      const saveCurrentChanges = async ({ reopenChartsAfterReload = false, hostRequest = false } = {}) => {
+        if (saving) return false;
+        saving = true;
+        const wasInert = document.body.inert;
+        document.body.inert = true;
         try {
           saveButton.disabled = true;
           statusNode.textContent = 'Saving…';
+          await waitForViewerEdits(api, pendingCellEdits);
+          await csvMutations.settle();
           const { result, reloadAfterSave } = await saveViewerState({
             viewState,
             postJson,
@@ -820,6 +824,11 @@ async function csvzallViewBootstrap(dependencies = {}) {
               sessionStorage.setItem(reopenChartsAfterReloadKey, '1');
             }
             statusNode.textContent = 'Saved. Reloading…';
+            if (hostRequest) {
+              // Post the save acknowledgment before a column-order reload.
+              window.setTimeout(() => window.location.reload(), 0);
+              return true;
+            }
             window.location.reload();
             return false;
           }
@@ -830,14 +839,15 @@ async function csvzallViewBootstrap(dependencies = {}) {
           } else {
             statusNode.textContent = `Saved ${schema.totalRows.toLocaleString()} rows.`;
           }
-          refreshRows();
+          if (!viewState.dirty) refreshRows();
           return true;
         } catch (error) {
           saveButton.disabled = !viewState.dirty;
           statusNode.textContent = error instanceof Error ? error.message : 'Save failed';
           return false;
-        }
+        } finally { saving = false; document.body.inert = wasInert; }
       };
+      installHostSaveRequests({ save: () => saveCurrentChanges({ hostRequest: true }), getDirty: () => viewState.dirty });
       const discardCurrentChangesForCharts = async () => {
         try {
           resetButton.disabled = true;
@@ -1020,16 +1030,20 @@ async function csvzallViewBootstrap(dependencies = {}) {
         if (!event.colDef.field || event.colDef.field === '_csvzallRowId') {
           return;
         }
+        const update = postJson('/api/edit-cell', {
+          row: event.data._csvzallRowId,
+          column: event.colDef.field,
+          value: event.newValue ?? '',
+        });
+        pendingCellEdits.add(update);
         try {
-          await postJson('/api/edit-cell', {
-            row: event.data._csvzallRowId,
-            column: event.colDef.field,
-            value: event.newValue ?? '',
-          });
+          await update;
           markDataDirty();
         } catch (error) {
           event.node.setDataValue(event.colDef.field, event.oldValue ?? '');
           statusNode.textContent = error instanceof Error ? error.message : 'Edit failed';
+        } finally {
+          pendingCellEdits.delete(update);
         }
       };
       if (api.setGridOption) {
@@ -1110,39 +1124,6 @@ async function csvzallViewBootstrap(dependencies = {}) {
         if (api.setGridOption) {
           api.setGridOption('onCellContextMenu', gridOptions.onCellContextMenu);
         }
-        const columnMenu = createContextMenu({
-          trigger: 'manual',
-          theme: 'system',
-          items: [
-            { id: 'rename-column', label: 'Rename Column', icon: () => createTablerIcon('pencil') },
-            { type: 'separator' },
-            { id: 'delete-column', label: 'Delete Column', icon: () => createTablerIcon('column-remove'), variant: 'danger' },
-          ],
-          onSelect(event) {
-            const column = event.context.data?.column;
-            if (event.id === 'rename-column' && typeof column === 'string') {
-              showRenameColumnDialog(column);
-            }
-            if (event.id === 'delete-column' && typeof column === 'string') {
-              void deleteColumnByName(column);
-            }
-          },
-        });
-        gridElement.addEventListener('contextmenu', (event) => {
-          const headerCell = event.target?.closest?.('.ag-header-cell[col-id]');
-          const column = headerCell?.getAttribute('col-id') ?? '';
-          if (!column || !schema.columns.includes(column)) {
-            return;
-          }
-          event.preventDefault();
-          columnMenu.open({
-            x: event.clientX,
-            y: event.clientY,
-            target: headerCell,
-            triggerEvent: event,
-            context: { column },
-          });
-        });
       }
       createToolbarDropdown(insertMenuButton, [
         { id: 'insert-row-before', label: 'Row Before', icon: () => createTablerIcon('row-insert-bottom') },
@@ -1244,7 +1225,51 @@ async function csvzallViewBootstrap(dependencies = {}) {
         void saveCurrentChanges();
       });
       refreshDirtyUi();
+      columnActions = { renameColumn: showRenameColumnDialog, deleteColumn: deleteColumnByName };
     }
+
+    sqlViewer = installSqlViewer({
+      elements: {
+        panel: document.getElementById('sqlite-query-toolbar'),
+        documentationLink: document.getElementById('sqlite-documentation'),
+        openButton: document.getElementById('open-sql-query'),
+        exitButton: document.getElementById('exit-sql-query'),
+        input: sqlQueryNode,
+        clearButton: clearQueryButton,
+        error: document.getElementById('sql-error'),
+        runButton: runSqlButton,
+        copyButton: copyMarkdownButton,
+        tableGrid: gridElement,
+        resultGrid: document.getElementById('sql-grid'),
+        editToolbar,
+        status: statusNode,
+        recordCount: recordCountNode,
+      },
+      tableName: sqlTableName,
+      editable,
+      postJson,
+      finishEditing: () => api.stopEditing?.(),
+      beforeQuery: () => waitForViewerEdits(api, pendingCellEdits),
+      restoreTable: () => {
+        recordCountNode.textContent = `${schema.totalRows.toLocaleString()} rows, ${schema.columns.length.toLocaleString()} columns`;
+        restoreTableStatus();
+      },
+      createGrid: (element, options) => {
+        if (window.agGrid.createGrid) return window.agGrid.createGrid(element, options);
+        new window.agGrid.Grid(element, options);
+        return options.api;
+      },
+      writeClipboard: (text) => navigator.clipboard.writeText(text),
+    });
+
+    installColumnContextMenu({
+      createContextMenu,
+      gridElement,
+      getColumns: () => schema.columns,
+      queryColumn: (column) => sqlViewer.queryColumn(column),
+      ...columnActions,
+      createIcon: createTablerIcon,
+    });
 
     if (api.sizeColumnsToFit) {
       api.sizeColumnsToFit();

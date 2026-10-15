@@ -533,7 +533,7 @@ TEST_CASE("charts run renders Markdown table column projection") {
 
   CHECK(rc == 0);
   const auto markdown = ReadText(root / "events.md");
-  CHECK(markdown.find("| content   | due_date   |") != std::string::npos);
+  CHECK(markdown.find("| content   | due\\_date  |") != std::string::npos);
   CHECK(markdown.find("Gym\\|Lift") != std::string::npos);
   CHECK(markdown.find("completed_at") == std::string::npos);
 }

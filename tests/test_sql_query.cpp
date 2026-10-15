@@ -8,9 +8,24 @@
 #include <vector>
 
 #include "../src/transform_pipeline.hpp"
+#include "../src/pipeline/common/markdown_table.hpp"
 #include "common_test_utils.hpp"
 
 using namespace csvzall;
+
+TEST_CASE("Markdown cells preserve literal CSV text without HTML or formatting") {
+  CHECK(pipeline::common::EscapeMarkdownTableCell("<!-- hidden --> & *bold* `code` [x] \\ |\nnext") ==
+        "&lt;!-- hidden --&gt; &amp; \\*bold\\* \\`code\\` \\[x\\] \\\\ \\|<br>next");
+}
+
+TEST_CASE("Qualified Markdown projection fails when a source column disappears") {
+  std::istringstream input("title,priority\nFirst,3\n");
+  std::ostringstream output;
+  pipeline::RunOptions options = tests::MakeTestOptions();
+  pipeline::RunStats stats;
+  CHECK(pipeline::RunSqlQueryCsv("SELECT * FROM (SELECT data.\"absent\" FROM data)", "data", "markdown",
+        input, output, options, tests::MakeNullLogger(), stats) != 0);
+}
 
 TEST_CASE("SqlQueryCsv: runs SELECT and streams result CSV") {
   auto csv = tests::MakeTestCsv(

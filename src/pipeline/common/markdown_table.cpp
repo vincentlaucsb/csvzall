@@ -12,8 +12,15 @@ std::string EscapeMarkdownTableCell(const std::string& value) {
   for (const char c : value) {
     if (c == '\\') {
       escaped += "\\\\";
-    } else if (c == '|') {
-      escaped += "\\|";
+    } else if (c == '|' || c == '`' || c == '*' || c == '_' || c == '[' || c == ']') {
+      escaped += '\\';
+      escaped += c;
+    } else if (c == '&') {
+      escaped += "&amp;";
+    } else if (c == '<') {
+      escaped += "&lt;";
+    } else if (c == '>') {
+      escaped += "&gt;";
     } else if (c == '\n') {
       escaped += "<br>";
     } else if (c != '\r') {

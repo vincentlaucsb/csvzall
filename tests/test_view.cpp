@@ -286,11 +286,25 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer);
   REQUIRE(viewer->status == 200);
   REQUIRE(viewer->body.find("csvzall view") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"query-mode-search\"") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"query-mode-sql\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"open-sql-query\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"exit-sql-query\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"query-mode-table\"") == std::string::npos);
+  REQUIRE(viewer->body.find("id=\"query-mode-sql\"") == std::string::npos);
   REQUIRE(viewer->body.find("id=\"clear-query\"") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"sql-error\"") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"sql-toolbar\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"sqlite-query-toolbar\"") != std::string::npos);
+  const auto tools_pos = viewer->body.find("id=\"viewer-tools\"");
+  const auto query_button_pos = viewer->body.find("id=\"open-sql-query\"");
+  const auto chart_button_pos = viewer->body.find("id=\"add-chart\"");
+  const auto header_end = viewer->body.find("</header>");
+  const auto query_toolbar_pos = viewer->body.find("id=\"sqlite-query-toolbar\"");
+  const auto data_pos = viewer->body.find("<main");
+  REQUIRE(tools_pos < query_button_pos);
+  REQUIRE(query_button_pos < chart_button_pos);
+  REQUIRE(chart_button_pos < header_end);
+  REQUIRE(header_end < query_toolbar_pos);
+  REQUIRE(query_toolbar_pos < data_pos);
+  REQUIRE(viewer->body.find(">SQLite query</button>") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"add-chart\"") != std::string::npos);
   REQUIRE(viewer->body.find(">Charts</button>") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"heatmap-chart-dialog\"") != std::string::npos);
@@ -308,10 +322,8 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(chart_orientation_pos < chart_range_pos);
   REQUIRE(viewer->body.find("id=\"chart-presentation\"") != std::string::npos);
   REQUIRE(viewer->body.find("value=\"markdown-table\"") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"chart-markdown-columns\"") != std::string::npos);
-  REQUIRE(viewer->body.find("aria-label=\"Markdown table columns\"") != std::string::npos);
+  REQUIRE(viewer->body.find("id=\"chart-table-form\"") != std::string::npos);
   REQUIRE(viewer->body.find("multiple size=\"6\"") == std::string::npos);
-  REQUIRE(viewer->body.find("id=\"chart-markdown-sql\"") != std::string::npos);
   REQUIRE(viewer->body.find("aria-disabled=\"true\"") == std::string::npos);
   REQUIRE(viewer->body.find("Weight column") != std::string::npos);
   REQUIRE(viewer->body.find("id=\"rename-column-dialog\"") != std::string::npos);
@@ -337,10 +349,8 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer_js->body.find("_csvzallRowId") != std::string::npos);
   REQUIRE(viewer_js->body.find("chartType.value") != std::string::npos);
   REQUIRE(viewer_js->body.find("markdown-table") != std::string::npos);
-  REQUIRE(viewer_js->body.find("populateColumnChecklist") != std::string::npos);
-  REQUIRE(viewer_js->body.find("updateMarkdownColumnsAvailability") != std::string::npos);
-  REQUIRE(viewer_js->body.find("input.disabled = disabled") != std::string::npos);
-  REQUIRE(viewer_js->body.find("selectedMarkdownColumns") != std::string::npos);
+  REQUIRE(viewer_js->body.find("tableForm.setColumns") != std::string::npos);
+  REQUIRE(viewer_js->body.find("mountTableForm") != std::string::npos);
   REQUIRE(viewer_js->body.find("missingChartFields") == std::string::npos);
   REQUIRE(viewer_js->body.find("Complete the required fields") == std::string::npos);
   REQUIRE(viewer_js->body.find(".required") == std::string::npos);
@@ -350,7 +360,7 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer_js->body.find("Insert Row Before") != std::string::npos);
   REQUIRE(viewer_js->body.find("Insert Row After") != std::string::npos);
   REQUIRE(viewer_js->body.find("Column After") != std::string::npos);
-  REQUIRE(viewer_js->body.find("Rename Column") != std::string::npos);
+  REQUIRE(viewer_js->body.find("installColumnContextMenu") != std::string::npos);
   REQUIRE(viewer_js->body.find("dirty-state") != std::string::npos);
   REQUIRE(viewer_js->body.find("prepareForCharts") != std::string::npos);
   REQUIRE(viewer_js->body.find("csvzall:reopen-charts-after-reload") != std::string::npos);
@@ -363,6 +373,22 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(sql_module->status == 200);
   REQUIRE(sql_module->body.find("VIEWER_SQL_TABLE_NAME") != std::string::npos);
   REQUIRE(sql_module->body.find("defaultSqlQuery") != std::string::npos);
+  REQUIRE(sql_module->body.find("installSqlViewer") != std::string::npos);
+  REQUIRE(sql_module->get_header_value("Content-Type") == "application/javascript");
+
+  const auto grid_module = client.Get("/assets/modules/grid.mjs");
+  REQUIRE(grid_module);
+  REQUIRE(grid_module->status == 200);
+  REQUIRE(grid_module->body.find("Query column") != std::string::npos);
+  REQUIRE(grid_module->body.find("Rename Column") != std::string::npos);
+
+  const auto table_form = client.Get("/assets/modules/table-form.mjs");
+  REQUIRE(table_form);
+  REQUIRE(table_form->status == 200);
+  REQUIRE(table_form->body.find("mountTableForm") != std::string::npos);
+  REQUIRE(table_form->body.find("Select at least one column.") != std::string::npos);
+  REQUIRE(table_form->body.find("SQLite query") != std::string::npos);
+  REQUIRE(table_form->get_header_value("Content-Type") == "application/javascript");
 
   const auto ag_grid_css = client.Get("/assets/ag-grid.css");
   REQUIRE(ag_grid_css);
@@ -431,6 +457,18 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(bad_sql);
   REQUIRE(bad_sql->status == 400);
   REQUIRE(bad_sql->body.find("no such column") != std::string::npos);
+
+  const auto quoted_semicolon = client.Post("/api/sql-query", headers,
+      R"({"sql":"/* comment ; */ SELECT ';' AS label; -- trailing ; comment"})", "application/json");
+  REQUIRE(quoted_semicolon);
+  CHECK(quoted_semicolon->status == 200);
+  CHECK(quoted_semicolon->body.find("\"rows\":[[\";\"]]") != std::string::npos);
+  for (const auto& query_text : {"SELECT * FROM data; DELETE FROM data", "WITH x AS (SELECT 1) DELETE FROM data RETURNING name"}) {
+    const auto invalid_query = client.Post("/api/sql-query", headers,
+        std::string("{\"sql\":\"") + query_text + "\"}", "application/json");
+    REQUIRE(invalid_query);
+    CHECK(invalid_query->status == 400);
+  }
 
   const auto health = client.Get("/api/health", headers);
   REQUIRE(health);
@@ -914,6 +952,7 @@ TEST_CASE("view: developer asset directory overrides first-party embedded viewer
   REQUIRE(sql_module);
   REQUIRE(sql_module->status == 200);
   REQUIRE(sql_module->body.find("csvzallDevSqlModule") != std::string::npos);
+  REQUIRE(sql_module->get_header_value("Content-Type") == "application/javascript");
 
   const auto ag_grid_css = client.Get("/assets/ag-grid.css");
   REQUIRE(ag_grid_css);
@@ -1017,6 +1056,14 @@ TEST_CASE("view edit: cell edits persist through save") {
       "application/json");
   REQUIRE(edit);
   REQUIRE(edit->status == 200);
+  // SQL includes the edit overlay without saving or mutating the source CSV.
+  const auto sql = client.Post(
+      "/api/sql-query", headers,
+      R"({"sql":"SELECT name, value FROM data WHERE value = 25"})", "application/json");
+  REQUIRE(sql);
+  REQUIRE(sql->status == 200);
+  REQUIRE(sql->body.find("\"rows\":[[\"bob\",\"25\"]]") != std::string::npos);
+  REQUIRE(ReadAllRows(path) == std::vector<std::vector<std::string>>{{"alice", "10"}, {"bob", "20"}});
   const auto save = client.Post("/api/save", headers, "{}", "application/json");
   REQUIRE(save);
   REQUIRE(save->status == 200);
