@@ -7,9 +7,10 @@
 #include <SQLiteCpp/SQLiteCpp.h>
 #include <csv.hpp>
 #include <nlohmann/json.hpp>
+#include <sqlite3.h>
 
 #include <algorithm>
-#include <cctype>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -51,28 +52,21 @@ const char* AffinitySql(sqlite::SqliteColumnAffinity affinity) {
   }
 }
 
-std::string Lowercase(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
-    return static_cast<char>(std::tolower(ch));
-  });
-  return value;
-}
-
-bool StartsWithReadOnlySqlVerb(const std::string& sql) {
-  const auto trimmed = common::Trim(sql);
-  const auto lowered = Lowercase(trimmed);
-  return lowered.starts_with("select") || lowered.starts_with("with");
-}
-
-bool HasAdditionalStatement(std::string_view sql) {
-  const auto semicolon = sql.find(';');
-  if (semicolon == std::string_view::npos) {
-    return false;
+void ValidateReadOnlyQuery(SQLite::Database& db, const std::string& sql) {
+  sqlite3_stmt* statement = nullptr;
+  const char* tail = nullptr;
+  const auto rc = sqlite3_prepare_v2(db.getHandle(), sql.c_str(), -1, &statement, &tail);
+  const std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)> prepared(statement, sqlite3_finalize);
+  if (rc != SQLITE_OK) throw std::runtime_error(sqlite3_errmsg(db.getHandle()));
+  if (!statement || !sqlite3_stmt_readonly(statement) || sqlite3_column_count(statement) <= 0) {
+    throw std::runtime_error("SQL preview only supports read-only queries returning a result set.");
   }
-  const auto rest = sql.substr(semicolon + 1);
-  return std::any_of(rest.begin(),
-                     rest.end(),
-                     [](unsigned char ch) { return std::isspace(ch) == 0; });
+  // Ask SQLite where the first statement ends: semicolons in strings/comments
+  // are data. Preparing the remaining tail accepts comments but no second SQL.
+  sqlite3_stmt* extra = nullptr;
+  const auto tail_rc = sqlite3_prepare_v2(db.getHandle(), tail, -1, &extra, nullptr);
+  const std::unique_ptr<sqlite3_stmt, decltype(&sqlite3_finalize)> remaining(extra, sqlite3_finalize);
+  if (tail_rc != SQLITE_OK || extra) throw std::runtime_error("SQL preview accepts one statement at a time.");
 }
 
 std::vector<sqlite::SqliteColumnAffinity> InferAffinitiesFromRows(
@@ -153,16 +147,11 @@ std::string BuildSqlQueryResultJson(const CsvViewData& data, std::string_view sq
   if (query_text.empty()) {
     query_text = "SELECT * FROM " + std::string(kViewerSqlTableName);
   }
-  if (!StartsWithReadOnlySqlVerb(query_text)) {
-    throw std::runtime_error("SQL preview only supports SELECT queries.");
-  }
-  if (HasAdditionalStatement(query_text)) {
-    throw std::runtime_error("SQL preview accepts one statement at a time.");
-  }
-
   SQLite::Database db(":memory:", SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
   sqlite::RegisterSqliteRegexFunctions(db);
   LoadViewerDataIntoSqlite(db, data);
+  db.exec("PRAGMA query_only = ON");
+  ValidateReadOnlyQuery(db, query_text);
 
   SQLite::Statement query(db, query_text);
   if (query.getColumnCount() <= 0) {

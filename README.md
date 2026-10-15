@@ -227,6 +227,20 @@ dirty state, supports reset from disk, and saves by writing a temporary sibling
 CSV before atomically replacing the source. Save refuses if the source file size
 or mtime changed after the viewer opened.
 
+Choose **SQLite query**, beside **Charts**, to open a full-width query toolbar
+above the data. Query the CSV as SQLite table `data`, including unsaved edits,
+and view read-only results in a separate grid. **Exit query** restores the
+editable table and preserves its changes. Use **Run query** or Ctrl/Cmd+Enter,
+then **Copy Markdown** to copy the result table.
+Right-click a column header and choose **Query column** to prepare a safely
+quoted query for that column. The query opens for editing and runs only when
+you choose Run query or Ctrl/Cmd+Enter.
+The initial query limits results to 100 rows. Each run loads the full CSV into
+an in-memory SQLite database, so large files need additional memory even with
+a result limit. This SQL viewer is available in the native desktop viewer.
+See the [SQLite capabilities reference](docs/sqlite-capabilities.md) for
+functions, regex and JSON examples, and query limitations.
+
 Current limitation: `view` is optimized for plain local CSV files. stdin,
 `.gz`, and `.zip` inputs are rejected in this pass. Server-side global
 sort/search/filter are deferred for paged mode. Edit mode uses the same paged

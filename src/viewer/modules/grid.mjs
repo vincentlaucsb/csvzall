@@ -27,3 +27,42 @@ export function rowInsertionIndex(anchorRow, rowCount, offset) {
   const clampedAnchor = Math.max(0, Math.min(anchorRow, count));
   return Math.max(0, Math.min(clampedAnchor + offset, count));
 }
+
+export function installColumnContextMenu({
+  createContextMenu, gridElement, getColumns, queryColumn, renameColumn, deleteColumn, createIcon,
+}) {
+  if (typeof createContextMenu !== 'function') return;
+  const items = [{ id: 'query-column', label: 'Query column', icon: () => createIcon('player-play') }];
+  if (renameColumn) items.push({ id: 'rename-column', label: 'Rename Column', icon: () => createIcon('pencil') });
+  if (deleteColumn) items.push({ type: 'separator' }, {
+    id: 'delete-column', label: 'Delete Column', icon: () => createIcon('column-remove'), variant: 'danger',
+  });
+  const menu = createContextMenu({
+    trigger: 'manual',
+    theme: 'system',
+    items,
+    onSelect(event) {
+      const column = event.context.data?.column;
+      if (!getColumns().includes(column)) return;
+      if (event.id === 'query-column') {
+        // Popright restores the old focus on close; close before focusing SQL.
+        event.close();
+        queryColumn(column);
+      } else if (event.id === 'rename-column') {
+        renameColumn?.(column);
+      } else if (event.id === 'delete-column') {
+        void deleteColumn?.(column);
+      }
+    },
+  });
+  gridElement.addEventListener('contextmenu', (event) => {
+    const headerCell = event.target?.closest?.('.ag-header-cell[col-id]');
+    const column = headerCell?.getAttribute('col-id');
+    if (!getColumns().includes(column)) return;
+    event.preventDefault();
+    menu.open({
+      x: event.clientX, y: event.clientY, target: headerCell,
+      triggerEvent: event, context: { column },
+    });
+  });
+}

@@ -1,18 +1,18 @@
 # Doxygen configuration for csvzall API documentation.
 
 PROJECT_NAME           = "csvzall"
-PROJECT_NUMBER         = 0.4.0
+PROJECT_NUMBER         = 0.5.0
 PROJECT_BRIEF          = "CSV command-line tool and emerging C++ library"
 
 OUTPUT_DIRECTORY       = docs/doxygen
 CREATE_SUBDIRS         = NO
 
-INPUT                  = README.md src
+INPUT                  = README.md src docs/sqlite-capabilities.md
 RECURSIVE              = YES
 FILE_PATTERNS          = *.hpp *.cpp *.md
 USE_MDFILE_AS_MAINPAGE = README.md
 
-EXCLUDE_PATTERNS       = */vendor/* */out/* */build/* */.github/*
+EXCLUDE_PATTERNS       = */vendor/* */out/* */build/* */.github/* */node_modules/*
 EXTRACT_ALL            = YES
 EXTRACT_PRIVATE        = NO
 EXTRACT_STATIC         = YES

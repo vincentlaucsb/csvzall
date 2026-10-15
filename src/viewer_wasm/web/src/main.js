@@ -11,6 +11,7 @@ import { setupFileDrop } from './file-drop.js';
 import { createHostBridge } from './host-bridge.js';
 import { createHostGridAdapter } from './host-grid.js';
 import { createSaveState } from './save-state.js';
+import { createMutationTracker } from '../../../viewer/modules/save.mjs';
 import { createIcon } from './icons.js';
 import { readLocalFile } from './local-file.js';
 import { setupPwa } from './pwa.js';
@@ -43,6 +44,7 @@ const cancelRenameColumn = document.getElementById('cancel-rename-column');
 const worker = new Worker(new URL('./csv-worker.js', import.meta.url), { type: 'module' });
 let nextRequestId = 1;
 const pendingRequests = new Map();
+const pendingCellEdits = new Set();
 let viewOpen = false;
 let activeName = '';
 let activeColumns = [];
@@ -55,6 +57,8 @@ let hostBridge = null;
 let wasmReady = false;
 let pendingOpenFile = null;
 const saveState = createSaveState();
+const csvMutations = createMutationTracker(() => setDirty(true));
+const mutationTypes = new Set(['editCell', 'insertColumn', 'insertRow', 'deleteRow', 'swapRows', 'deleteColumn', 'renameColumn', 'reset']);
 const hostGrid = createHostGridAdapter({
   getGrid: () => gridApi,
   isHostMode: () => hostBridge?.isHostMode() ?? false,
@@ -92,6 +96,10 @@ function showDialog(dialog, focusTarget) {
 }
 
 function workerRequest(type, payload = {}, transfer = []) {
+  return mutationTypes.has(type) ? csvMutations.run(() => sendWorkerRequest(type, payload, transfer)) : sendWorkerRequest(type, payload, transfer);
+}
+
+function sendWorkerRequest(type, payload, transfer) {
   const id = nextRequestId;
   nextRequestId += 1;
   return new Promise((resolve, reject) => {
@@ -199,7 +207,9 @@ const gridOptions = {
     if (!viewOpen || !event.colDef.field || event.colDef.field === '_csvzallRowId') {
       return;
     }
-    void commitCellEdit(event);
+    const pending = commitCellEdit(event);
+    pendingCellEdits.add(pending);
+    void pending.finally(() => pendingCellEdits.delete(pending));
   },
 };
 
@@ -680,13 +690,21 @@ fileInput.addEventListener('change', () => {
   }
 });
 
-saveButton.addEventListener('click', () => {
+let saving = false;
+async function saveCurrentChanges() {
   if (!viewOpen) {
-    return;
+    throw new Error('No CSV is open.');
   }
-  void (async () => {
+  if (saving) throw new Error('A save is already in progress.');
+  saving = true;
+  const wasInert = document.body.inert;
+  document.body.inert = true;
+  try {
+    gridApi.stopEditing();
+    await new Promise(resolve => window.setTimeout(resolve, 0));
+    await Promise.all([...pendingCellEdits]);
+    await csvMutations.settle();
     showLoading('Preparing Download', `${activeName} is being rewritten with your edits.`);
-    try {
       const name = activeName;
       const hosted = await saveState.save({
         prepare: () => workerRequest('save'),
@@ -703,11 +721,15 @@ saveButton.addEventListener('click', () => {
       setStatus(hosted ? `Saved ${name} to host.` : `Downloaded ${name}.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Download failed');
+      throw error;
     } finally {
       hideLoading();
+      document.body.inert = wasInert;
+      saving = false;
     }
-  })();
-});
+}
+
+saveButton.addEventListener('click', () => { void saveCurrentChanges().catch(() => {}); });
 
 resetButton.addEventListener('click', () => {
   if (!viewOpen) {
@@ -787,6 +809,8 @@ hostBridge = createHostBridge({
   onOpenFile: openHostFile,
   onHostModeChange: setHostMode,
   onViewportResize: hostGrid.onViewportResize,
+  onSaveRequested: saveCurrentChanges,
+  getDirty: () => dirty,
 });
 hostBridge.start();
 setupFileDrop({

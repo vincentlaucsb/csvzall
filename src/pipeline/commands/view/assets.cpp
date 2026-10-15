@@ -125,7 +125,7 @@ std::string_view ViewerAssetContentType(std::string_view route) {
   if (route.ends_with(".css")) {
     return "text/css";
   }
-  if (route.ends_with(".js")) {
+  if (route.ends_with(".js") || route.ends_with(".mjs")) {
     return "application/javascript";
   }
   return "application/octet-stream";

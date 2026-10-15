@@ -2,6 +2,40 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHostBridge, HOST_CAPABILITIES, VIEWER_SOURCE } from '../src/host-bridge.js';
 
+test('host-requested Save waits for the parent file-write acknowledgment', async () => {
+  const { windowRef, posts } = createFakeWindow();
+  let dirty = true, saves = 0;
+  const bridge = createHostBridge({ windowRef, onOpenFile() {}, getDirty: () => dirty,
+    async onSaveRequested() { saves++; await bridge.saveFile({ name: 'a.csv', result: { buffer: csvBuffer() } }); dirty = false; },
+  });
+  bridge.start(); await bridge.markReady();
+  windowRef.dispatchMessage({ source: 'obsidian-csvzall', type: 'open-file', name: 'a.csv', buffer: csvBuffer() });
+  const data = { source: 'obsidian-csvzall', type: 'save-request', version: 1, requestId: 12 };
+  windowRef.dispatchMessage(data, {}); assert.equal(saves, 0);
+  windowRef.dispatchMessage(data);
+  assert.equal(saves, 1);
+  assert.equal(posts.at(-1).message.type, 'save-file');
+  const fileWriteId = posts.at(-1).message.requestId;
+  assert.ok(!posts.some(post => post.message.type === 'save-response'));
+  windowRef.dispatchMessage({ source: 'obsidian-csvzall', type: 'save-result', requestId: fileWriteId, success: true });
+  for (let i = 0; i < 8; ++i) await Promise.resolve();
+  assert.deepEqual(posts.at(-1).message, { source: VIEWER_SOURCE, type: 'save-response', version: 1, requestId: 12, success: true, dirty: false });
+  bridge.destroy();
+});
+
+test('host Save errors are returned without claiming clean state', async () => {
+  const { windowRef, posts } = createFakeWindow();
+  const bridge = createHostBridge({ windowRef, onOpenFile() {}, getDirty: () => true,
+    async onSaveRequested() { throw new Error('disk full'); },
+  });
+  bridge.start(); await bridge.markReady();
+  windowRef.dispatchMessage({ source: 'obsidian-csvzall', type: 'open-file', name: 'a.csv', buffer: csvBuffer() });
+  windowRef.dispatchMessage({ source: 'obsidian-csvzall', type: 'save-request', version: 1, requestId: 13 });
+  for (let i = 0; i < 8; ++i) await Promise.resolve();
+  assert.deepEqual(posts.at(-1).message, { source: VIEWER_SOURCE, type: 'save-response', version: 1, requestId: 13, success: false, dirty: true, error: 'disk full' });
+  bridge.destroy();
+});
+
 function createFakeWindow({ embedded = true } = {}) {
   const listeners = new Map();
   const posts = [];
