@@ -1,6 +1,8 @@
 export const HOST_SOURCE = 'obsidian-csvzall';
 export const VIEWER_SOURCE = 'csvzall-wasm-viewer';
 export const HOST_CAPABILITIES = Object.freeze([
+  'csvzall-shared-shell-v1',
+  'csvzall-compact-layout-v1',
   'csvzall-host-integration-v1',
   'csvzall-save-ack-v1',
   'csvzall-edit-revision-v1',

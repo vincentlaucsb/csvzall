@@ -10,6 +10,7 @@ export function createFallbackContextMenu(options) {
     root = null;
     document.removeEventListener('pointerdown', handlePointerDown, true);
     document.removeEventListener('keydown', handleKeyDown, true);
+    options.onClose?.({ reason: 'manual' });
   };
 
   const handlePointerDown = (event) => {
@@ -27,9 +28,9 @@ export function createFallbackContextMenu(options) {
   const open = (input = {}) => {
     close();
     currentInput = input;
-    const items = typeof options.items === 'function'
+    const items = input.items ?? (typeof options.items === 'function'
       ? options.items({ data: input.context, target: input.target, triggerEvent: input.triggerEvent })
-      : options.items;
+      : options.items);
     const visibleItems = (items || []).filter((item) => !item.hidden);
     if (visibleItems.length === 0) {
       return;
@@ -56,6 +57,7 @@ export function createFallbackContextMenu(options) {
       button.type = 'button';
       button.setAttribute('data-popright-item', '');
       button.setAttribute('role', 'menuitem');
+      if (item.type === 'submenu') button.setAttribute('aria-haspopup', 'menu');
       if (item.icon) {
         const icon = document.createElement('span');
         icon.setAttribute('data-popright-icon', '');
@@ -78,6 +80,11 @@ export function createFallbackContextMenu(options) {
         button.setAttribute('data-active', '');
       });
       button.addEventListener('click', (event) => {
+        if (item.type === 'submenu') {
+          const items = typeof item.items === 'function' ? item.items({ data: currentInput.context }) : item.items;
+          open({ ...currentInput, items });
+          return;
+        }
         const selectEvent = {
           id: item.id,
           item,

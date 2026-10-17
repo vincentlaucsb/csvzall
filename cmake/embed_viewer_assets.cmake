@@ -8,6 +8,18 @@ if(NOT DEFINED VIEWER_SOURCE_DIR OR NOT DEFINED AG_GRID_SOURCE_DIR OR NOT DEFINE
 endif()
 
 set(_assets
+  "/assets/modules/features/style.mjs|${VIEWER_SOURCE_DIR}/modules/features/style.mjs|application/javascript|viewer_feature_style_mjs"
+  "/assets/modules/features/charts.css|${VIEWER_SOURCE_DIR}/modules/features/charts.css|text/css|viewer_feature_charts_css"
+  "/assets/modules/features/sql.css|${VIEWER_SOURCE_DIR}/modules/features/sql.css|text/css|viewer_feature_sql_css"
+  "/assets/modules/features/charts.mjs|${VIEWER_SOURCE_DIR}/modules/features/charts.mjs|application/javascript|viewer_features_charts"
+  "/assets/modules/features/sql.mjs|${VIEWER_SOURCE_DIR}/modules/features/sql.mjs|application/javascript|viewer_features_sql"
+  "/assets/modules/adapters/native.mjs|${VIEWER_SOURCE_DIR}/modules/adapters/native.mjs|application/javascript|viewer_adapters_native"
+  "/assets/modules/local-file.mjs|${VIEWER_SOURCE_DIR}/modules/local-file.mjs|application/javascript|viewer_local_file"
+  "/assets/modules/save-state.mjs|${VIEWER_SOURCE_DIR}/modules/save-state.mjs|application/javascript|viewer_save_state"
+  "/assets/modules/host-grid.mjs|${VIEWER_SOURCE_DIR}/modules/host-grid.mjs|application/javascript|viewer_host_grid"
+  "/assets/modules/shell-markup.mjs|${VIEWER_SOURCE_DIR}/modules/shell-markup.mjs|application/javascript|viewer_shell_markup"
+  "/assets/modules/shell.mjs|${VIEWER_SOURCE_DIR}/modules/shell.mjs|application/javascript|viewer_shell"
+  "/assets/modules/compact-layout.mjs|${VIEWER_SOURCE_DIR}/modules/compact-layout.mjs|application/javascript|viewer_compact_layout"
   "/|${VIEWER_SOURCE_DIR}/index.html|text/html|index_html"
   "/assets/viewer.css|${VIEWER_SOURCE_DIR}/viewer.css|text/css|viewer_css"
   "/assets/viewer.js|${VIEWER_SOURCE_DIR}/viewer.js|application/javascript|viewer_js"
@@ -19,6 +31,7 @@ set(_assets
   "/assets/modules/icons.mjs|${VIEWER_SOURCE_DIR}/modules/icons.mjs|application/javascript|viewer_module_icons_mjs"
   "/assets/modules/markdown.mjs|${VIEWER_SOURCE_DIR}/modules/markdown.mjs|application/javascript|viewer_module_markdown_mjs"
   "/assets/modules/table-form.mjs|${VIEWER_SOURCE_DIR}/modules/table-form.mjs|application/javascript|viewer_module_table_form_mjs"
+  "/assets/modules/chart-form.mjs|${VIEWER_SOURCE_DIR}/modules/chart-form.mjs|application/javascript|viewer_module_chart_form_mjs"
   "/assets/modules/save.mjs|${VIEWER_SOURCE_DIR}/modules/save.mjs|application/javascript|viewer_module_save_mjs"
   "/assets/modules/sql.mjs|${VIEWER_SOURCE_DIR}/modules/sql.mjs|application/javascript|viewer_module_sql_mjs"
   "/assets/modules/state.mjs|${VIEWER_SOURCE_DIR}/modules/state.mjs|application/javascript|viewer_module_state_mjs"

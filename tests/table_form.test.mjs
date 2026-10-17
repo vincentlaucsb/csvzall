@@ -10,11 +10,20 @@ class Element {
   appendChild(child) { child.parentElement = this; this.children.push(child); return child; }
   replaceChildren() { this.children = []; }
   setAttribute(key, value) { this[key] = value; }
+  closest(tag) { return this.tag === tag ? this : this.parentElement?.closest(tag); }
+  focus() { this.ownerDocument.activeElement = this; }
+  setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
+  setRangeText(text, start, end) {
+    this.value = this.value.slice(0, start) + text + this.value.slice(end);
+    this.setSelectionRange(start + text.length, start + text.length);
+  }
   addEventListener(type, handler) { this.listeners.set(type, [...(this.listeners.get(type) || []), handler]); }
   removeEventListener(type, handler) { this.listeners.set(type, this.listeners.get(type).filter(fn => fn !== handler)); }
   dispatchEvent(event) {
+    event.target ??= this;
+    event.stopPropagation ??= () => { event.cancelBubble = true; };
     this.listeners.get(event.type)?.forEach(fn => fn(event));
-    this.parentElement?.dispatchEvent(event);
+    if (!event.cancelBubble) this.parentElement?.dispatchEvent(event);
   }
   querySelectorAll(tag) { return this.children.flatMap(child => [...(child.tag === tag ? [child] : []), ...child.querySelectorAll(tag)]); }
 }
@@ -28,9 +37,81 @@ function fixture(options = {}) {
   };
   const button = title => root.querySelectorAll('button').find(button => button.textContent === title);
   const fire = (node, type = 'change') => node.dispatchEvent({ type });
-  return { root, form, field, button, fire };
+  const picker = root.querySelectorAll('fieldset').find(node => node.className === 'csvzall-query-picker');
+  return { root, form, field, button, fire, picker };
 }
 const settle = async () => { for (let i = 0; i < 8; ++i) await Promise.resolve(); };
+
+test('SQL column buttons start an empty query and quote spaces, reserved words, quotes and Unicode', () => {
+  for (const [name, quoted] of [['Customer name', '"Customer name"'], ['select', '"select"'], ['a"b', '"a""b"'], ['日本語 😀', '"日本語 😀"']]) {
+    let previews = 0, changes = 0;
+    const f = fixture({ columns: [name], preview: async () => { ++previews; }, onChange: () => { ++changes; } });
+    assert.equal(f.picker.hidden, true);
+    f.field('Include').value = 'sql'; f.fire(f.field('Include'));
+    assert.equal(f.picker.hidden, false);
+    const query = f.field('SQLite query'); query.value = ' \n ';
+    const before = changes;
+    f.fire(f.button(name), 'click');
+    assert.equal(f.form.getValue().sql, `SELECT ${quoted} FROM data`);
+    assert.equal(query.selectionStart, query.value.length);
+    assert.equal(query.selectionEnd, query.value.length);
+    assert.equal(query.ownerDocument.activeElement, query);
+    assert.equal(changes, before + 1);
+    assert.equal(previews, 0);
+  }
+});
+
+test('SQL column buttons insert at the cursor or replace a selection without changing surrounding SQL', () => {
+  const f = fixture({ columns: ['a"b'], value: { sql: 'SELECT  FROM data WHERE active = 1' } });
+  const query = f.field('SQLite query'); query.setSelectionRange(7, 7);
+  f.fire(f.button('a"b'), 'click');
+  assert.equal(query.value, 'SELECT "a""b" FROM data WHERE active = 1');
+  assert.equal(query.selectionStart, 13);
+  query.value = 'SELECT old FROM data'; query.setSelectionRange(7, 10);
+  f.fire(f.button('a"b'), 'click');
+  assert.equal(query.value, 'SELECT "a""b" FROM data');
+  query.setSelectionRange(query.value.length, query.value.length);
+  f.fire(f.button('a"b'), 'click');
+  assert.equal(query.value, 'SELECT "a""b" FROM data"a""b"');
+});
+
+test('SQL picker updates after column discovery and exposes a compact searchable list', async () => {
+  let finish, changes = 0;
+  const f = fixture({ value: { source: 'a.csv', sql: 'SELECT * FROM data' }, onChange: () => { ++changes; }, loadColumns: () => new Promise(resolve => { finish = resolve; }) });
+  assert.equal(f.picker.querySelectorAll('button').filter(button => !button.hidden).length, 0);
+  finish(['one', 'two', 'three', 'four', 'five', 'six', 'Seventh', 'a"b']); await settle();
+  assert.equal(f.button('Seventh'), undefined);
+  f.fire(f.button('Show all 8 columns'), 'click');
+  assert.ok(f.button('Seventh'));
+  const search = f.picker.querySelectorAll('input')[0]; search.value = 'SEV';
+  const before = changes;
+  f.fire(search, 'input');
+  assert.equal(changes, before);
+  assert.ok(f.button('Seventh')); assert.equal(f.button('one'), undefined);
+  let prevented = false;
+  search.dispatchEvent({ type: 'keydown', key: 'Enter', preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  assert.equal(f.field('SQLite query').value, 'SELECT * FROM data');
+  f.fire(f.button('Show fewer columns'), 'click');
+  assert.ok(f.button('one')); assert.equal(f.button('Seventh'), undefined);
+  f.form.setColumns(['new']);
+  assert.equal(f.button('one'), undefined); assert.ok(f.button('new'));
+});
+
+test('inserting a column invalidates pending previews and remains disabled during submission', async () => {
+  let finish;
+  const f = fixture({ columns: ['name'], value: { sql: 'SELECT  FROM data' }, preview: () => new Promise(resolve => { finish = resolve; }) });
+  f.fire(f.button('Preview'), 'click');
+  f.field('SQLite query').setSelectionRange(7, 7); f.fire(f.button('name'), 'click');
+  finish('stale'); await settle();
+  assert.equal(f.root.querySelectorAll('pre')[0].hidden, true);
+  const pending = fixture({ columns: ['name'], value: { sql: 'SELECT * FROM data' }, submit: () => new Promise(resolve => { finish = resolve; }) });
+  pending.fire(pending.button('Insert table'), 'click');
+  assert.equal(pending.button('name').disabled, true);
+  pending.fire(pending.button('name'), 'click');
+  assert.equal(pending.field('SQLite query').value, 'SELECT * FROM data');
+  finish(); await settle(); assert.equal(pending.button('name').disabled, false);
+});
 
 test('shared table form switches between all, selected columns and SQL without stale options', () => {
   const f = fixture({ columns: ['title', 'priority'] });

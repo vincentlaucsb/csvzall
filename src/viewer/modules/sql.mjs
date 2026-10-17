@@ -186,6 +186,7 @@ export function installSqlViewer({
   });
   setMode(false);
   return {
+    destroy() { ++generation; resultApi?.destroy?.(); },
     get active() { return active; },
     queryColumn(column) {
       input.value = columnSqlQuery(column, tableName);

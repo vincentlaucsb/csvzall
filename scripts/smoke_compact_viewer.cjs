@@ -1,0 +1,101 @@
+// Optional real-engine regression. Uses the same external Playwright setup as
+// smoke_shared_viewer.cjs; no browser automation is shipped with the viewer.
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const { createRequire } = require('node:module');
+const requireWeb = createRequire(path.resolve(__dirname, '../src/viewer_wasm/web/package.json'));
+const { chromium } = process.env.CSVZALL_PLAYWRIGHT_MODULE ? require(process.env.CSVZALL_PLAYWRIGHT_MODULE) : requireWeb('playwright');
+const options = Object.fromEntries(process.argv.slice(2).map(arg => {
+  const match = /^--(wasm-url|viewer-path|browser|output-dir)=(.+)$/.exec(arg);
+  if (!match) throw new Error('Expected --wasm-url=..., --viewer-path=..., --browser=..., or --output-dir=...');
+  return [match[1], match[2]];
+}));
+const base = (options['wasm-url'] || 'http://127.0.0.1:5174').replace(/\/$/, '');
+const output = path.resolve(options['output-dir'] || 'out/build/viewer-browser-smoke');
+require('node:fs').mkdirSync(output, { recursive: true });
+const csv = 'name,count\n' + Array.from({ length: 40 }, (_, index) => `Row ${index + 1},${index + 1}`).join('\n') + '\n';
+
+(async () => {
+  const browser = await chromium.launch({ headless: true, ...(options.browser ? { channel: options.browser } : {}) });
+  const errors = [];
+  try {
+    const page = await browser.newPage({ viewport: { width: 320, height: 740 }, hasTouch: true });
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(base + '/host-harness.html');
+    if (options['viewer-path']) await page.locator('#viewer').evaluate((frame, source) => new Promise(resolve => {
+      frame.onload = resolve; frame.src = source;
+    }), options['viewer-path']);
+    await page.locator('#open-file-early').click();
+    const frame = page.frameLocator('#viewer');
+    await frame.getByRole('gridcell', { name: 'Ada', exact: true }).waitFor();
+    await page.evaluate(csv => {
+      const buffer = new TextEncoder().encode(csv).buffer;
+      document.getElementById('viewer').contentWindow.postMessage({ source: 'obsidian-csvzall', type: 'open-file', name: 'forty.csv', buffer }, '*', [buffer]);
+    }, csv);
+    await frame.getByRole('gridcell', { name: 'Row 1', exact: true }).waitFor();
+    assert.equal(await frame.locator('.file-meta').isVisible(), false);
+    assert.equal(await frame.locator('#status').textContent(), 'Loaded.');
+    assert.equal(await frame.locator('#save').isVisible(), true);
+    assert.equal(await frame.locator('.toolbar-actions').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);
+    await frame.locator('#grid .ag-body-viewport').evaluate(el => { el.scrollTop = el.scrollHeight; });
+    const lastRow = frame.locator('#grid .ag-row[row-index="39"]');
+    await lastRow.waitFor();
+    const clearance = await lastRow.evaluate(row => row.closest('#grid').querySelector('.ag-body-viewport').getBoundingClientRect().bottom - row.getBoundingClientRect().bottom);
+    assert.ok(clearance >= 99, `Expected 100px below the final real row, got ${clearance}`);
+    assert.match(await frame.locator('#record-count').textContent(), /^40 rows, 2 columns$/);
+    await lastRow.locator('[col-id="name"]').click();
+    await frame.locator('#more-actions').tap();
+    const rootMenu = frame.locator('[data-popright-menu]:not([data-popright-submenu])');
+    assert.equal(await rootMenu.getByRole('menuitem', { name: 'Reset', exact: true }).getAttribute('aria-disabled'), 'true');
+    await rootMenu.locator('[data-popright-submenu-trigger]').tap();
+    await frame.locator('[data-popright-submenu]').waitFor();
+    await frame.locator('[data-popright-submenu] [data-popright-item]').first().tap();
+    await frame.locator('#record-count').filter({ hasText: '39 rows' }).waitFor();
+    await page.setViewportSize({ width: 200, height: 740 });
+    await frame.locator('#insert-menu').waitFor({ state: 'hidden' });
+    await frame.locator('#more-actions').tap();
+    await rootMenu.locator('[data-popright-submenu-trigger]').first().tap();
+    await frame.locator('[data-popright-submenu]').waitFor();
+    await frame.locator('[data-popright-submenu] [data-popright-item]').nth(1).tap();
+    await frame.locator('#record-count').filter({ hasText: '40 rows' }).waitFor();
+    await page.setViewportSize({ width: 320, height: 740 });
+    await frame.locator('#insert-menu').waitFor({ state: 'visible' });
+    await frame.locator('#more-actions').click();
+    const branch = await rootMenu.locator('[data-popright-submenu-trigger]').boundingBox();
+    await page.mouse.click(branch.x + branch.width / 2, branch.y + branch.height / 2);
+    await frame.locator('[data-popright-submenu]').waitFor();
+    assert.match(await frame.locator('#record-count').textContent(), /^40 rows,/, 'opening Delete must not activate a child row action');
+    await frame.locator('#record-count').click();
+    await frame.locator('#save').click();
+    await page.locator('#saved').filter({ hasText: 'Last save:' }).waitFor();
+    const saved = await page.evaluate(() => new TextDecoder().decode(window.csvzallHostHarness.savedBytes()));
+    assert.equal(saved.trimEnd().split(/\r?\n/).length, 41, 'scroll clearance must not add CSV rows');
+    await page.setViewportSize({ width: 900, height: 900 });
+    await frame.locator('body:not([data-compact])').waitFor();
+    assert.equal(await frame.locator('.file-meta').isVisible(), true);
+    await frame.locator('#grid .ag-body-viewport').evaluate(el => { el.scrollTop = 0; });
+    const firstCell = frame.locator('#grid .ag-row[row-index="0"] [col-id="name"]');
+    await firstCell.dblclick();
+    const editor = frame.locator('.ag-cell-inline-editing input');
+    await editor.fill('Still editing');
+    const originalEditor = await editor.elementHandle();
+    await page.setViewportSize({ width: 900, height: 450 });
+    await page.waitForTimeout(200);
+    assert.equal(await frame.locator('body').getAttribute('data-compact'), null);
+    assert.equal(await originalEditor.evaluate(el => el === document.activeElement), true);
+    assert.equal(await editor.inputValue(), 'Still editing');
+    await page.keyboard.press('Enter');
+    await frame.locator('body[data-compact]').waitFor();
+    assert.equal(await frame.locator('.file-meta').isVisible(), false);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: path.join(output, 'compact-hosted-viewer.png') });
+    await page.goto(base + (options['viewer-path'] || '/index.html'));
+    await page.locator('#file-input:not(:disabled)').waitFor();
+    await page.locator('#file-input').setInputFiles({ name: 'standalone.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
+    await page.getByRole('gridcell', { name: 'Row 1', exact: true }).waitFor();
+    assert.equal(await page.locator('.file-meta').isVisible(), true);
+    assert.match(await page.locator('#file-name').textContent(), /standalone.csv/);
+    assert.deepEqual(errors, []);
+    console.log('Compact viewer: portrait/landscape, preserved edit focus, nested actions, disabled states, real scroll clearance, 40-row save, and standalone filename passed.');
+  } finally { await browser.close(); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

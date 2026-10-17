@@ -1,0 +1,60 @@
+.sqlite-query-toolbar{
+  grid-area: query-toolbar;
+  min-width: 0;
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--csvzall-border);
+  background: var(--csvzall-background-primary);
+  color: var(--csvzall-text-muted);
+  font-size: 0.78rem;
+}
+.sql-help{
+  margin: 0;
+  line-height: 1.3;
+}
+.sql-help a{
+  color: var(--csvzall-accent);
+  text-decoration: underline;
+}
+.sql-error{
+  margin: 0;
+  color: var(--text-error, #dc2626);
+  font-size: 0.76rem;
+  line-height: 1.3;
+}
+.sql-toolbar{
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.sql-toolbar{
+  flex-wrap: wrap;
+}
+.sql-toolbar button{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 0.6rem;
+  border: 1px solid var(--csvzall-border);
+  border-radius: var(--radius-s, 4px);
+  background: var(--csvzall-background-secondary);
+  color: var(--csvzall-text-normal);
+  font: inherit;
+  white-space: nowrap;
+}
+.sql-toolbar button:disabled{
+  opacity: 0.55;
+}
+#sql-grid{
+  height: 100%;
+  width: 100%;
+  min-height: 12rem;
+  border: 0;
+  overflow: hidden;
+}
+@media (max-width: 820px){.sql-toolbar{
+    align-self: flex-start;
+  }
+}

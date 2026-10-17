@@ -115,8 +115,10 @@
 
     document.getElementById('open-file-early').addEventListener('click', () => {
       ready = false;
+      // Wait for the new document's message listener, not a fixed network delay.
+      // Its engine can still be initializing, exercising the queued-open path.
+      viewer.addEventListener('load', postOpen, { once: true });
       viewer.src = './index.html';
-      setTimeout(postOpen, 25);
       statusNode.textContent = 'Posted sample CSV before ready.';
     });
 

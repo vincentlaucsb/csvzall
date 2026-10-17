@@ -82,7 +82,7 @@ This file is the canonical AI reference for this repository.
 
 ## Release artifacts
 
-- Obsidian helper release assets are intentionally narrower than the full CLI release and are published for each native desktop platform. They support CSV editing, viewing, charting/SVGPlot, and SQLite-backed workflows.
+- Obsidian helper builds are owned by the obsidian-csvzall release-preparation pipeline, which pins this repository and its dependencies by commit and reuses verified binaries for unchanged build identities. Do not restore duplicate Obsidian helper jobs in csvzall release workflows. The narrower build still supports CSV editing, viewing, charting/SVGPlot, and SQLite-backed workflows.
 - Obsidian helper builds must be configured with `CSVZALL_OBSIDIAN_BUILD=ON`.
 - `CSVZALL_OBSIDIAN_BUILD=ON` must keep PostgreSQL support, keychain support, and compressed input support disabled.
 - Obsidian helper builds must prefer in-tree/static dependencies over system shared packages for compiled/runtime dependencies. In particular, keep `CSVZALL_PREFER_SYSTEM_SIMDJSON=OFF`, `CSVZALL_PREFER_SYSTEM_NLOHMANN_JSON=OFF`, and `CSVZALL_PREFER_SYSTEM_SVGPLOT=OFF` for Obsidian release assets.

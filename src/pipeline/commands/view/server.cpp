@@ -181,7 +181,7 @@ int ViewServer::Start(const ViewServerOptions& options) {
                                              "text/plain; charset=utf-8");
                       }
                     });
-  impl_->server.Get(R"(/assets/modules/([A-Za-z0-9._-]+\.m?js))",
+  impl_->server.Get(R"(/assets/modules/([A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\.(?:m?js|css)))",
                     [this](const httplib::Request& request, httplib::Response& response) {
                       const auto route = std::string("/assets/modules/") + request.matches[1].str();
                       try {

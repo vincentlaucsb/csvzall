@@ -33,7 +33,8 @@ export const HOST_THEME_CSS = `
   --popright-disabled-color: var(--text-faint, var(--csvzall-text-muted));
   --popright-danger-color: var(--text-error, #dc2626);
 }
-:root[data-csvzall-host-theme] #grid {
+:root[data-csvzall-host-theme] #grid,
+:root[data-csvzall-host-theme] #sql-grid {
   --ag-font-family: var(--csvzall-font-family);
   --ag-background-color: var(--csvzall-background-primary);
   --ag-foreground-color: var(--csvzall-text-normal);
@@ -66,6 +67,18 @@ export const HOST_THEME_CSS = `
 }
 `;
 
+// A host may send its first theme before the shell or an optional grid mounts.
+export function applyHostGridTheme(grid, mode) {
+  if (!grid || !['light', 'dark'].includes(mode)) return;
+  for (const family of ['alpine', 'quartz']) {
+    const base = `ag-theme-${family}`;
+    if (![base, `${base}-auto-dark`, `${base}-dark`].some(name => grid.classList.contains(name))) continue;
+    grid.classList.remove(`${base}-auto-dark`);
+    grid.classList.add(base);
+    grid.classList.toggle(`${base}-dark`, mode === 'dark');
+  }
+}
+
 export function installHostTheme(windowRef) {
   const parent = windowRef.parent;
   if (!parent || parent === windowRef) return () => {};
@@ -91,14 +104,7 @@ export function installHostTheme(windowRef) {
     root.style.setProperty('color-scheme', theme.mode);
     // Keep the base class for csvzall's own grid overrides, but stop AG Grid
     // selecting its palette independently from the operating system.
-    const grid = doc.getElementById('grid');
-    for (const family of ['alpine', 'quartz']) {
-      const base = `ag-theme-${family}`;
-      if (!grid || ![base, `${base}-auto-dark`, `${base}-dark`].some(name => grid.classList.contains(name))) continue;
-      grid.classList.remove(`${base}-auto-dark`);
-      grid.classList.add(base);
-      grid.classList.toggle(`${base}-dark`, theme.mode === 'dark');
-    }
+    for (const id of ['grid', 'sql-grid']) applyHostGridTheme(doc.getElementById(id), theme.mode);
   };
   windowRef.addEventListener('message', onMessage);
   parent.postMessage({ source: 'csvzall-viewer', type: 'theme-ready', version: 1 }, '*');

@@ -1,6 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { installHostTheme, parseHostTheme } from '../src/viewer/modules/host-theme.mjs';
+import { applyHostGridTheme, installHostTheme, parseHostTheme } from '../src/viewer/modules/host-theme.mjs';
+
+test('a grid mounted after the first host message adopts the resolved mode', () => {
+  const classes = new Set(['ag-theme-alpine-auto-dark']);
+  const grid = { classList: {
+    contains: name => classes.has(name), add: name => classes.add(name), remove: name => classes.delete(name),
+    toggle: (name, value) => value ? classes.add(name) : classes.delete(name),
+  } };
+  applyHostGridTheme(grid, undefined);
+  assert.ok(classes.has('ag-theme-alpine-auto-dark'));
+  applyHostGridTheme(grid, 'dark');
+  assert.ok(classes.has('ag-theme-alpine-dark'));
+  assert.equal(classes.has('ag-theme-alpine-auto-dark'), false);
+  applyHostGridTheme(grid, 'light');
+  assert.equal(classes.has('ag-theme-alpine-dark'), false);
+  assert.ok(classes.has('ag-theme-alpine'));
+});
 
 const message = (mode = 'dark', variables = { '--background-primary': '#123456', '--text-normal': '#abcdef' }) => ({
   source: 'obsidian-csvzall', type: 'theme', version: 1, mode, variables,

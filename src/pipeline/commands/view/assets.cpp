@@ -35,14 +35,23 @@ std::string ReadDevViewerAsset(const std::filesystem::path& path) {
 
 bool IsSafeViewerModuleRoute(std::string_view route) {
   constexpr std::string_view prefix = "/assets/modules/";
-  if (!route.starts_with(prefix) || (!route.ends_with(".js") && !route.ends_with(".mjs"))) {
+  if (!route.starts_with(prefix) ||
+      (!route.ends_with(".js") && !route.ends_with(".mjs") && !route.ends_with(".css"))) {
     return false;
   }
   const auto name = route.substr(prefix.size());
   if (name.empty()) {
     return false;
   }
-  for (const char ch : name) {
+  std::size_t segment_start = 0;
+  for (std::size_t index = 0; index <= name.size(); ++index) {
+    if (index == name.size() || name[index] == '/') {
+      const auto segment = name.substr(segment_start, index - segment_start);
+      if (segment.empty() || segment == "." || segment == "..") return false;
+      segment_start = index + 1;
+      continue;
+    }
+    const char ch = name[index];
     const bool allowed =
         (ch >= 'A' && ch <= 'Z') ||
         (ch >= 'a' && ch <= 'z') ||

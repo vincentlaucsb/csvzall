@@ -59,6 +59,16 @@ std::filesystem::path WriteTempViewerAssets(const std::string& name) {
     std::ofstream output(dir / "modules" / "sql.mjs", std::ios::binary);
     output << "export const csvzallDevSqlModule = true;";
   }
+  std::filesystem::create_directories(dir / "modules" / "features");
+  {
+    std::ofstream output(dir / "modules" / "features" / "probe.css", std::ios::binary);
+    output << ".probe { color: green; }";
+  }
+  {
+    // Must not be readable through a module route containing '..'.
+    std::ofstream output(dir / "private.mjs", std::ios::binary);
+    output << "private fixture contents";
+  }
   return dir;
 }
 
@@ -286,87 +296,35 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(viewer);
   REQUIRE(viewer->status == 200);
   REQUIRE(viewer->body.find("csvzall view") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"open-sql-query\"") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"exit-sql-query\"") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"query-mode-table\"") == std::string::npos);
-  REQUIRE(viewer->body.find("id=\"query-mode-sql\"") == std::string::npos);
-  REQUIRE(viewer->body.find("id=\"clear-query\"") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"sql-error\"") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"sqlite-query-toolbar\"") != std::string::npos);
-  const auto tools_pos = viewer->body.find("id=\"viewer-tools\"");
-  const auto query_button_pos = viewer->body.find("id=\"open-sql-query\"");
-  const auto chart_button_pos = viewer->body.find("id=\"add-chart\"");
-  const auto header_end = viewer->body.find("</header>");
-  const auto query_toolbar_pos = viewer->body.find("id=\"sqlite-query-toolbar\"");
-  const auto data_pos = viewer->body.find("<main");
-  REQUIRE(tools_pos < query_button_pos);
-  REQUIRE(query_button_pos < chart_button_pos);
-  REQUIRE(chart_button_pos < header_end);
-  REQUIRE(header_end < query_toolbar_pos);
-  REQUIRE(query_toolbar_pos < data_pos);
-  REQUIRE(viewer->body.find(">SQLite query</button>") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"add-chart\"") != std::string::npos);
-  REQUIRE(viewer->body.find(">Charts</button>") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"heatmap-chart-dialog\"") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"heatmap-chart-form\" class=\"dialog-form\" novalidate") !=
-          std::string::npos);
-  REQUIRE(viewer->body.find("id=\"chart-type\"") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"chart-orientation\"") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"chart-color-scheme\"") != std::string::npos);
-  const auto chart_layout_pos = viewer->body.find("id=\"chart-layout-section\"");
-  const auto chart_range_pos = viewer->body.find("id=\"chart-range-section\"");
-  const auto chart_orientation_pos = viewer->body.find("id=\"chart-orientation\"");
-  REQUIRE(chart_layout_pos != std::string::npos);
-  REQUIRE(chart_range_pos != std::string::npos);
-  REQUIRE(chart_layout_pos < chart_orientation_pos);
-  REQUIRE(chart_orientation_pos < chart_range_pos);
-  REQUIRE(viewer->body.find("id=\"chart-presentation\"") != std::string::npos);
-  REQUIRE(viewer->body.find("value=\"markdown-table\"") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"chart-table-form\"") != std::string::npos);
-  REQUIRE(viewer->body.find("multiple size=\"6\"") == std::string::npos);
-  REQUIRE(viewer->body.find("aria-disabled=\"true\"") == std::string::npos);
-  REQUIRE(viewer->body.find("Weight column") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"rename-column-dialog\"") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"chart-dirty-dialog\"") != std::string::npos);
-  REQUIRE(viewer->body.find("Save or discard current changes before opening Charts.") !=
-          std::string::npos);
-  REQUIRE(viewer->body.find(">Bar</option>") != std::string::npos);
-  REQUIRE(viewer->body.find("id=\"chart-id\" type=\"text\" autocomplete=\"off\" required") ==
-          std::string::npos);
-  REQUIRE(viewer->body.find("id=\"chart-date-column\" required") == std::string::npos);
-  REQUIRE(viewer->body.find("id=\"chart-output\" type=\"text\" autocomplete=\"off\" required") ==
-          std::string::npos);
   REQUIRE(viewer->body.find("type=\"module\" src=\"/assets/viewer.js\"") != std::string::npos);
-
+  REQUIRE(viewer->body.find("heatmap-chart-form") == std::string::npos);
+  // Every transitive module and optional stylesheet must be reachable from a
+  // production binary. Nested feature routes are covered as HTTP, not just
+  // entries in the generated asset table.
+  for (const auto* route : {"shell.mjs", "shell-markup.mjs", "compact-layout.mjs", "host-grid.mjs", "save-state.mjs", "local-file.mjs",
+       "adapters/native.mjs", "features/sql.mjs", "features/charts.mjs", "features/style.mjs", "chart-form.mjs"}) {
+    const auto module = client.Get(std::string("/assets/modules/") + route);
+    INFO(route);
+    REQUIRE(module);
+    REQUIRE(module->status == 200);
+    REQUIRE_FALSE(module->body.empty());
+    REQUIRE(module->get_header_value("Content-Type") == "application/javascript");
+  }
+  for (const auto* name : {"sql", "charts"}) {
+    const auto style = client.Get(std::string("/assets/modules/features/") + name + ".css");
+    REQUIRE(style);
+    REQUIRE(style->status == 200);
+    REQUIRE(style->get_header_value("Content-Type") == "text/css");
+  }
+  const auto shell = client.Get("/assets/modules/shell.mjs");
+  REQUIRE(shell->body.find("createViewerShell") != std::string::npos);
+  REQUIRE(shell->body.find("_csvzallRowId") != std::string::npos);
+  REQUIRE(shell->body.find("/api/sql-query") == std::string::npos);
+  REQUIRE(shell->body.find("mountChartForm") == std::string::npos);
   const auto viewer_js = client.Get("/assets/viewer.js");
   REQUIRE(viewer_js);
   REQUIRE(viewer_js->status == 200);
-  REQUIRE(viewer_js->body.find("csvzallViewBootstrap") != std::string::npos);
-  REQUIRE(viewer_js->body.find("/api/chart-config/heatmap") != std::string::npos);
-  REQUIRE(viewer_js->body.find("VIEWER_SQL_TABLE_NAME") != std::string::npos);
-  REQUIRE(viewer_js->body.find("rowModelType = 'infinite'") != std::string::npos);
-  REQUIRE(viewer_js->body.find("purgeInfiniteCache") != std::string::npos);
-  REQUIRE(viewer_js->body.find("_csvzallRowId") != std::string::npos);
-  REQUIRE(viewer_js->body.find("chartType.value") != std::string::npos);
-  REQUIRE(viewer_js->body.find("markdown-table") != std::string::npos);
-  REQUIRE(viewer_js->body.find("tableForm.setColumns") != std::string::npos);
-  REQUIRE(viewer_js->body.find("mountTableForm") != std::string::npos);
-  REQUIRE(viewer_js->body.find("missingChartFields") == std::string::npos);
-  REQUIRE(viewer_js->body.find("Complete the required fields") == std::string::npos);
-  REQUIRE(viewer_js->body.find(".required") == std::string::npos);
-  REQUIRE(viewer_js->body.find("checkValidity") == std::string::npos);
-  REQUIRE(viewer_js->body.find("aria-invalid") != std::string::npos);
-  REQUIRE(viewer_js->body.find("Row Before") != std::string::npos);
-  REQUIRE(viewer_js->body.find("Insert Row Before") != std::string::npos);
-  REQUIRE(viewer_js->body.find("Insert Row After") != std::string::npos);
-  REQUIRE(viewer_js->body.find("Column After") != std::string::npos);
-  REQUIRE(viewer_js->body.find("installColumnContextMenu") != std::string::npos);
-  REQUIRE(viewer_js->body.find("dirty-state") != std::string::npos);
-  REQUIRE(viewer_js->body.find("prepareForCharts") != std::string::npos);
-  REQUIRE(viewer_js->body.find("csvzall:reopen-charts-after-reload") != std::string::npos);
-  REQUIRE(viewer_js->body.find("discardCurrentChangesForCharts") != std::string::npos);
-  REQUIRE(viewer_js->body.find("await loadChartList();\n        clearChartError();") !=
-          std::string::npos);
+  REQUIRE(viewer_js->body.find("features: [sqlFeature, chartsFeature]") != std::string::npos);
 
   const auto sql_module = client.Get("/assets/modules/sql.mjs");
   REQUIRE(sql_module);
@@ -953,6 +911,19 @@ TEST_CASE("view: developer asset directory overrides first-party embedded viewer
   REQUIRE(sql_module->status == 200);
   REQUIRE(sql_module->body.find("csvzallDevSqlModule") != std::string::npos);
   REQUIRE(sql_module->get_header_value("Content-Type") == "application/javascript");
+
+  const auto feature_style = client.Get("/assets/modules/features/probe.css");
+  REQUIRE(feature_style);
+  REQUIRE(feature_style->status == 200);
+  REQUIRE(feature_style->body.find("color: green") != std::string::npos);
+  REQUIRE(feature_style->get_header_value("Content-Type") == "text/css");
+  for (const auto* route : {"/assets/modules/../private.mjs", "/assets/modules/features/../../private.mjs",
+       "/assets/modules/%2e%2e/private.mjs", "/assets/modules/features//probe.css"}) {
+    const auto rejected = client.Get(route);
+    REQUIRE(rejected);
+    REQUIRE(rejected->status == 404);
+    REQUIRE(rejected->body.find("private fixture contents") == std::string::npos);
+  }
 
   const auto ag_grid_css = client.Get("/assets/ag-grid.css");
   REQUIRE(ag_grid_css);
