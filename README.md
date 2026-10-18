@@ -558,7 +558,10 @@ release runner.
 
 | Library | Author / maintainer | Role | How it's sourced |
 |---|---|---|---|
-| [actions/cache](https://github.com/actions/cache) v5.0.5 | [GitHub](https://github.com/actions) | Cache CMake FetchContent dependencies in CI | GitHub Actions workflows only |
+| [actions/cache](https://github.com/actions/cache) v5.0.5 | [GitHub](https://github.com/actions) | Cache CMake FetchContent dependencies and compiler results in CI | GitHub Actions workflows only |
+| [ccache](https://ccache.dev/) | [ccache contributors](https://github.com/ccache/ccache) | Reuse Linux/macOS compiler results in native and coverage CI | Ubuntu/Homebrew package, CI only |
+| [sccache](https://github.com/mozilla/sccache) v0.18.0 | [Mozilla](https://github.com/mozilla) and contributors | Reuse MSVC compiler results in native CI | Pinned [mozilla-actions/sccache-action](https://github.com/mozilla-actions/sccache-action) v0.0.11, CI only |
+| [ilammy/msvc-dev-cmd](https://github.com/ilammy/msvc-dev-cmd) v1.13.0 | [Alexey Orlenko](https://github.com/ilammy) and contributors | Set up MSVC for the Ninja CI generator | Pinned GitHub Action, CI only |
 | [lukka/get-cmake](https://github.com/lukka/get-cmake) v4.3.3 | [Luca K.](https://github.com/lukka) and contributors | Install CMake for release binary builds | GitHub Actions release workflow only |
 | [Codecov GitHub Action](https://github.com/codecov/codecov-action) v6.0.1 | [Codecov](https://about.codecov.io/) | Upload coverage reports to Codecov | GitHub Actions coverage workflow only |
 
