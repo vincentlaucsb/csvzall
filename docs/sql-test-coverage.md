@@ -32,9 +32,18 @@ Operating-system permission errors, concurrent destination replacement, allocati
 failure, and transient disk/device errors are not exhaustively simulated.
 Rejecting stream buffers cover deterministic write and flush failures instead.
 
+The measured coverage review also distinguishes behavior from compiler-generated
+paths. The uncovered closing brace in `StripSqlStringsAndComments` is an
+exceptional compiler path, rather than an untested SQL input. Likewise,
+`SELECT COUNT(*)` always produces one row after successful preparation, so the
+false branch of the export row-count step is not a reachable success case.
+Tests do not add artificial invalid-token inputs or manufacture exceptions
+merely to mark these paths covered. Export failures and failed output writes
+exercise both present and absent diagnostic callbacks.
+
 Local validation uses the existing Windows MSVC/Ninja build at
 `out/build/codex-shared-shell-tests`, with compressed input enabled. The focused
-suite passes 294 assertions across 15 cases. The full CTest suite also passes
+suite passes 336 assertions across 16 cases. The full CTest suite also passes
 when run outside the execution sandbox, which permits localhost HTTP tests,
 temporary-file renames, and the MSVC compiler probe. The compressed-disabled
 configuration is validated by the added Linux CI job rather than this local run.

@@ -226,7 +226,8 @@ TEST_CASE("SQL input detection and warning token boundaries", "[sql-edges]") {
     REQUIRE(pipeline::DetectSqlQueryInputKind(path) == pipeline::SqlQueryInputKind::kUnknown);
   for (const auto& sql :
        {"SELECT 1", "SELECT /", "SELECT 'it''s 3/2'", "SELECT \"a\"\"3/2\"", "SELECT 2e3/2",
-        "SELECT 2/3E-2", "SELECT 2/3.0", "SELECT 1 /* 3/2 */", "SELECT 1 -- 3/2", "SELECT (3)/(2)"})
+        "SELECT 2/3E-2", "SELECT 2/3E+2", "SELECT 2/3.0", "SELECT 1 /* 3/2 */",
+        "SELECT 1 /* * x 3/2 */", "SELECT 1 -- 3/2", "SELECT (3)/(2)"})
     REQUIRE_FALSE(pipeline::ShouldWarnIntegerDivision(sql));
   for (const auto& sql :
        {"SELECT _x/2", "SELECT 3/2 -- comment", "SELECT 1 /* x */ + a/b", "-- comment\nSELECT a/2"})
@@ -277,28 +278,33 @@ TEST_CASE("SQL query reports output failures and preserves stream exception mask
     int_type overflow(int_type c) override { return sync_only ? c : traits_type::eof(); }
     int sync() override { return sync_only ? -1 : 0; }
   };
-  for (const bool sync_only : {false, true}) {
-    for (const bool database : {false, true}) {
-      for (const bool exceptions : {false, true}) {
-        for (const auto& format : {"csv", "markdown"}) {
-          DYNAMIC_SECTION(sync_only << '/' << database << '/' << exceptions << '/' << format) {
-            RejectWrites buffer(sync_only);
-            std::ostream output(&buffer);
-            const auto mask = exceptions ? std::ios::badbit | std::ios::failbit : std::ios::goodbit;
-            output.exceptions(mask);
-            std::istringstream input("x\n1\n");
-            pipeline::RunStats stats;
-            std::string error;
-            pipeline::LoggerCallbacks logger{[&](const std::string& s) { error = s; }, nullptr};
-            const int rc =
-                database
-                    ? pipeline::RunSqlQueryDb("SELECT x FROM data", files.path("data.db"), format,
-                                              output, logger, stats)
-                    : pipeline::RunSqlQueryCsv("SELECT x FROM data", "data", format, input, output,
-                                               tests::MakeTestOptions(), logger, stats);
-            REQUIRE(rc == 1);
-            REQUIRE(error == "sql query: failed to write output.");
-            REQUIRE(output.exceptions() == mask);
+  for (const bool capture : {false, true}) {
+    for (const bool sync_only : {false, true}) {
+      for (const bool database : {false, true}) {
+        for (const bool exceptions : {false, true}) {
+          for (const auto& format : {"csv", "markdown"}) {
+            DYNAMIC_SECTION(capture << '/' << sync_only << '/' << database << '/' << exceptions
+                                    << '/' << format) {
+              RejectWrites buffer(sync_only);
+              std::ostream output(&buffer);
+              const auto mask =
+                  exceptions ? std::ios::badbit | std::ios::failbit : std::ios::goodbit;
+              output.exceptions(mask);
+              std::istringstream input("x\n1\n");
+              pipeline::RunStats stats;
+              std::string error;
+              auto logger = tests::MakeNullLogger();
+              if (capture) logger.error = [&](const std::string& s) { error = s; };
+              const int rc =
+                  database
+                      ? pipeline::RunSqlQueryDb("SELECT x FROM data", files.path("data.db"), format,
+                                                output, logger, stats)
+                      : pipeline::RunSqlQueryCsv("SELECT x FROM data", "data", format, input,
+                                                 output, tests::MakeTestOptions(), logger, stats);
+              REQUIRE(rc == 1);
+              if (capture) REQUIRE(error == "sql query: failed to write output.");
+              REQUIRE(output.exceptions() == mask);
+            }
           }
         }
       }
@@ -445,9 +451,9 @@ TEST_CASE("SQL writers escape headers and embedded newlines exactly", "[sql-edge
     std::istringstream input("x\n1\n");
     std::ostringstream output;
     pipeline::RunStats stats;
-    REQUIRE(pipeline::RunSqlQueryCsv(
-                "SELECT 'line\nnext,\"quoted\"' AS \"a,\n\"\"b\" FROM data", "data", "csv",
-                input, output, tests::MakeTestOptions(), tests::MakeNullLogger(), stats) == 0);
+    REQUIRE(pipeline::RunSqlQueryCsv("SELECT 'line\nnext,\"quoted\"' AS \"a,\n\"\"b\" FROM data",
+                                     "data", "csv", input, output, tests::MakeTestOptions(),
+                                     tests::MakeNullLogger(), stats) == 0);
     REQUIRE(tests::ParseCsv(output.str()) ==
             std::vector<std::vector<std::string>>{{"a,\n\"b"}, {"line\nnext,\"quoted\""}});
     REQUIRE(stats.rows_processed == 1);
@@ -463,5 +469,43 @@ TEST_CASE("SQL writers escape headers and embedded newlines exactly", "[sql-edge
                                     "markdown", output, tests::MakeNullLogger(), stats) == 0);
     REQUIRE(output.str() == "| a\\|b | n |\n| ---- | --- |\n| x\\|y |   |\n");
     REQUIRE(stats.rows_processed == 1);
+  }
+}
+
+TEST_CASE("SQL export failures accept an absent error callback", "[sql-edges]") {
+  SqlWorkspace files;
+  SECTION("existing destination") {
+    const auto destination = files.path("existing.db");
+    {
+      std::ofstream file(destination);
+      file << "preserved";
+    }
+    std::istringstream input("x\n1\n");
+    pipeline::RunStats stats;
+    REQUIRE(pipeline::RunSqlExport("-", destination, "data", input, tests::MakeTestOptions(),
+                                   tests::MakeNullLogger(), stats) == 1);
+    std::ifstream file(destination);
+    std::ostringstream bytes;
+    bytes << file.rdbuf();
+    REQUIRE(bytes.str() == "preserved");
+    REQUIRE(stats.rows_processed == 0);
+  }
+  SECTION("SQLite open failure") {
+    const auto destination = files.path("missing/destination.db");
+    std::istringstream input("x\n1\n");
+    pipeline::RunStats stats;
+    REQUIRE(pipeline::RunSqlExport("-", destination, "data", input, tests::MakeTestOptions(),
+                                   tests::MakeNullLogger(), stats) == 1);
+    REQUIRE_FALSE(std::filesystem::exists(destination));
+    REQUIRE(stats.rows_processed == 0);
+  }
+  SECTION("destination inspection failure") {
+    // POSIX reports the overlong component during filesystem inspection.
+    // Windows may instead defer rejection until SQLite attempts to open it.
+    std::istringstream input("x\n1\n");
+    pipeline::RunStats stats;
+    REQUIRE(pipeline::RunSqlExport("-", files.path(std::string(300, 'x')), "data", input,
+                                   tests::MakeTestOptions(), tests::MakeNullLogger(), stats) == 1);
+    REQUIRE(stats.rows_processed == 0);
   }
 }
