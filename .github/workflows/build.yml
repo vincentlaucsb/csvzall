@@ -7,10 +7,15 @@ on:
 
 jobs:
   build:
+    name: ${{ matrix.compressed == 'ON' && format('build ({0})', matrix.os) || format('build ({0}, compressed OFF)', matrix.os) }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        compressed: ["ON"]
+        include:
+          - os: ubuntu-latest
+            compressed: "OFF"
 
     steps:
       - uses: actions/checkout@v6.0.2
@@ -59,7 +64,7 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-cmake-fetchcontent-${{ steps.cmake-cache-key.outputs.id }}-
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCSVZALL_ENABLE_COMPRESSED_INPUT=${{ matrix.compressed }}
 
       - name: Build
         run: cmake --build build --config Release --parallel --target csvzall csvzall_tests

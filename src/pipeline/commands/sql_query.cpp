@@ -200,6 +200,22 @@ bool IsLikelyIntegerOperand(TokenKind kind) {
   return kind == TokenKind::Identifier || kind == TokenKind::IntegerLiteral;
 }
 
+// csv-parser flushes in its noexcept writer destructor. Keep stream exceptions
+// disabled until the writer has been destroyed, then restore the caller's mask.
+class OutputExceptionMask {
+public:
+  explicit OutputExceptionMask(std::ostream& output)
+      : output_(output), mask_(output.exceptions()) {
+    output_.exceptions(std::ios::goodbit);
+  }
+  ~OutputExceptionMask() {
+    try { output_.exceptions(mask_); } catch (const std::ios_base::failure&) {}
+  }
+private:
+  std::ostream& output_;
+  std::ios::iostate mask_;
+};
+
 int WriteQueryResult(SQLite::Statement& query,
                      const std::string& format,
                      std::ostream& output,
@@ -215,9 +231,16 @@ int WriteQueryResult(SQLite::Statement& query,
 
   const std::vector<std::string> out_headers = sqlite::StatementColumnNames(query);
 
+  OutputExceptionMask exception_mask(output);
+  auto output_status = [&]() {
+    if (output.good()) return 0;
+    if (logger.error) logger.error("sql query: failed to write output.");
+    return 1;
+  };
+
   if (format == "csv") {
     stats.rows_processed += sqlite::WriteStatementRowsAsCsv(query, out_headers, output);
-    return 0;
+    return output_status();
   }
 
   if (format == "markdown") {
@@ -228,7 +251,8 @@ int WriteQueryResult(SQLite::Statement& query,
     }
 
     common::WriteMarkdownTable(output, out_headers, out_rows);
-    return 0;
+    output.flush();
+    return output_status();
   }
 
   if (logger.error) {
@@ -272,15 +296,14 @@ protected:
       return 1;
     }
 
-    sqlite::SqliteDb sdb = sqlite::OpenSqliteDb(MakeSqliteDbOpenOptions(options()));
-    if (!sqlite::LoadCsvIntoTableWithInferredAffinities(
-            [this]() -> csv::CSVReader& { return reader(); }, headers(), sdb.db(), table_name_text,
-            [this]() { return reset_reader() == 0; },
-            MakeCsvLoadOptions(options()), MakeSqliteLogCallbacks(logger()))) {
-      return 1;
-    }
-
     try {
+      sqlite::SqliteDb sdb = sqlite::OpenSqliteDb(MakeSqliteDbOpenOptions(options()));
+      if (!sqlite::LoadCsvIntoTableWithInferredAffinities(
+              [this]() -> csv::CSVReader& { return reader(); }, headers(), sdb.db(), table_name_text,
+              [this]() { return reset_reader() == 0; },
+              MakeCsvLoadOptions(options()), MakeSqliteLogCallbacks(logger()))) {
+        return 1;
+      }
       SQLite::Statement query(sdb.db(), query_text);
       return WriteQueryResult(query, format_, output(), stats(), logger());
     } catch (const SQLite::Exception& ex) {
