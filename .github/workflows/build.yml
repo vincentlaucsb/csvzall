@@ -96,7 +96,6 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER_LAUNCHER=${{ steps.compiler-cache.outputs.launcher }}
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ steps.compiler-cache.outputs.launcher }}
-          -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
           -DCSVZALL_ENABLE_COMPRESSED_INPUT=${{ matrix.compressed }}
 
       - name: Build
