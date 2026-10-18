@@ -723,6 +723,7 @@ set(CSVZALL_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/chart_schema.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/chart_spec.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/column_lookup.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/file_replace.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/gzip_stream.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/json_path.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/markdown_calendar.cpp

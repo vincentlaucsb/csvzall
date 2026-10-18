@@ -416,7 +416,7 @@ SQL notes:
 
 Workflow examples:
   csvzall json extract activities.json --map map.json > incoming.csv
-  csvzall merge store.csv incoming.csv --key id --in-place
+  csvzall merge store.csv incoming.csv --key id --in-place --create
   csvzall sql query --csv store.csv --format markdown --sql "SELECT substr(date,1,7) AS month, COUNT(*) AS days FROM data GROUP BY month"
   csvzall view store.csv
   csvzall heatmap store.csv --date date --start 2026-01-01 --end 2026-12-31 --title "Activity"
@@ -543,6 +543,7 @@ Examples:
   merge_cmd.add_epilog(R"(Input shape:
   existing.csv and incoming.csv must have exactly matching headers.
   --key names the required primary-key column.
+  existing.csv must exist unless --create is set.
 
 Output shape:
   Without --in-place, merged CSV is written to stdout.
@@ -553,10 +554,22 @@ Edge cases:
   Duplicate keys within existing fail.
   Duplicate keys within incoming fail.
   Incoming rows whose key already exists are skipped.
+  Without --create, a missing existing file fails, so a mistyped store path
+  is reported instead of silently starting a new store.
+  With --create, a missing existing file is treated as empty: the output is
+  incoming's header and rows, after the same key validation (duplicate keys
+  or a missing --key column still fail, and nothing is created). With
+  --in-place the store is created at the existing path via the same
+  temporary-file replace. If the existing file is present, --create has no
+  effect. A directory or unreadable file at the existing path still fails.
 
 Examples:
   csvzall merge activities.csv incoming.csv --key id > merged.csv
   csvzall merge activities.csv incoming.csv --key id --in-place
+
+Rerunnable import (first run creates the store, later runs merge into it):
+  csvzall json extract activities.json --map map.json > incoming.csv
+  csvzall merge store.csv incoming.csv --key id --in-place --create
 )");
   merge_cmd.add_argument("existing")
       .help("Existing CSV file path");
@@ -567,6 +580,10 @@ Examples:
       .required();
   merge_cmd.add_argument("--in-place")
       .help("Replace the existing CSV atomically after validation succeeds")
+      .default_value(false)
+      .implicit_value(true);
+  merge_cmd.add_argument("--create")
+      .help("Treat a missing existing CSV as empty and write incoming as the new store")
       .default_value(false)
       .implicit_value(true);
   merge_cmd.add_argument("--quiet")
@@ -861,7 +878,7 @@ Mapping example:
 
 Pipeline example:
   csvzall json extract todoist-activities.json --map todoist-map.json > todoist-activities.csv
-  csvzall merge activities.csv todoist-activities.csv --key event_id --in-place
+  csvzall merge activities.csv todoist-activities.csv --key event_id --in-place --create
   csvzall sql query --csv activities.csv --format markdown --sql "SELECT content, COUNT(*) FROM data GROUP BY content"
 )");
   json_cmd.add_argument("mode")
@@ -1244,6 +1261,7 @@ Examples:
         merge_cmd.get<std::string>("incoming"),
         merge_cmd.get<std::string>("--key"),
         merge_cmd.get<bool>("--in-place"),
+        merge_cmd.get<bool>("--create"),
         std::cout, BuildCallbacks(logger), ps);
     stats = FinishStats(ps, start);
     return rc;

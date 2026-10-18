@@ -43,7 +43,8 @@ tabular steps to csvzall:
 csvzall json extract todoist-activities.json --map todoist-map.json > incoming.csv
 
 # 2. Rerunnable keyed import: existing rows win, duplicates are skipped.
-csvzall merge activity-store.csv incoming.csv --key event_id --in-place
+#    --create starts the store from incoming on the first run.
+csvzall merge activity-store.csv incoming.csv --key event_id --in-place --create
 
 # 3. Inspect the source table in a browser when Markdown tables get cramped.
 csvzall view activity-store.csv
@@ -137,7 +138,7 @@ not a general JSON query command; it supports a small deterministic path subset:
 
 ```sh
 csvzall json extract todoist_activities.json --map todoist_activity_map.json > incoming.csv
-csvzall merge todoist_activity_store.csv incoming.csv --key event_id --in-place
+csvzall merge todoist_activity_store.csv incoming.csv --key event_id --in-place --create
 ```
 
 Optional, missing, and null values become empty CSV cells. Nested API payload
@@ -348,7 +349,7 @@ csvzall append existing.csv incoming.csv > combined.csv
 csvzall append existing.csv incoming.csv --in-place
 ```
 
-### `merge <existing.csv> <incoming.csv> --key <column> [--in-place]`
+### `merge <existing.csv> <incoming.csv> --key <column> [--in-place] [--create]`
 
 Merge incoming rows into an existing CSV for rerunnable local imports. Headers
 must match exactly. The key column must exist in both files. Duplicate keys
@@ -360,9 +361,21 @@ csvzall writes a temporary sibling file and replaces the original only after
 validation and output writing succeed. Added/skipped counts are reported on
 stderr unless `--quiet` is set.
 
+By default a missing existing file is an error, so a mistyped store path fails
+loudly. With `--create`, a missing existing file is treated as empty: the output
+is incoming's header and rows after the same key validation (duplicate or missing
+keys still fail and nothing is created). Combined with `--in-place`, the store is
+created at the existing path through the same temporary-file replace. When the
+existing file is present, `--create` changes nothing; a directory or unreadable
+file at that path still fails.
+
 ```sh
 csvzall merge activity-store.csv incoming.csv --key event_id > merged.csv
 csvzall merge activity-store.csv incoming.csv --key event_id --in-place
+
+# First run creates activity-store.csv; later runs merge into it.
+csvzall json extract activities.json --map map.json > incoming.csv
+csvzall merge activity-store.csv incoming.csv --key event_id --in-place --create
 ```
 
 ### `infer [input]`
