@@ -74,7 +74,7 @@ jobs:
           -DCMAKE_EXE_LINKER_FLAGS_DEBUG="--coverage"
 
       - name: Build
-        run: cmake --build build-coverage --config Debug
+        run: cmake --build build-coverage --config Debug --parallel 2 --target csvzall csvzall_tests
 
       - name: Test
         run: ctest --test-dir build-coverage -C Debug --output-on-failure
