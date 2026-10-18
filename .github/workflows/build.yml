@@ -12,6 +12,14 @@ on:
       - "LICENSE"
 
 jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Check version markers agree
+        run: node scripts/version.mjs check
+
   build:
     runs-on: ${{ matrix.os }}
     strategy:
