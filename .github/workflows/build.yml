@@ -23,6 +23,8 @@ jobs:
   build:
     name: ${{ matrix.compressed == 'ON' && format('build ({0})', matrix.os) || format('build ({0}, compressed OFF)', matrix.os) }}
     runs-on: ${{ matrix.os }}
+    env:
+      CMAKE_GENERATOR: ${{ matrix.os == 'windows-latest' && 'Ninja' || 'Unix Makefiles' }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -35,6 +37,10 @@ jobs:
       - uses: actions/checkout@v6.0.2
         with:
           submodules: true
+
+      - name: Set up MSVC for Ninja
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
       - name: Detect CMake toolchain cache key
         id: cmake-cache-key
@@ -52,6 +58,7 @@ jobs:
           $defaultGenerator = (cmake --help | Where-Object { $_ -match '^\* ' } | Select-Object -First 1)
           $defaultGenerator = $defaultGenerator -replace '^\*\s*', ''
           $defaultGenerator = ($defaultGenerator -split '\s+=\s+', 2)[0].Trim()
+          if ($env:CMAKE_GENERATOR) { $defaultGenerator = $env:CMAKE_GENERATOR }
 
           if ($env:RUNNER_OS -eq 'Windows') {
             $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -77,11 +84,33 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-cmake-fetchcontent-${{ steps.cmake-cache-key.outputs.id }}-
 
+      - name: Set up compiler cache
+        id: compiler-cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          toolchain: ${{ steps.cmake-cache-key.outputs.id }}
+          configuration: native-release-compressed-${{ matrix.compressed }}
+
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCSVZALL_ENABLE_COMPRESSED_INPUT=${{ matrix.compressed }}
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER_LAUNCHER=${{ steps.compiler-cache.outputs.launcher }}
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ steps.compiler-cache.outputs.launcher }}
+          -DCSVZALL_ENABLE_COMPRESSED_INPUT=${{ matrix.compressed }}
 
       - name: Build
-        run: cmake --build build --config Release --parallel --target csvzall csvzall_tests
+        # Bound Make concurrency on the macOS ARM runner's 7 GB RAM.
+        run: cmake --build build --config Release --parallel ${{ runner.os == 'macOS' && 2 || 4 }} --target csvzall csvzall_tests
+
+      - name: Report compiler cache statistics
+        if: always() && steps.compiler-cache.outcome == 'success'
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_OS -eq 'Windows') {
+            sccache --show-stats
+          } else {
+            ccache --show-stats
+          }
 
       - name: Test
         working-directory: build

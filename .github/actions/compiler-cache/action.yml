@@ -1,0 +1,69 @@
+name: Compiler cache
+description: Persist compiler results without restoring the build tree or test results
+inputs:
+  configuration:
+    description: Separate native feature variants and instrumented coverage builds
+    required: true
+  toolchain:
+    description: Compiler and generator identity
+    required: true
+outputs:
+  launcher:
+    description: CMake compiler launcher
+    value: ${{ steps.configure.outputs.launcher }}
+runs:
+  using: composite
+  steps:
+    - name: Install ccache (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y ccache
+
+    - name: Install ccache (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      env:
+        HOMEBREW_NO_AUTO_UPDATE: '1'
+      run: brew install ccache
+
+    - name: Install sccache (Windows)
+      if: runner.os == 'Windows'
+      uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      with:
+        version: v0.18.0
+
+    - name: Configure compiler cache
+      id: configure
+      shell: pwsh
+      run: |
+        $cacheDir = Join-Path $env:RUNNER_TEMP 'compiler-cache'
+        if ($env:RUNNER_OS -eq 'Windows') {
+          "SCCACHE_DIR=$cacheDir" >> $env:GITHUB_ENV
+          'SCCACHE_CACHE_SIZE=500M' >> $env:GITHUB_ENV
+          'launcher=sccache' >> $env:GITHUB_OUTPUT
+        } else {
+          "CCACHE_DIR=$cacheDir" >> $env:GITHUB_ENV
+          'CCACHE_MAXSIZE=500M' >> $env:GITHUB_ENV
+          'CCACHE_COMPILERCHECK=content' >> $env:GITHUB_ENV
+          'launcher=ccache' >> $env:GITHUB_OUTPUT
+        }
+
+    - name: Restore and save compiler results
+      uses: actions/cache@v5.0.5
+      with:
+        path: ${{ runner.temp }}/compiler-cache
+        # Fresh snapshots can grow across commits/reruns; restore compatible older ones.
+        key: compiler-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.toolchain }}-${{ inputs.configuration }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: |
+          compiler-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.toolchain }}-${{ inputs.configuration }}-
+
+    - name: Reset compiler cache statistics
+      shell: pwsh
+      run: |
+        if ($env:RUNNER_OS -eq 'Windows') {
+          sccache --zero-stats
+        } else {
+          ccache --zero-stats
+        }
