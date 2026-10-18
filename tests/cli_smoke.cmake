@@ -149,7 +149,7 @@ run_csvzall_case("sql query regexp from csv" 0 "alice" "" sql query --csv "${csv
 run_csvzall_case("append concatenates duplicate keys" 0 "bob duplicate" "" append "${append_existing_path}" "${append_incoming_path}")
 run_csvzall_case("merge skips existing stdout" 0 "cara" "added 1 row\\(s\\), skipped 1 row\\(s\\)" merge "${append_existing_path}" "${append_incoming_path}" --key id)
 set(merge_store_path "${CLI_TEST_DIR}/merge-store.csv")
-run_csvzall_case("merge missing store fails without create" 1 "" "Cannot open file" merge "${merge_store_path}" "${append_incoming_path}" --key id --in-place)
+run_csvzall_case("merge missing store fails without create" 1 "" "Cannot open file .*merge-store\\.csv" merge "${merge_store_path}" "${append_incoming_path}" --key id --in-place)
 if(EXISTS "${merge_store_path}")
   message(FATAL_ERROR "merge without --create created ${merge_store_path}")
 endif()

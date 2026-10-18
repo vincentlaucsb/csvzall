@@ -1,6 +1,7 @@
 #include "commands.hpp"
 
 #include "../common/column_lookup.hpp"
+#include "../common/file_replace.hpp"
 
 #include <csv.hpp>
 
@@ -11,13 +12,12 @@
 #include <unordered_set>
 #include <vector>
 
-#ifdef _WIN32
-#define NOMINMAX
-#include <windows.h>
-#endif
-
 namespace csvzall::pipeline::commands {
 namespace {
+
+using common::MoveIntoPlaceNoReplace;
+using common::ReplaceFileWith;
+using common::TempSiblingFor;
 
 csv::CSVFormat MakeFormat() {
   csv::CSVFormat format;
@@ -167,22 +167,17 @@ void RejectDirectory(const std::string& path, std::string_view label) {
   }
 }
 
-std::filesystem::path TempSiblingFor(const std::filesystem::path& existing_path) {
-  return existing_path.parent_path() /
-         (existing_path.filename().string() + ".csvzall.tmp");
-}
-
-void ReplaceExistingFile(const std::filesystem::path& temp_path,
-                         const std::filesystem::path& existing_path) {
-#ifdef _WIN32
-  if (!MoveFileExW(temp_path.wstring().c_str(),
-                   existing_path.wstring().c_str(),
-                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-    throw std::runtime_error("append: unable to replace original file atomically");
+// For merge --create: the temporary sibling is written next to the new store,
+// so its parent directory must already exist. Directories are never created.
+void RequireParentDirectory(const std::filesystem::path& store_path) {
+  const auto parent = store_path.parent_path();
+  if (parent.empty()) {
+    return;  // relative file name in the current directory
   }
-#else
-  std::filesystem::rename(temp_path, existing_path);
-#endif
+  std::error_code ec;
+  if (!std::filesystem::is_directory(parent, ec)) {
+    throw std::runtime_error("merge: parent directory does not exist: " + parent.string());
+  }
 }
 
 }  // namespace
@@ -225,7 +220,7 @@ int RunAppend(const std::string& existing_path,
       }
     }
 
-    ReplaceExistingFile(temp_path, existing_fs_path);
+    ReplaceFileWith(temp_path, existing_fs_path, "append");
     return 0;
   } catch (const std::exception& ex) {
     if (!temp_path.empty()) {
@@ -265,10 +260,16 @@ int RunMerge(const std::string& existing_path,
     const bool existing_present = !(create_missing && PathDoesNotExist(existing_path));
     if (existing_present) {
       RejectDirectory(existing_path, "existing");
+    } else if (in_place) {
+      RequireParentDirectory(existing_path);
     }
 
-    const auto incoming_headers = HeadersFor(incoming_path);
-    const auto existing_headers = existing_present ? HeadersFor(existing_path) : incoming_headers;
+    // Store present: read existing headers before incoming (unchanged order and
+    // diagnostics). Store missing: only incoming is read.
+    const auto existing_headers =
+        existing_present ? HeadersFor(existing_path) : HeadersFor(incoming_path);
+    const auto incoming_headers =
+        existing_present ? HeadersFor(incoming_path) : existing_headers;
     ValidateHeadersMatch(existing_headers, incoming_headers);
 
     const auto existing_keys = existing_present
@@ -313,7 +314,18 @@ int RunMerge(const std::string& existing_path,
       }
     }
 
-    ReplaceExistingFile(temp_path, existing_fs_path);
+    if (existing_present) {
+      ReplaceFileWith(temp_path, existing_fs_path, "merge");
+    } else {
+      // The store was missing when checked above; never overwrite a store that
+      // another process created while this run was writing.
+      try {
+        MoveIntoPlaceNoReplace(temp_path, existing_fs_path, "merge");
+      } catch (const common::TargetExistsError&) {
+        throw std::runtime_error("merge: " + existing_path +
+                                 " appeared while --create was running; rerun to merge into it");
+      }
+    }
     log_counts(added_count);
     return 0;
   } catch (const std::exception& ex) {

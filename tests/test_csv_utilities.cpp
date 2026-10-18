@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "../src/pipeline/common/file_replace.hpp"
 #include "../src/transform_pipeline.hpp"
 #include "common_test_utils.hpp"
 
@@ -345,7 +346,9 @@ TEST_CASE("merge: missing store without --create still fails") {
 TEST_CASE("merge --create: invalid incoming does not create the store") {
   const auto store = TempCsvPath("merge_create_invalid_store");
   const auto incoming = TempCsvPath("merge_create_invalid_incoming");
+  std::string error_msg;
   auto logger = tests::MakeNullLogger();
+  logger.error = [&](const std::string& msg) { error_msg = msg; };
 
   SECTION("duplicate keys") {
     std::filesystem::remove(store);
@@ -354,6 +357,7 @@ TEST_CASE("merge --create: invalid incoming does not create the store") {
     pipeline::RunStats stats;
     REQUIRE(pipeline::RunMerge(store.string(), incoming.string(), "id", true, true,
                                output, logger, stats) == 1);
+    REQUIRE(error_msg.find("duplicate key within incoming CSV: 1") != std::string::npos);
     REQUIRE_FALSE(std::filesystem::exists(store));
     REQUIRE_FALSE(std::filesystem::exists(store.string() + ".csvzall.tmp"));
   }
@@ -365,7 +369,92 @@ TEST_CASE("merge --create: invalid incoming does not create the store") {
     pipeline::RunStats stats;
     REQUIRE(pipeline::RunMerge(store.string(), incoming.string(), "id", true, true,
                                output, logger, stats) == 1);
+    REQUIRE(error_msg.find("key column 'id' not found") != std::string::npos);
     REQUIRE_FALSE(std::filesystem::exists(store));
+    REQUIRE_FALSE(std::filesystem::exists(store.string() + ".csvzall.tmp"));
+  }
+}
+
+TEST_CASE("merge --create --in-place: missing parent directory fails without creating it") {
+  const auto parent = std::filesystem::temp_directory_path() / "csvzall_merge_create_no_parent";
+  const auto store = parent / "store.csv";
+  const auto incoming = TempCsvPath("merge_create_no_parent_incoming");
+  std::filesystem::remove_all(parent);
+  WriteCsvFile(incoming, {"id", "name"}, {{"1", "alice"}});
+
+  std::ostringstream output;
+  std::string error_msg;
+  auto logger = tests::MakeNullLogger();
+  logger.error = [&](const std::string& msg) { error_msg = msg; };
+  pipeline::RunStats stats;
+
+  REQUIRE(pipeline::RunMerge(store.string(), incoming.string(), "id", true, true,
+                             output, logger, stats) == 1);
+  REQUIRE(error_msg == "merge: parent directory does not exist: " + parent.string());
+  REQUIRE_FALSE(std::filesystem::exists(parent));
+}
+
+TEST_CASE("merge: a directory at the existing path fails without --create") {
+  const auto dir = std::filesystem::temp_directory_path() / "csvzall_merge_plain_dir.csv";
+  const auto incoming = TempCsvPath("merge_plain_dir_incoming");
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directory(dir);
+  WriteCsvFile(incoming, {"id", "name"}, {{"1", "alice"}});
+
+  std::ostringstream output;
+  std::string error_msg;
+  auto logger = tests::MakeNullLogger();
+  logger.error = [&](const std::string& msg) { error_msg = msg; };
+  pipeline::RunStats stats;
+
+  REQUIRE(pipeline::RunMerge(dir.string(), incoming.string(), "id", true,
+                             output, logger, stats) == 1);
+  REQUIRE(error_msg ==
+          "merge: existing path is a directory, not a CSV file: " + dir.string());
+  REQUIRE(std::filesystem::is_empty(dir));
+  std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("file_replace: MoveIntoPlaceNoReplace never overwrites an existing target") {
+  const auto target = TempCsvPath("no_replace_target");
+  const auto temp = pipeline::common::TempSiblingFor(target);
+
+  SECTION("target appeared: move fails and both files are intact") {
+    WriteCsvFile(target, {"id"}, {{"someone else"}});
+    WriteCsvFile(temp, {"id"}, {{"ours"}});
+    const auto target_before = ReadText(target);
+    const auto temp_before = ReadText(temp);
+
+    REQUIRE_THROWS_AS(pipeline::common::MoveIntoPlaceNoReplace(temp, target, "merge"),
+                      pipeline::common::TargetExistsError);
+    REQUIRE(ReadText(target) == target_before);
+    REQUIRE(ReadText(temp) == temp_before);
+  }
+
+  SECTION("target missing: temp is moved into place") {
+    std::filesystem::remove(target);
+    WriteCsvFile(temp, {"id"}, {{"ours"}});
+    const auto temp_before = ReadText(temp);
+
+    pipeline::common::MoveIntoPlaceNoReplace(temp, target, "merge");
+    REQUIRE(ReadText(target) == temp_before);
+    REQUIRE_FALSE(std::filesystem::exists(temp));
+  }
+
+  std::filesystem::remove(target);
+  std::filesystem::remove(temp);
+}
+
+TEST_CASE("file_replace: ReplaceFileWith reports the label and target on failure") {
+  const auto missing_temp = TempCsvPath("replace_missing_temp");
+  const auto target = TempCsvPath("replace_target");
+  std::filesystem::remove(missing_temp);
+
+  try {
+    pipeline::common::ReplaceFileWith(missing_temp, target, "merge");
+    FAIL("expected ReplaceFileWith to throw");
+  } catch (const std::runtime_error& ex) {
+    REQUIRE(std::string(ex.what()) == "merge: unable to write " + target.string());
   }
 }
 
