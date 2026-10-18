@@ -447,6 +447,41 @@ TEST_CASE("charts run renders configured bar and line outputs") {
   CHECK(ReadText(root / "line.svg").find("class=\"line-series") != std::string::npos);
 }
 
+TEST_CASE("charts run rotates crowded monthly bar labels instead of overlapping them") {
+  // Regression for https://github.com/vincentlaucsb/csvzall/issues/20.
+  const auto root = TempDir("csvzall_charts_bar_crowded_labels");
+  std::string csv = "month,miles\n";
+  int year = 2024;
+  int month = 11;
+  for (int i = 0; i < 24; ++i) {
+    csv += std::to_string(year) + "-" + (month < 10 ? "0" : "") + std::to_string(month) + "," +
+           std::to_string(40 + i) + "\n";
+    if (++month > 12) {
+      month = 1;
+      ++year;
+    }
+  }
+  WriteText(root / "data.csv", csv);
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"monthly","type":"bar","input":"data.csv","output":"monthly.svg","options":{"label":"month","value":"miles","xLabel":"Month"}}]})");
+
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  const auto rc = csvzall::pipeline::RunCharts((root / "config.json").string(),
+                                               "", false, options, SilentLogger(), stats);
+
+  REQUIRE(rc == 0);
+  const auto svg = ReadText(root / "monthly.svg");
+  std::size_t rotated = 0;
+  for (auto pos = svg.find("bar-label-rotated"); pos != std::string::npos;
+       pos = svg.find("bar-label-rotated", pos + 1)) {
+    ++rotated;
+  }
+  CHECK(rotated == 24);
+  CHECK(svg.find(">2024-11</text>") != std::string::npos);
+  CHECK(svg.find(">2026-10</text>") != std::string::npos);
+}
+
 TEST_CASE("charts run renders configured multi-value heatmap bar and line outputs") {
   const auto root = TempDir("csvzall_charts_multi_value");
   WriteText(root / "training.csv",

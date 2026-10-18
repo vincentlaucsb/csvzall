@@ -318,7 +318,7 @@ if(CSVZALL_NLOHMANN_JSON_TARGET STREQUAL "")
 endif()
 
 set(SVGPLOT_ROOT "" CACHE PATH "Path to svgplot checkout or single-header distribution")
-set(CSVZALL_SVGPLOT_GIT_TAG "0.4.0"
+set(CSVZALL_SVGPLOT_GIT_TAG "0.4.1"
     CACHE STRING "svgplot revision used by FetchContent fallback")
 set(CSVZALL_HAVE_SVGPLOT OFF)
 set(CSVZALL_SVGPLOT_TARGET "")
@@ -382,6 +382,7 @@ function(csvzall_try_svgplot_root root_path source_description)
         training_heatmap_svg
         multi_series_line_svg
         stacked_bar_svg
+        monthly_bar_svg
         svgplot_tests)
       if(TARGET ${_csvzall_svgplot_aux_target})
         set_target_properties(${_csvzall_svgplot_aux_target} PROPERTIES EXCLUDE_FROM_ALL TRUE)
