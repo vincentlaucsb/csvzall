@@ -73,7 +73,19 @@ int RunMerge(const std::string& existing_path,
              const LoggerCallbacks& logger,
              RunStats& stats) {
   return commands::RunMerge(existing_path, incoming_path, key_column, in_place,
-                            output, logger, stats);
+                            false, output, logger, stats);
+}
+
+int RunMerge(const std::string& existing_path,
+             const std::string& incoming_path,
+             const std::string& key_column,
+             bool in_place,
+             bool create_missing,
+             std::ostream& output,
+             const LoggerCallbacks& logger,
+             RunStats& stats) {
+  return commands::RunMerge(existing_path, incoming_path, key_column, in_place,
+                            create_missing, output, logger, stats);
 }
 
 int RunView(const std::string& input_path,

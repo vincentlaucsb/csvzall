@@ -121,10 +121,14 @@ int RunAppend(const std::string& existing_path,
               const LoggerCallbacks& logger,
               RunStats& stats);
 
+// create_missing: treat a nonexistent existing_path as an empty store whose
+// header is the incoming header (merge --create). Directories and unreadable
+// files still fail.
 int RunMerge(const std::string& existing_path,
              const std::string& incoming_path,
              const std::string& key_column,
              bool in_place,
+             bool create_missing,
              std::ostream& output,
              const LoggerCallbacks& logger,
              RunStats& stats);

@@ -112,7 +112,11 @@ void WriteConcatenated(const std::string& existing_path,
   writer.flush();
 }
 
+// Writes existing rows (when existing_present) followed by incoming rows whose
+// key is not in existing_keys. existing_present is false only for merge
+// --create when the existing file does not exist yet.
 std::size_t WriteMerged(const std::string& existing_path,
+                        bool existing_present,
                         const std::string& incoming_path,
                         const std::vector<std::string>& headers,
                         const std::string& key_column,
@@ -122,10 +126,12 @@ std::size_t WriteMerged(const std::string& existing_path,
   auto writer = csv::make_csv_writer(output).set_auto_flush(false);
   writer << headers;
 
-  auto existing_reader = OpenReader(existing_path);
-  for (auto& row : existing_reader) {
-    writer << std::vector<std::string>(row);
-    ++stats.rows_processed;
+  if (existing_present) {
+    auto existing_reader = OpenReader(existing_path);
+    for (auto& row : existing_reader) {
+      writer << std::vector<std::string>(row);
+      ++stats.rows_processed;
+    }
   }
 
   const auto key_index = RequiredKeyIndex(headers, key_column, "incoming");
@@ -142,6 +148,23 @@ std::size_t WriteMerged(const std::string& existing_path,
 
   writer.flush();
   return added_count;
+}
+
+// True only when nothing exists at path (not even a dangling symlink).
+// Directories, unreadable files, and other status errors are left for the
+// normal open path to report.
+bool PathDoesNotExist(const std::string& path) {
+  std::error_code ec;
+  const auto status = std::filesystem::symlink_status(path, ec);
+  return status.type() == std::filesystem::file_type::not_found;
+}
+
+void RejectDirectory(const std::string& path, std::string_view label) {
+  std::error_code ec;
+  if (std::filesystem::is_directory(path, ec)) {
+    throw std::runtime_error("merge: " + std::string(label) +
+                             " path is a directory, not a CSV file: " + path);
+  }
 }
 
 std::filesystem::path TempSiblingFor(const std::filesystem::path& existing_path) {
@@ -220,6 +243,7 @@ int RunMerge(const std::string& existing_path,
              const std::string& incoming_path,
              const std::string& key_column,
              bool in_place,
+             bool create_missing,
              std::ostream& output,
              const LoggerCallbacks& logger,
              RunStats& stats) {
@@ -235,22 +259,42 @@ int RunMerge(const std::string& existing_path,
       throw std::runtime_error("merge: --key is required");
     }
 
-    const auto existing_headers = HeadersFor(existing_path);
+    // --create treats a nonexistent existing file as an empty store with the
+    // incoming header. Every other case (including a directory or unreadable
+    // file at that path) goes through the normal existing-file validation.
+    const bool existing_present = !(create_missing && PathDoesNotExist(existing_path));
+    if (existing_present) {
+      RejectDirectory(existing_path, "existing");
+    }
+
     const auto incoming_headers = HeadersFor(incoming_path);
+    const auto existing_headers = existing_present ? HeadersFor(existing_path) : incoming_headers;
     ValidateHeadersMatch(existing_headers, incoming_headers);
 
-    const auto existing_keys = ReadExistingKeys(existing_path, existing_headers, key_column);
+    const auto existing_keys = existing_present
+                                   ? ReadExistingKeys(existing_path, existing_headers, key_column)
+                                   : std::unordered_set<std::string>{};
     const std::size_t skipped_count =
         ValidateIncomingKeys(incoming_path, incoming_headers, key_column, existing_keys);
 
+    const auto log_counts = [&](std::size_t added_count) {
+      if (!logger.info) {
+        return;
+      }
+      std::string prefix = "merge: ";
+      if (!existing_present) {
+        prefix += in_place ? "created " + existing_path + " from incoming; "
+                           : existing_path + " does not exist; treated as empty; ";
+      }
+      logger.info(prefix + "added " + std::to_string(added_count) +
+                  " row(s), skipped " + std::to_string(skipped_count) + " row(s)");
+    };
+
     std::size_t added_count = 0;
     if (!in_place) {
-      added_count = WriteMerged(existing_path, incoming_path, existing_headers, key_column,
-                                existing_keys, output, stats);
-      if (logger.info) {
-        logger.info("merge: added " + std::to_string(added_count) +
-                    " row(s), skipped " + std::to_string(skipped_count) + " row(s)");
-      }
+      added_count = WriteMerged(existing_path, existing_present, incoming_path, existing_headers,
+                                key_column, existing_keys, output, stats);
+      log_counts(added_count);
       return 0;
     }
 
@@ -261,8 +305,8 @@ int RunMerge(const std::string& existing_path,
       if (!temp.is_open()) {
         throw std::runtime_error("merge: unable to open temporary file: " + temp_path.string());
       }
-      added_count = WriteMerged(existing_path, incoming_path, existing_headers, key_column,
-                                existing_keys, temp, stats);
+      added_count = WriteMerged(existing_path, existing_present, incoming_path, existing_headers,
+                                key_column, existing_keys, temp, stats);
       temp.close();
       if (!temp) {
         throw std::runtime_error("merge: failed writing temporary file: " + temp_path.string());
@@ -270,10 +314,7 @@ int RunMerge(const std::string& existing_path,
     }
 
     ReplaceExistingFile(temp_path, existing_fs_path);
-    if (logger.info) {
-      logger.info("merge: added " + std::to_string(added_count) +
-                  " row(s), skipped " + std::to_string(skipped_count) + " row(s)");
-    }
+    log_counts(added_count);
     return 0;
   } catch (const std::exception& ex) {
     if (!temp_path.empty()) {

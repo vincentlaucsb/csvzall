@@ -66,6 +66,18 @@ int RunMerge(const std::string& existing_path,
              const LoggerCallbacks& logger,
              RunStats& stats);
 
+/// Same as RunMerge above; when create_missing is true, a nonexistent
+/// existing_path is treated as an empty store with the incoming header
+/// (merge --create). Directories and unreadable files still fail.
+int RunMerge(const std::string& existing_path,
+             const std::string& incoming_path,
+             const std::string& key_column,
+             bool in_place,
+             bool create_missing,
+             std::ostream& output,
+             const LoggerCallbacks& logger,
+             RunStats& stats);
+
 int RunView(const std::string& input_path,
             std::ostream& output,
             const RunOptions& options,

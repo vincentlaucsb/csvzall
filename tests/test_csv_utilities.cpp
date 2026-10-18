@@ -261,6 +261,164 @@ TEST_CASE("merge --in-place: updates only after validation succeeds") {
   REQUIRE(ReadText(existing) == original);
 }
 
+TEST_CASE("merge --create --in-place: creates a missing store, then reruns merge normally") {
+  const auto store = TempCsvPath("merge_create_store");
+  const auto incoming = TempCsvPath("merge_create_incoming");
+  std::filesystem::remove(store);
+  WriteCsvFile(incoming, {"id", "name"}, {{"1", "alice"}, {"2", "bob"}});
+
+  std::ostringstream output;
+  std::string info_msg;
+  auto logger = tests::MakeNullLogger();
+  logger.info = [&](const std::string& msg) { info_msg = msg; };
+
+  {
+    pipeline::RunStats stats;
+    REQUIRE(pipeline::RunMerge(store.string(), incoming.string(), "id", true, true,
+                               output, logger, stats) == 0);
+    REQUIRE(output.str().empty());
+    REQUIRE(tests::ParseCsv(ReadText(store)) ==
+            std::vector<std::vector<std::string>>{
+                {"id", "name"}, {"1", "alice"}, {"2", "bob"}});
+    REQUIRE(info_msg.find("created") != std::string::npos);
+    REQUIRE(info_msg.find("added 2") != std::string::npos);
+    REQUIRE_FALSE(std::filesystem::exists(store.string() + ".csvzall.tmp"));
+  }
+
+  WriteCsvFile(incoming, {"id", "name"}, {{"2", "bob again"}, {"3", "cara"}});
+  {
+    pipeline::RunStats stats;
+    REQUIRE(pipeline::RunMerge(store.string(), incoming.string(), "id", true, true,
+                               output, logger, stats) == 0);
+    REQUIRE(tests::ParseCsv(ReadText(store)) ==
+            std::vector<std::vector<std::string>>{
+                {"id", "name"}, {"1", "alice"}, {"2", "bob"}, {"3", "cara"}});
+    REQUIRE(info_msg.find("created") == std::string::npos);
+    REQUIRE(info_msg.find("added 1") != std::string::npos);
+    REQUIRE(info_msg.find("skipped 1") != std::string::npos);
+  }
+}
+
+TEST_CASE("merge --create: writes incoming to stdout when the store is missing") {
+  const auto store = TempCsvPath("merge_create_stdout_store");
+  const auto incoming = TempCsvPath("merge_create_stdout_incoming");
+  std::filesystem::remove(store);
+  WriteCsvFile(incoming, {"id", "name"}, {{"1", "alice"}});
+
+  std::ostringstream output;
+  auto logger = tests::MakeNullLogger();
+  pipeline::RunStats stats;
+
+  REQUIRE(pipeline::RunMerge(store.string(), incoming.string(), "id", false, true,
+                             output, logger, stats) == 0);
+  REQUIRE(tests::ParseCsv(output.str()) ==
+          std::vector<std::vector<std::string>>{{"id", "name"}, {"1", "alice"}});
+  REQUIRE_FALSE(std::filesystem::exists(store));
+}
+
+TEST_CASE("merge: missing store without --create still fails") {
+  const auto store = TempCsvPath("merge_no_create_store");
+  const auto incoming = TempCsvPath("merge_no_create_incoming");
+  std::filesystem::remove(store);
+  WriteCsvFile(incoming, {"id", "name"}, {{"1", "alice"}});
+
+  std::ostringstream output;
+  std::string error_msg;
+  auto logger = tests::MakeNullLogger();
+  logger.error = [&](const std::string& msg) { error_msg = msg; };
+
+  {
+    pipeline::RunStats stats;
+    REQUIRE(pipeline::RunMerge(store.string(), incoming.string(), "id", true,
+                               output, logger, stats) == 1);
+  }
+  {
+    pipeline::RunStats stats;
+    REQUIRE(pipeline::RunMerge(store.string(), incoming.string(), "id", true, false,
+                               output, logger, stats) == 1);
+  }
+  REQUIRE_FALSE(error_msg.empty());
+  REQUIRE(output.str().empty());
+  REQUIRE_FALSE(std::filesystem::exists(store));
+}
+
+TEST_CASE("merge --create: invalid incoming does not create the store") {
+  const auto store = TempCsvPath("merge_create_invalid_store");
+  const auto incoming = TempCsvPath("merge_create_invalid_incoming");
+  auto logger = tests::MakeNullLogger();
+
+  SECTION("duplicate keys") {
+    std::filesystem::remove(store);
+    WriteCsvFile(incoming, {"id", "name"}, {{"1", "alice"}, {"1", "again"}});
+    std::ostringstream output;
+    pipeline::RunStats stats;
+    REQUIRE(pipeline::RunMerge(store.string(), incoming.string(), "id", true, true,
+                               output, logger, stats) == 1);
+    REQUIRE_FALSE(std::filesystem::exists(store));
+    REQUIRE_FALSE(std::filesystem::exists(store.string() + ".csvzall.tmp"));
+  }
+
+  SECTION("missing key column") {
+    std::filesystem::remove(store);
+    WriteCsvFile(incoming, {"event_id", "name"}, {{"1", "alice"}});
+    std::ostringstream output;
+    pipeline::RunStats stats;
+    REQUIRE(pipeline::RunMerge(store.string(), incoming.string(), "id", true, true,
+                               output, logger, stats) == 1);
+    REQUIRE_FALSE(std::filesystem::exists(store));
+  }
+}
+
+TEST_CASE("merge --create: existing store is merged exactly as without --create") {
+  const auto store = TempCsvPath("merge_create_existing_store");
+  const auto incoming = TempCsvPath("merge_create_existing_incoming");
+  auto logger = tests::MakeNullLogger();
+
+  SECTION("merges normally") {
+    WriteCsvFile(store, {"id", "name"}, {{"1", "old"}});
+    WriteCsvFile(incoming, {"id", "name"}, {{"1", "overlap"}, {"2", "new"}});
+    std::ostringstream output;
+    pipeline::RunStats stats;
+    REQUIRE(pipeline::RunMerge(store.string(), incoming.string(), "id", true, true,
+                               output, logger, stats) == 0);
+    REQUIRE(tests::ParseCsv(ReadText(store)) ==
+            std::vector<std::vector<std::string>>{
+                {"id", "name"}, {"1", "old"}, {"2", "new"}});
+  }
+
+  SECTION("header mismatch still fails and leaves the store unchanged") {
+    WriteCsvFile(store, {"id", "name"}, {{"1", "old"}});
+    WriteCsvFile(incoming, {"id", "title"}, {{"2", "new"}});
+    const auto original = ReadText(store);
+    std::ostringstream output;
+    pipeline::RunStats stats;
+    REQUIRE(pipeline::RunMerge(store.string(), incoming.string(), "id", true, true,
+                               output, logger, stats) == 1);
+    REQUIRE(ReadText(store) == original);
+  }
+}
+
+TEST_CASE("merge --create: a directory at the existing path still fails") {
+  const auto dir = std::filesystem::temp_directory_path() / "csvzall_merge_create_dir.csv";
+  const auto incoming = TempCsvPath("merge_create_dir_incoming");
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directory(dir);
+  WriteCsvFile(incoming, {"id", "name"}, {{"1", "alice"}});
+
+  std::ostringstream output;
+  std::string error_msg;
+  auto logger = tests::MakeNullLogger();
+  logger.error = [&](const std::string& msg) { error_msg = msg; };
+  pipeline::RunStats stats;
+
+  REQUIRE(pipeline::RunMerge(dir.string(), incoming.string(), "id", true, true,
+                             output, logger, stats) == 1);
+  REQUIRE(error_msg.find("directory") != std::string::npos);
+  REQUIRE(std::filesystem::is_directory(dir));
+  REQUIRE(std::filesystem::is_empty(dir));
+  std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("append --in-place: leaves original unchanged when validation fails") {
   const auto existing = TempCsvPath("append_existing_inplace_fail");
   const auto incoming = TempCsvPath("append_incoming_inplace_fail");
