@@ -7,7 +7,9 @@
 #include <string>
 #include <vector>
 
+#ifdef CSVZALL_HAVE_COMPRESSED_INPUT
 #include <zlib.h>
+#endif
 
 #include "../src/head.hpp"
 #include "../src/pipeline_types.hpp"
@@ -56,6 +58,7 @@ std::size_t CountSeparatorColumns(const std::string& output) {
   return 0;
 }
 
+#ifdef CSVZALL_HAVE_COMPRESSED_INPUT
 std::filesystem::path WriteGzipCsv(const std::string& csv_text) {
   auto path = std::filesystem::temp_directory_path() /
               std::filesystem::path("csvzall_head_test.csv.gz");
@@ -152,6 +155,8 @@ std::filesystem::path WriteStoredZip(std::vector<ZipTestEntry> entries,
   return path;
 }
 
+#endif
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -180,6 +185,7 @@ TEST_CASE("Head: CSV comma-separated") {
   REQUIRE(table[2][0] == "bob");
 }
 
+#ifdef CSVZALL_HAVE_COMPRESSED_INPUT
 TEST_CASE("Head: gzip CSV") {
   const std::string input =
     "name,value,active\n"
@@ -273,6 +279,7 @@ TEST_CASE("Head: explicit ZIP entry selects one file from multi-file archive") {
 }
 
 // ---------------------------------------------------------------------------
+#endif
 // TSV (tab-separated)
 // ---------------------------------------------------------------------------
 TEST_CASE("Head: TSV tab-separated") {

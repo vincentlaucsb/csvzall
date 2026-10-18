@@ -6,6 +6,7 @@
 #include <SQLiteCpp/SQLiteCpp.h>
 
 #include <filesystem>
+#include <memory>
 #include <string>
 
 namespace csvzall::pipeline::commands {
@@ -57,7 +58,15 @@ protected:
       db_path = DeriveDatabasePath(input_path_);
     }
 
-    if (std::filesystem::exists(db_path)) {
+    std::error_code path_error;
+    const bool destination_exists = std::filesystem::exists(db_path, path_error);
+    if (path_error) {
+      if (logger().error) {
+        logger().error("sql: cannot inspect destination: " + db_path + ": " + path_error.message());
+      }
+      return 1;
+    }
+    if (destination_exists) {
       if (logger().error) {
         logger().error("sql: destination already exists: " + db_path +
                        ". Remove it first or choose a different --dest path.");
@@ -66,30 +75,26 @@ protected:
     }
 
     try {
-      SQLite::Database db(db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
-      bool committed = false;
-      auto cleanup = [&]() {
-        if (!committed) {
-          std::error_code ec;
-          std::filesystem::remove(db_path, ec);
-        }
-      };
+      auto db = std::make_unique<SQLite::Database>(
+          db_path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
 
       if (!sqlite::LoadCsvIntoTableWithInferredAffinities(
-              [this]() -> csv::CSVReader& { return reader(); }, headers(), db, table_name_,
+              [this]() -> csv::CSVReader& { return reader(); }, headers(), *db, table_name_,
               [this]() { return reset_reader() == 0; },
               MakeCsvLoadOptions(options()), MakeSqliteLogCallbacks(logger()))) {
-        cleanup();
+        // Windows cannot unlink an open SQLite database. Close before cleanup.
+        db.reset();
+        std::error_code ec;
+        std::filesystem::remove(db_path, ec);
         return 1;
       }
 
-      SQLite::Statement count_stmt(db, "SELECT COUNT(*) FROM \"" + table_name_ + "\"");
+      SQLite::Statement count_stmt(*db, "SELECT COUNT(*) FROM " + sqlite::QuoteIdentifier(table_name_));
       if (count_stmt.executeStep()) {
         stats().rows_processed =
             static_cast<std::uint64_t>(count_stmt.getColumn(0).getInt64());
       }
 
-      committed = true;
       if (logger().verbose) {
         logger().verbose("sql: wrote " + std::to_string(stats().rows_processed) +
                          " rows to " + db_path);

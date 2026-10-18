@@ -14,6 +14,7 @@ add_executable(csvzall_tests
   test_head.cpp
   test_sql_query.cpp
   test_sql_export.cpp
+  test_sql_edges.cpp
   test_sqlite_db.cpp
   test_postgres_schema.cpp
   test_json_extract.cpp
@@ -89,5 +90,6 @@ add_test(
     ${CMAKE_COMMAND}
     -DCSVZALL_EXE=$<TARGET_FILE:csvzall>
     -DCSVZALL_HAVE_SVGPLOT=$<BOOL:${CSVZALL_HAVE_SVGPLOT}>
+    -DCSVZALL_HAVE_COMPRESSED_INPUT=$<BOOL:${CSVZALL_ENABLE_COMPRESSED_INPUT}>
     -DCLI_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-smoke
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_smoke.cmake)

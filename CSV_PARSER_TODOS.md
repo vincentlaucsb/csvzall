@@ -147,3 +147,13 @@ for csv-parser follow-ups, not a committed roadmap.
   and `end`, plus caller-provided output storage. Lookahead/lookback then stays
   inside the callback as ordinary pointer inspection, which works for UTF-8 byte
   sequences without making the core parser Unicode-aware.
+
+
+## Writer exception safety
+
+- SQL query failure tests use output streams with exception masks enabled.
+  `DelimWriter` flushes from its implicitly `noexcept` destructor, so a failed
+  write can terminate the process while unwinding. csvzall temporarily disables
+  stream exceptions until the writer is destroyed and then checks stream state.
+  Consider an explicit close/finish API that reports output failure, plus a
+  destructor that cannot throw even when the caller enables stream exceptions.

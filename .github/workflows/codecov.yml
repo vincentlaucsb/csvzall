@@ -88,9 +88,16 @@ jobs:
           --exclude 'build-coverage/.*'
           --exclude-unreachable-branches
           --exclude-throw-branches
+          --txt-summary
           --xml-pretty
           --output coverage.xml
           build-coverage
+
+      - name: Save coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6.0.1
