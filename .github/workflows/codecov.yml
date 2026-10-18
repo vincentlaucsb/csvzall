@@ -67,10 +67,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-cmake-fetchcontent-${{ steps.cmake-cache-key.outputs.id }}-
 
+      - name: Set up compiler cache
+        id: compiler-cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          toolchain: ${{ steps.cmake-cache-key.outputs.id }}
+          configuration: coverage-debug
+
       - name: Configure CMake
         run: >
           cmake -S . -B build-coverage
           -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER_LAUNCHER=${{ steps.compiler-cache.outputs.launcher }}
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ steps.compiler-cache.outputs.launcher }}
           -DCSVZALL_CXX_STANDARD=23
           -DCSVZALL_ENABLE_POSTGRESQL=OFF
           -DCSVZALL_ENABLE_KEYCHAIN=OFF
@@ -84,6 +93,10 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build-coverage -C Debug --output-on-failure
+
+      - name: Report compiler cache statistics
+        if: always() && steps.compiler-cache.outcome == 'success'
+        run: ccache --show-stats
 
       - name: Generate coverage report
         run: >
