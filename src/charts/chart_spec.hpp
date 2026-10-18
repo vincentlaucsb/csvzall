@@ -13,7 +13,10 @@ struct ChartValueSpec {
   std::string color;
 };
 
+// `sql`, when set, is a SELECT against SQLite table `data` loaded from the
+// chart input; the chart's column options then name result columns.
 struct HeatmapSpec {
+  std::string sql;
   std::string date_column = "date";
   std::string value_column;
   std::vector<ChartValueSpec> values;
@@ -26,6 +29,7 @@ struct HeatmapSpec {
 };
 
 struct BarSpec {
+  std::string sql;
   std::string label_column;
   std::string value_column;
   std::vector<ChartValueSpec> values;
@@ -37,6 +41,7 @@ struct BarSpec {
 };
 
 struct LineSpec {
+  std::string sql;
   std::string x_column;
   std::string y_column;
   std::vector<ChartValueSpec> values;
@@ -64,10 +69,20 @@ struct ChartSpec {
   MarkdownTableSpec markdown_table;
 };
 
+// A chart entry that failed to parse. `id` is empty when the entry has no
+// readable string id.
+struct ChartConfigError {
+  std::size_t index = 0;
+  std::string id;
+  std::string message;
+};
+
 struct ChartConfig {
   std::filesystem::path path;
   std::filesystem::path root;
   std::vector<ChartSpec> charts;
+  // Only populated by LoadChartConfigAllowingInvalidCharts.
+  std::vector<ChartConfigError> invalid_charts;
 };
 
 ChartSpec MakeHeatmapChartSpec(std::string id,
@@ -93,19 +108,25 @@ ChartSpec MakeMarkdownTableChartSpec(std::string id,
 
 std::filesystem::path DefaultChartConfigPath();
 std::filesystem::path ResolveChartConfigRoot(const std::filesystem::path& config_path);
+// Throws on the first invalid chart entry.
 ChartConfig LoadChartConfig(const std::filesystem::path& config_path);
+// Throws only for config-level errors (unreadable JSON, bad top-level shape);
+// invalid chart entries are skipped and recorded in `invalid_charts`.
+ChartConfig LoadChartConfigAllowingInvalidCharts(const std::filesystem::path& config_path);
 
 }  // namespace csvzall::charts
 
 namespace csvzall::pipeline::common {
 using ::csvzall::charts::BarSpec;
 using ::csvzall::charts::ChartConfig;
+using ::csvzall::charts::ChartConfigError;
 using ::csvzall::charts::ChartSpec;
 using ::csvzall::charts::ChartValueSpec;
 using ::csvzall::charts::DefaultChartConfigPath;
 using ::csvzall::charts::HeatmapSpec;
 using ::csvzall::charts::LineSpec;
 using ::csvzall::charts::LoadChartConfig;
+using ::csvzall::charts::LoadChartConfigAllowingInvalidCharts;
 using ::csvzall::charts::MakeBarChartSpec;
 using ::csvzall::charts::MakeHeatmapChartSpec;
 using ::csvzall::charts::MakeLineChartSpec;

@@ -227,6 +227,7 @@ HeatmapSpec ParseHeatmapOptions(simdjson::dom::object options,
                           context + ".options");
 
   HeatmapSpec spec;
+  spec.sql = OptionalString(options, "sql", "", context + ".options");
   spec.date_column = OptionalString(options, "date", "date", context + ".options");
   spec.value_column = OptionalString(options, "value", "", context + ".options");
   spec.values = OptionalValues(options, "values", context + ".options");
@@ -252,6 +253,7 @@ BarSpec ParseBarOptions(simdjson::dom::object options,
                           context + ".options");
 
   BarSpec spec;
+  spec.sql = OptionalString(options, "sql", "", context + ".options");
   spec.label_column = RequireString(options, "label", context + ".options");
   spec.value_column = OptionalString(options, "value", "", context + ".options");
   spec.values = OptionalValues(options, "values", context + ".options");
@@ -270,6 +272,7 @@ LineSpec ParseLineOptions(simdjson::dom::object options,
                           context + ".options");
 
   LineSpec spec;
+  spec.sql = OptionalString(options, "sql", "", context + ".options");
   spec.x_column = RequireString(options, "x", context + ".options");
   spec.y_column = OptionalString(options, "y", "", context + ".options");
   spec.values = OptionalValues(options, "values", context + ".options");
@@ -380,7 +383,63 @@ std::filesystem::path ResolveChartConfigRoot(const std::filesystem::path& config
   return parent;
 }
 
-ChartConfig LoadChartConfig(const std::filesystem::path& config_path) {
+namespace {
+
+ChartSpec ParseChartEntry(simdjson::dom::element chart_element,
+                          const std::filesystem::path& root,
+                          const std::string& context) {
+  simdjson::dom::object chart_object;
+  const auto chart_error = chart_element.get_object().get(chart_object);
+  if (chart_error) {
+    throw std::runtime_error(context + " must be an object");
+  }
+
+  static const std::set<std::string_view> kChartAllowed{
+      "id", "type", "input", "output", "options", "runOnSave"};
+  RejectUnknownKeys(chart_object, kChartAllowed, context);
+
+  const auto id = RequireString(chart_object, "id", context);
+  const auto type = RequireString(chart_object, "type", context);
+  if (!IsKnownChartType(type)) {
+    throw std::runtime_error(context + ": unknown chart type '" + type + "'");
+  }
+
+  const auto input = ResolveAgainstRoot(
+      root, std::filesystem::path(RequireString(chart_object, "input", context)));
+
+  std::optional<std::filesystem::path> output;
+  if (const auto output_value = OptionalField(chart_object, "output", context)) {
+    output = ResolveAgainstRoot(
+        root, std::filesystem::path(AsString(*output_value, "output", context)));
+  }
+
+  const auto options = RequireObject(RequireField(chart_object, "options", context),
+                                     "options", context);
+  const auto run_on_save = OptionalBool(chart_object, "runOnSave", false, context);
+  if (type == "heatmap") {
+    return MakeHeatmapChartSpec(
+        id, input, output, run_on_save, ParseHeatmapOptions(options, context));
+  }
+  if (type == "bar") {
+    return MakeBarChartSpec(id, input, output, run_on_save, ParseBarOptions(options, context));
+  }
+  if (type == "line") {
+    return MakeLineChartSpec(id, input, output, run_on_save, ParseLineOptions(options, context));
+  }
+  return MakeMarkdownTableChartSpec(
+      id, input, output, run_on_save, ParseMarkdownTableOptions(options, context));
+}
+
+std::string ChartEntryId(simdjson::dom::element chart_element) {
+  std::string_view id;
+  if (chart_element.is_object() && !chart_element["id"].get_string().get(id)) {
+    return std::string(id);
+  }
+  return {};
+}
+
+ChartConfig LoadChartConfigImpl(const std::filesystem::path& config_path,
+                                bool allow_invalid_charts) {
   const auto absolute_config_path = ResolveConfigPath(config_path);
   if (!std::filesystem::exists(absolute_config_path)) {
     throw std::runtime_error("config file not found: " + absolute_config_path.string());
@@ -417,52 +476,28 @@ ChartConfig LoadChartConfig(const std::filesystem::path& config_path) {
   std::size_t index = 0;
   for (simdjson::dom::element chart_element : charts_array) {
     const std::string context = "charts[" + std::to_string(index) + "]";
+    try {
+      config.charts.push_back(ParseChartEntry(chart_element, config.root, context));
+    } catch (const std::exception& ex) {
+      if (!allow_invalid_charts) {
+        throw;
+      }
+      config.invalid_charts.push_back({index, ChartEntryId(chart_element), ex.what()});
+    }
     ++index;
-
-    simdjson::dom::object chart_object;
-    const auto chart_error = chart_element.get_object().get(chart_object);
-    if (chart_error) {
-      throw std::runtime_error(context + " must be an object");
-    }
-
-    static const std::set<std::string_view> kChartAllowed{
-        "id", "type", "input", "output", "options", "runOnSave"};
-    RejectUnknownKeys(chart_object, kChartAllowed, context);
-
-    const auto id = RequireString(chart_object, "id", context);
-    const auto type = RequireString(chart_object, "type", context);
-    if (!IsKnownChartType(type)) {
-      throw std::runtime_error(context + ": unknown chart type '" + type + "'");
-    }
-
-    const auto input = ResolveAgainstRoot(
-        config.root, std::filesystem::path(RequireString(chart_object, "input", context)));
-
-    std::optional<std::filesystem::path> output;
-    if (const auto output_value = OptionalField(chart_object, "output", context)) {
-      output = ResolveAgainstRoot(
-          config.root, std::filesystem::path(AsString(*output_value, "output", context)));
-    }
-
-    const auto options = RequireObject(RequireField(chart_object, "options", context),
-                                       "options", context);
-    const auto run_on_save = OptionalBool(chart_object, "runOnSave", false, context);
-    if (type == "heatmap") {
-      config.charts.push_back(MakeHeatmapChartSpec(
-          id, input, output, run_on_save, ParseHeatmapOptions(options, context)));
-    } else if (type == "bar") {
-      config.charts.push_back(MakeBarChartSpec(
-          id, input, output, run_on_save, ParseBarOptions(options, context)));
-    } else if (type == "line") {
-      config.charts.push_back(MakeLineChartSpec(
-          id, input, output, run_on_save, ParseLineOptions(options, context)));
-    } else {
-      config.charts.push_back(MakeMarkdownTableChartSpec(
-          id, input, output, run_on_save, ParseMarkdownTableOptions(options, context)));
-    }
   }
 
   return config;
+}
+
+}  // namespace
+
+ChartConfig LoadChartConfig(const std::filesystem::path& config_path) {
+  return LoadChartConfigImpl(config_path, false);
+}
+
+ChartConfig LoadChartConfigAllowingInvalidCharts(const std::filesystem::path& config_path) {
+  return LoadChartConfigImpl(config_path, true);
 }
 
 }  // namespace csvzall::charts

@@ -139,6 +139,7 @@ Json ChartValuesForApi(const std::vector<common::ChartValueSpec>& values) {
 Json ChartOptionsForConfig(const common::ChartSpec& spec) {
   Json options;
   if (spec.type == "heatmap") {
+    if (!spec.heatmap.sql.empty()) options["sql"] = spec.heatmap.sql;
     options["date"] = spec.heatmap.date_column;
     if (!spec.heatmap.values.empty()) {
       options["values"] = ChartValuesForConfig(spec.heatmap.values);
@@ -165,6 +166,7 @@ Json ChartOptionsForConfig(const common::ChartSpec& spec) {
       options["orientation"] = spec.heatmap.orientation;
     }
   } else if (spec.type == "bar") {
+    if (!spec.bar.sql.empty()) options["sql"] = spec.bar.sql;
     options["label"] = spec.bar.label_column;
     if (!spec.bar.values.empty()) {
       options["values"] = ChartValuesForConfig(spec.bar.values);
@@ -181,6 +183,7 @@ Json ChartOptionsForConfig(const common::ChartSpec& spec) {
       options["presentation"] = spec.bar.presentation;
     }
   } else if (spec.type == "line") {
+    if (!spec.line.sql.empty()) options["sql"] = spec.line.sql;
     options["x"] = spec.line.x_column;
     if (!spec.line.values.empty()) {
       options["values"] = ChartValuesForConfig(spec.line.values);
@@ -208,6 +211,7 @@ Json ChartOptionsForConfig(const common::ChartSpec& spec) {
 Json ChartOptionsForApi(const common::ChartSpec& spec) {
   Json options;
   if (spec.type == "heatmap") {
+    options["sql"] = spec.heatmap.sql;
     options["date"] = spec.heatmap.date_column;
     options["value"] = spec.heatmap.value_column;
     options["values"] = ChartValuesForApi(spec.heatmap.values);
@@ -218,6 +222,7 @@ Json ChartOptionsForApi(const common::ChartSpec& spec) {
     options["title"] = spec.heatmap.title;
     options["orientation"] = spec.heatmap.orientation;
   } else if (spec.type == "bar") {
+    options["sql"] = spec.bar.sql;
     options["label"] = spec.bar.label_column;
     options["value"] = spec.bar.value_column;
     options["values"] = ChartValuesForApi(spec.bar.values);
@@ -227,6 +232,7 @@ Json ChartOptionsForApi(const common::ChartSpec& spec) {
     options["colorScheme"] = spec.bar.color_scheme;
     options["presentation"] = spec.bar.presentation;
   } else if (spec.type == "line") {
+    options["sql"] = spec.line.sql;
     options["x"] = spec.line.x_column;
     options["y"] = spec.line.y_column;
     options["values"] = ChartValuesForApi(spec.line.values);
@@ -441,6 +447,29 @@ std::size_t RenderRunOnSaveChartsForCurrentCsv(const CsvViewData& data,
   return generated;
 }
 
+namespace {
+
+// The viewer chart form has no sql field for heatmap/bar/line charts, so a save
+// keeps the sql an existing chart of the same id and type already has.
+void PreserveConfigOnlySql(common::ChartSpec& spec,
+                           const std::vector<common::ChartSpec>& existing_charts) {
+  for (const auto& existing : existing_charts) {
+    if (existing.id != spec.id || existing.type != spec.type) {
+      continue;
+    }
+    if (spec.type == "heatmap" && spec.heatmap.sql.empty()) {
+      spec.heatmap.sql = existing.heatmap.sql;
+    } else if (spec.type == "bar" && spec.bar.sql.empty()) {
+      spec.bar.sql = existing.bar.sql;
+    } else if (spec.type == "line" && spec.line.sql.empty()) {
+      spec.line.sql = existing.line.sql;
+    }
+    return;
+  }
+}
+
+}  // namespace
+
 std::string AppendHeatmapChartConfig(const CsvViewData& data,
                                      std::string_view body,
                                      const LoggerCallbacks& logger) {
@@ -470,6 +499,7 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
     const auto lookback = JsonStringFieldOr(body, "lookback", "");
     const auto orientation = JsonStringFieldOr(body, "orientation", "months-horizontal");
     common::HeatmapSpec heatmap;
+    heatmap.sql = JsonStringFieldOr(body, "sql", "");
     heatmap.date_column = date;
     heatmap.value_column = value;
     heatmap.values = values;
@@ -491,6 +521,7 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
     const auto values = ChartValuesFromColumns(
         JsonStringArrayFieldOr(body, "values", {}));
     common::BarSpec bar;
+    bar.sql = JsonStringFieldOr(body, "sql", "");
     bar.label_column = label;
     bar.value_column = value;
     bar.values = values;
@@ -512,6 +543,7 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
         JsonStringArrayFieldOr(body, "values", {}));
     const auto series = JsonStringFieldOr(body, "series", "");
     common::LineSpec line;
+    line.sql = JsonStringFieldOr(body, "sql", "");
     line.x_column = x;
     line.y_column = y;
     line.values = values;
@@ -539,6 +571,7 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
   } else {
     throw std::runtime_error("unknown chart type: " + type);
   }
+  PreserveConfigOnlySql(spec, charts);
   ValidateChartBeforeSave(spec, logger);
 
   bool updated_existing = false;

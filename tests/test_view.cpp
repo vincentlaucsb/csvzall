@@ -625,6 +625,56 @@ TEST_CASE("view edit: save regenerates runOnSave markdown table outputs") {
 }
 #endif
 
+#ifdef CSVZALL_HAVE_SVGPLOT
+TEST_CASE("view: Add chart endpoint keeps config-only sql when the form omits it") {
+  const auto dir = TempDir("csvzall_view_chart_sql_preserved");
+  const auto path = dir / "rides.csv";
+  std::filesystem::create_directories(dir / ".csvzall");
+  {
+    std::ofstream output(path, std::ios::binary);
+    output << "day,miles\n2026-01-01,3\n2026-01-15,4\n2026-02-01,5\n";
+  }
+  {
+    std::ofstream config(dir / ".csvzall" / "charts.json", std::ios::binary);
+    config << R"({"charts":[{"id":"monthly","type":"bar","input":"rides.csv","output":"charts/monthly.svg",)"
+           << R"("options":{"sql":"SELECT substr(day,1,7) AS month, SUM(miles) AS miles FROM data GROUP BY month","label":"month","value":"miles"}}]})";
+  }
+
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_mode = pipeline::ViewModeSelection::Paged;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(
+      path.string(), options, tests::MakeNullLogger(), stats);
+
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, false, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  client.set_connection_timeout(2, 0);
+  client.set_read_timeout(2, 0);
+  client.set_write_timeout(2, 0);
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+
+  const auto response = client.Post(
+      "/api/chart-config/heatmap",
+      headers,
+      R"({"type":"bar","id":"monthly","label":"month","value":"miles","title":"Monthly","output":"charts/monthly.svg","runOnSave":true})",
+      "application/json");
+  REQUIRE(response);
+  REQUIRE(response->status == 200);
+  server.Stop();
+
+  const auto config_text = ReadTextFile(dir / ".csvzall" / "charts.json");
+  CHECK(config_text.find("GROUP BY month") != std::string::npos);
+  CHECK(config_text.find("\"title\": \"Monthly\"") != std::string::npos);
+  const auto svg = ReadTextFile(dir / "charts" / "monthly.svg");
+  CHECK(svg.find(">2026-01</text>") != std::string::npos);
+  CHECK(svg.find(">2026-01-15</text>") == std::string::npos);
+
+  std::filesystem::remove_all(dir);
+}
+#endif
+
 TEST_CASE("view: Add chart endpoint lists and upserts current CSV charts") {
   const auto dir = TempDir("csvzall_view_chart_config_existing");
   std::filesystem::create_directories(dir / ".csvzall");

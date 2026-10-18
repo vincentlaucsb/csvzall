@@ -31,12 +31,66 @@ bool ValidateChartSpecFields(const charts::ChartSpec& spec,
   return true;
 }
 
+const std::string& ChartSql(const charts::ChartSpec& spec) {
+  static const std::string kNone;
+  if (spec.type == "heatmap") {
+    return spec.heatmap.sql;
+  }
+  if (spec.type == "bar") {
+    return spec.bar.sql;
+  }
+  if (spec.type == "line") {
+    return spec.line.sql;
+  }
+  return kNone;
+}
+
+int RenderChartToStream(const charts::ChartSpec& spec,
+                        std::istream& input,
+                        std::ostream& output,
+                        const RunOptions& options,
+                        const LoggerCallbacks& logger,
+                        RunStats& stats);
+
+// Runs the chart's `sql` against table `data` and renders the chart from the
+// query result, so column options name result columns.
+int RenderSqlChartToStream(const charts::ChartSpec& spec,
+                           std::istream& input,
+                           std::ostream& output,
+                           const RunOptions& options,
+                           const LoggerCallbacks& logger,
+                           RunStats& stats) {
+  std::ostringstream query_result;
+  const auto query_rc =
+      RunSqlQueryCsv(ChartSql(spec), "data", "csv", input, query_result, options, logger, stats);
+  if (query_rc != 0) {
+    return query_rc;
+  }
+
+  charts::ChartSpec result_spec = spec;
+  result_spec.heatmap.sql.clear();
+  result_spec.bar.sql.clear();
+  result_spec.line.sql.clear();
+  std::istringstream result_input(query_result.str());
+  // Read the query result stream, not the chart's input file.
+  RunOptions result_options = options;
+  result_options.input_is_stdin = false;
+  result_options.input_path.clear();
+  result_options.zip_entry.clear();
+  RunStats render_stats;
+  return RenderChartToStream(
+      result_spec, result_input, output, result_options, logger, render_stats);
+}
+
 int RenderChartToStream(const charts::ChartSpec& spec,
                         std::istream& input,
                         std::ostream& output,
                         const RunOptions& options,
                         const LoggerCallbacks& logger,
                         RunStats& stats) {
+  if (!ChartSql(spec).empty()) {
+    return RenderSqlChartToStream(spec, input, output, options, logger, stats);
+  }
   if (spec.type == "markdown-table") {
     std::string query = spec.markdown_table.sql;
     if (query.empty()) {
