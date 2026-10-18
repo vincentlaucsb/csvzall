@@ -80,6 +80,11 @@ This file is the canonical AI reference for this repository.
 - When preparing a release bump, update all three source markers in the same commit, then create the matching Git tag after that commit.
 - Do not update unrelated dependency version references, such as the README dependency table, when bumping csvzall itself.
 
+## Controlled dependency remediation
+
+- When an issue must be fixed in, or shipped through, a repository we control (svg, svgplot, csv-parser, csvzall, obsidian-csvzall), follow `.claude/skills/dependency-remediation/SKILL.md`.
+- Walk the controlled dependency tree deepest-first: fix, bump the version (patch or minor per that workflow), get the PR green, merge, release, then re-pin the next consumer. Never pin a consumer to an unmerged or unreleased commit.
+
 ## Release artifacts
 
 - Obsidian helper builds are owned by the obsidian-csvzall release-preparation pipeline, which pins this repository and its dependencies by commit and reuses verified binaries for unchanged build identities. Do not restore duplicate Obsidian helper jobs in csvzall release workflows. The narrower build still supports CSV editing, viewing, charting/SVGPlot, and SQLite-backed workflows.
