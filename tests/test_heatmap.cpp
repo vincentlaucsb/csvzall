@@ -522,6 +522,22 @@ TEST_CASE("charts run draws a single-series bar chart in one color") {
   CHECK(CountOccurrences(default_svg, "class=\"bar svgplot-color-0\"") == 4);
 }
 
+TEST_CASE("charts run rounds fractional bar y-axis bounds and ticks") {
+  // Regression for https://github.com/vincentlaucsb/csvzall/issues/21.
+  const auto root = TempDir("csvzall_charts_bar_nice_axis");
+  WriteText(root / "mo.csv", "month,miles\n2026-01,42.5\n2026-02,91.7\n2026-03,68.9\n");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"c","type":"bar","input":"mo.csv","output":"c.svg","options":{"label":"month","value":"miles"}}]})");
+
+  REQUIRE(RunChartsQuietly(root / "config.json", "c") == 0);
+  const auto svg = ReadText(root / "c.svg");
+  for (const auto* tick : {">0</text>", ">25</text>", ">50</text>", ">75</text>", ">100</text>"}) {
+    CHECK(svg.find(tick) != std::string::npos);
+  }
+  CHECK(svg.find(">76</text>") == std::string::npos);
+  CHECK(svg.find(">101</text>") == std::string::npos);
+}
+
 TEST_CASE("charts run <id> ignores an unrelated invalid chart entry") {
   // Regression for https://github.com/vincentlaucsb/csvzall/issues/22.
   const auto root = TempDir("csvzall_charts_invalid_neighbor");

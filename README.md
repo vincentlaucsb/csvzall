@@ -528,7 +528,7 @@ release runner.
 
 | Library | Author / maintainer | Role | How it's sourced |
 |---|---|---|---|
-| [svgplot](https://github.com/vincentlaucsb/svgplot) v0.4.1 | [Vincent La](https://github.com/vincentlaucsb) | SVG chart rendering for `heatmap`, `bar`, and `line` chart outputs | CMake package if `CSVZALL_PREFER_SYSTEM_SVGPLOT=ON`; local checkout via `SVGPLOT_ROOT` or sibling `../svgplot`; pinned FetchContent fallback; release workflows force local or FetchContent sources |
+| [svgplot](https://github.com/vincentlaucsb/svgplot) v0.4.2 | [Vincent La](https://github.com/vincentlaucsb) | SVG chart rendering for `heatmap`, `bar`, and `line` chart outputs | CMake package if `CSVZALL_PREFER_SYSTEM_SVGPLOT=ON`; local checkout via `SVGPLOT_ROOT` or sibling `../svgplot`; pinned FetchContent fallback; release workflows force local or FetchContent sources |
 
 ### Viewer
 
