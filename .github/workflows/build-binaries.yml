@@ -8,7 +8,18 @@ permissions:
   contents: write
 
 jobs:
+  verify-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Check version markers match the release tag
+        run: node scripts/version.mjs check --tag "${{ github.event.release.tag_name }}"
+
   build:
+    needs: verify-version
     strategy:
       matrix:
         include:
@@ -160,6 +171,7 @@ jobs:
         run: gh release upload "$RELEASE_TAG" "$ASSET_PATH" --clobber
 
   wasm-viewer:
+    needs: verify-version
     runs-on: ubuntu-latest
     env:
       EMSDK_VERSION: 6.0.0

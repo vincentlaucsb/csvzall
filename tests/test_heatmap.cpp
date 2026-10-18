@@ -447,6 +447,164 @@ TEST_CASE("charts run renders configured bar and line outputs") {
   CHECK(ReadText(root / "line.svg").find("class=\"line-series") != std::string::npos);
 }
 
+TEST_CASE("charts run rotates crowded monthly bar labels instead of overlapping them") {
+  // Regression for https://github.com/vincentlaucsb/csvzall/issues/20.
+  const auto root = TempDir("csvzall_charts_bar_crowded_labels");
+  std::string csv = "month,miles\n";
+  int year = 2024;
+  int month = 11;
+  for (int i = 0; i < 24; ++i) {
+    csv += std::to_string(year) + "-" + (month < 10 ? "0" : "") + std::to_string(month) + "," +
+           std::to_string(40 + i) + "\n";
+    if (++month > 12) {
+      month = 1;
+      ++year;
+    }
+  }
+  WriteText(root / "data.csv", csv);
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"monthly","type":"bar","input":"data.csv","output":"monthly.svg","options":{"label":"month","value":"miles","xLabel":"Month"}}]})");
+
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  const auto rc = csvzall::pipeline::RunCharts((root / "config.json").string(),
+                                               "", false, options, SilentLogger(), stats);
+
+  REQUIRE(rc == 0);
+  const auto svg = ReadText(root / "monthly.svg");
+  std::size_t rotated = 0;
+  for (auto pos = svg.find("bar-label-rotated"); pos != std::string::npos;
+       pos = svg.find("bar-label-rotated", pos + 1)) {
+    ++rotated;
+  }
+  CHECK(rotated == 24);
+  CHECK(svg.find(">2024-11</text>") != std::string::npos);
+  CHECK(svg.find(">2026-10</text>") != std::string::npos);
+}
+
+namespace {
+
+std::size_t CountOccurrences(const std::string& text, const std::string& needle) {
+  std::size_t count = 0;
+  for (auto pos = text.find(needle); pos != std::string::npos; pos = text.find(needle, pos + 1)) {
+    ++count;
+  }
+  return count;
+}
+
+int RunChartsQuietly(const std::filesystem::path& config, const std::string& id,
+                     bool validate_only = false) {
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  return csvzall::pipeline::RunCharts(config.string(), id, validate_only, options,
+                                      SilentLogger(), stats);
+}
+
+}  // namespace
+
+TEST_CASE("charts run draws a single-series bar chart in one color") {
+  // Regression for https://github.com/vincentlaucsb/csvzall/issues/19.
+  const auto root = TempDir("csvzall_charts_bar_single_color");
+  WriteText(root / "data.csv", "month,miles\n2026-01,10\n2026-02,20\n2026-03,30\n2026-04,40\n");
+  WriteText(root / "config.json",
+            R"({"charts":[)"
+            R"({"id":"explicit","type":"bar","input":"data.csv","output":"explicit.svg","options":{"label":"month","values":[{"column":"miles","label":"Miles","color":"#123456"}]}},)"
+            R"({"id":"default","type":"bar","input":"data.csv","output":"default.svg","options":{"label":"month","value":"miles"}}]})");
+
+  REQUIRE(RunChartsQuietly(root / "config.json", "") == 0);
+
+  const auto explicit_svg = ReadText(root / "explicit.svg");
+  CHECK(explicit_svg.find("--svgplot-color: #123456;") != std::string::npos);
+  CHECK(CountOccurrences(explicit_svg, "--svgplot-color:") == 1);
+
+  const auto default_svg = ReadText(root / "default.svg");
+  CHECK(CountOccurrences(default_svg, "--svgplot-color:") == 1);
+  CHECK(CountOccurrences(default_svg, "class=\"bar svgplot-color-0\"") == 4);
+}
+
+TEST_CASE("charts run rounds fractional bar y-axis bounds and ticks") {
+  // Regression for https://github.com/vincentlaucsb/csvzall/issues/21.
+  const auto root = TempDir("csvzall_charts_bar_nice_axis");
+  WriteText(root / "mo.csv", "month,miles\n2026-01,42.5\n2026-02,91.7\n2026-03,68.9\n");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"c","type":"bar","input":"mo.csv","output":"c.svg","options":{"label":"month","value":"miles"}}]})");
+
+  REQUIRE(RunChartsQuietly(root / "config.json", "c") == 0);
+  const auto svg = ReadText(root / "c.svg");
+  for (const auto* tick : {">0</text>", ">25</text>", ">50</text>", ">75</text>", ">100</text>"}) {
+    CHECK(svg.find(tick) != std::string::npos);
+  }
+  CHECK(svg.find(">76</text>") == std::string::npos);
+  CHECK(svg.find(">101</text>") == std::string::npos);
+}
+
+TEST_CASE("charts run <id> ignores an unrelated invalid chart entry") {
+  // Regression for https://github.com/vincentlaucsb/csvzall/issues/22.
+  const auto root = TempDir("csvzall_charts_invalid_neighbor");
+  WriteText(root / "mo.csv", "month,miles\n2026-01,10\n2026-02,20\n");
+  WriteText(root / "cfg.json",
+            R"({"charts":[)"
+            R"({"id":"c","type":"bar","input":"mo.csv","output":"c.svg","options":{"label":"month","value":"miles"}},)"
+            R"({"id":"x","type":"bar","input":"mo.csv","output":"x.svg","options":{"label":"month","value":"miles","xLabelRotation":45}}]})");
+  const auto config = root / "cfg.json";
+
+  CHECK(RunChartsQuietly(config, "c") == 0);
+  CHECK(std::filesystem::exists(root / "c.svg"));
+  CHECK(RunChartsQuietly(config, "c", true) == 0);
+
+  CHECK(RunChartsQuietly(config, "x") == 1);
+  CHECK_FALSE(std::filesystem::exists(root / "x.svg"));
+
+  std::filesystem::remove(root / "c.svg");
+  CHECK(RunChartsQuietly(config, "") == 1);
+  CHECK(std::filesystem::exists(root / "c.svg"));
+
+  const auto lenient = csvzall::pipeline::common::LoadChartConfigAllowingInvalidCharts(config);
+  REQUIRE(lenient.charts.size() == 1);
+  REQUIRE(lenient.invalid_charts.size() == 1);
+  CHECK(lenient.invalid_charts.front().index == 1);
+  CHECK(lenient.invalid_charts.front().id == "x");
+  CHECK_THAT(lenient.invalid_charts.front().message,
+             Catch::Matchers::ContainsSubstring("unknown key 'xLabelRotation'"));
+  CHECK_THROWS_WITH(csvzall::pipeline::common::LoadChartConfig(config),
+                    Catch::Matchers::ContainsSubstring("unknown key 'xLabelRotation'"));
+}
+
+TEST_CASE("charts run renders bar line and heatmap charts from options.sql") {
+  // Regression for https://github.com/vincentlaucsb/csvzall/issues/24.
+  const auto root = TempDir("csvzall_charts_sql_options");
+  WriteText(root / "rides.csv",
+            "start_local,distance_m\n"
+            "2026-01-03,1609.344\n2026-01-20,3218.688\n2026-02-07,4828.032\n");
+  WriteText(root / "config.json",
+            R"({"charts":[)"
+            R"({"id":"bar","type":"bar","input":"rides.csv","output":"bar.svg","options":{"sql":"SELECT substr(start_local,1,7) AS month, SUM(distance_m)/1609.344 AS miles FROM data GROUP BY month ORDER BY month","label":"month","value":"miles"}},)"
+            R"({"id":"line","type":"line","input":"rides.csv","output":"line.svg","options":{"sql":"SELECT CAST(substr(start_local,9,2) AS INTEGER) AS day, distance_m/1609.344 AS miles FROM data","x":"day","y":"miles"}},)"
+            R"({"id":"heatmap","type":"heatmap","input":"rides.csv","output":"heatmap.svg","options":{"sql":"SELECT start_local AS ride_date, distance_m/1609.344 AS miles FROM data","date":"ride_date","value":"miles","start":"2026-01-01","end":"2026-02-28"}}]})");
+
+  REQUIRE(RunChartsQuietly(root / "config.json", "") == 0);
+
+  const auto bar = ReadText(root / "bar.svg");
+  CHECK(bar.find(">2026-01</text>") != std::string::npos);
+  CHECK(bar.find(">2026-02</text>") != std::string::npos);
+  CHECK(bar.find(">2026-01-03</text>") == std::string::npos);
+  CHECK(CountOccurrences(bar, "class=\"bar svgplot-color-") == 2);
+
+  CHECK(ReadText(root / "line.svg").find("class=\"line-series") != std::string::npos);
+  CHECK(ReadText(root / "heatmap.svg").find("<svg") != std::string::npos);
+
+  const auto config = csvzall::pipeline::common::LoadChartConfig(root / "config.json");
+  CHECK(config.charts[0].bar.sql.find("GROUP BY month") != std::string::npos);
+}
+
+TEST_CASE("charts sql option reports query errors") {
+  const auto root = TempDir("csvzall_charts_sql_error");
+  WriteText(root / "data.csv", "a,b\n1,2\n");
+  WriteText(root / "config.json",
+            R"({"charts":[{"id":"bad","type":"bar","input":"data.csv","output":"bad.svg","options":{"sql":"SELECT nope FROM data","label":"a","value":"b"}}]})");
+  CHECK(RunChartsQuietly(root / "config.json", "bad") == 1);
+}
+
 TEST_CASE("charts run renders configured multi-value heatmap bar and line outputs") {
   const auto root = TempDir("csvzall_charts_multi_value");
   WriteText(root / "training.csv",

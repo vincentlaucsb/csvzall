@@ -7,7 +7,8 @@
 namespace csvzall::charts {
 namespace {
 
-constexpr std::array<ChartOptionDoc, 9> kHeatmapOptions{{
+constexpr std::array<ChartOptionDoc, 10> kHeatmapOptions{{
+    {"sql", "Optional SELECT against SQLite table `data`; other options name result columns."},
     {"date", "Date column. Defaults to \"date\"."},
     {"start",
      "Start date. Accepts YYYY-MM-DD, M/D/YYYY, M-D-YYYY, D/M/YYYY, or D-M-YYYY.\n"
@@ -25,7 +26,8 @@ constexpr std::array<ChartOptionDoc, 9> kHeatmapOptions{{
     {"title", "Optional SVG title."},
 }};
 
-constexpr std::array<ChartOptionDoc, 8> kBarOptions{{
+constexpr std::array<ChartOptionDoc, 9> kBarOptions{{
+    {"sql", "Optional SELECT against SQLite table `data`; other options name result columns."},
     {"label", "Category column."},
     {"value", "Single numeric value column."},
     {"values", "Multi-dataset numeric columns. See Multi-value options."},
@@ -36,7 +38,8 @@ constexpr std::array<ChartOptionDoc, 8> kBarOptions{{
     {"yLabel", "Optional Y-axis label."},
 }};
 
-constexpr std::array<ChartOptionDoc, 8> kLineOptions{{
+constexpr std::array<ChartOptionDoc, 9> kLineOptions{{
+    {"sql", "Optional SELECT against SQLite table `data`; other options name result columns."},
     {"x", "X-axis column."},
     {"y", "Single numeric Y column."},
     {"values", "Multi-dataset numeric Y columns. Cannot be combined with series."},
@@ -60,13 +63,13 @@ constexpr std::array<ChartOptionDoc, 3> kChartValueObjectOptions{{
 
 constexpr std::array<ChartTypeDoc, 4> kChartTypes{{
     {"heatmap",
-     "date, optional value/values/label/title/orientation, and either start+end or lookback.",
+     "date, optional sql/value/values/label/title/orientation, and either start+end or lookback.",
      kHeatmapOptions},
     {"bar",
-     "label, value or values, optional colorScheme/title/xLabel/yLabel/presentation.",
+     "label, value or values, optional sql/colorScheme/title/xLabel/yLabel/presentation.",
      kBarOptions},
     {"line",
-     "x, y or values, optional colorScheme/series/title/xLabel/yLabel.",
+     "x, y or values, optional sql/colorScheme/series/title/xLabel/yLabel.",
      kLineOptions},
     {"markdown-table",
      "optional sql SELECT, or columns array, or neither to export all CSV columns.",
@@ -176,6 +179,8 @@ Drill-down by type:
            [{"column":"gym","label":"Gym","color":"#2563eb"}].
   colorScheme controls generated colors for values without explicit color:
            sequential or diverging. Multi-value heatmaps use diverging.
+  Single-series bars (value, or one values entry) draw every bar in that
+           series' color: its values[].color, else colorScheme's first color.
 
   value object keys:
 )";
@@ -189,6 +194,17 @@ Validation and errors:
   values without writing outputs. It is useful for generated configs.
   Missing inputs, unknown chart types, invalid options, missing columns, and
   write failures produce stderr diagnostics and a non-zero exit.
+  An invalid chart entry only affects runs that select it: `charts run <id>`
+  ignores other entries, and a full run still renders every valid chart
+  before exiting non-zero.
+
+SQL-backed charts:
+  heatmap, bar, line, and markdown-table accept options.sql, a SELECT against
+  SQLite table `data` loaded from input. Column options then name result
+  columns, for example:
+    "options": {"sql": "SELECT substr(date,1,7) AS month, SUM(miles) AS miles
+                        FROM data GROUP BY month",
+                "label": "month", "value": "miles"}
 )";
   return output.str();
 }

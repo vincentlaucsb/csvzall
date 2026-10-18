@@ -3,9 +3,23 @@ name: Build & Test csvzall
 on:
   push:
     branches: [ main, master ]
+    paths-ignore:
+      - "**/*.md"
+      - "LICENSE"
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "LICENSE"
 
 jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Check version markers agree
+        run: node scripts/version.mjs check
+
   build:
     name: ${{ matrix.compressed == 'ON' && format('build ({0})', matrix.os) || format('build ({0}, compressed OFF)', matrix.os) }}
     runs-on: ${{ matrix.os }}

@@ -76,8 +76,9 @@ This file is the canonical AI reference for this repository.
   - `src/main.cpp`: `argparse::ArgumentParser program("csvzall", "...")`
 - Keep all three source version markers in sync with each other and with the intended release tag.
 - Before bumping, releasing, or stating the current csvzall version, verify the three source markers directly. Do not rely on memory, issue text, branch names, release notes, or previous conversation context.
+- Bump versions only with `node scripts/version.mjs bump X.Y.Z`; it rewrites all three markers together. `node scripts/version.mjs check` verifies them (CI fails when they disagree, and the release workflow runs `check --tag <tag>` before building assets). If a new version marker is added, add it to the script's `markers` list in the same change.
 - If the source markers disagree with each other or with the requested/current release tag, stop and report the mismatch before choosing a new version.
-- When preparing a release bump, update all three source markers in the same commit, then create the matching Git tag after that commit.
+- When preparing a release bump, run the bump script and commit all three source markers together, then create the matching Git tag after that commit.
 - Do not update unrelated dependency version references, such as the README dependency table, when bumping csvzall itself.
 
 ## Controlled dependency remediation

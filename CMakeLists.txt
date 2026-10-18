@@ -81,6 +81,24 @@ set(FETCHCONTENT_BASE_DIR
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "Do not update already-populated FetchContent dependencies" FORCE)
 message(STATUS "FetchContent cache: ${FETCHCONTENT_BASE_DIR}")
 
+# Pinned FetchContent fallbacks (csv-parser, svgplot) live in per-revision
+# directories. FETCHCONTENT_UPDATES_DISCONNECTED cannot move an existing shallow
+# clone to a new pin, so without this a pin bump fails against a restored CI
+# cache or an existing local out/fetchcontent checkout.
+function(csvzall_pinned_fetch_dirs out_var name revision)
+  string(LENGTH "${revision}" _csvzall_revision_length)
+  if(_csvzall_revision_length GREATER 12)
+    string(SUBSTRING "${revision}" 0 12 revision)
+  endif()
+  string(MAKE_C_IDENTIFIER "${revision}" _csvzall_revision_id)
+  set(_csvzall_pinned_base "${FETCHCONTENT_BASE_DIR}/${name}-${_csvzall_revision_id}")
+  set(${out_var}
+      SOURCE_DIR "${_csvzall_pinned_base}-src"
+      BINARY_DIR "${_csvzall_pinned_base}-build"
+      SUBBUILD_DIR "${_csvzall_pinned_base}-subbuild"
+      PARENT_SCOPE)
+endfunction()
+
 # csv-parser location strategy:
 # 1) User-provided -DCSV_PARSER_ROOT=...
 # 2) Sibling checkout at ../csv-parser when CSVZALL_PREFER_SIBLING_CSV_PARSER=ON
@@ -147,11 +165,13 @@ elseif(EXISTS "${CSVZALL_IN_REPO_CSV_PARSER_ROOT}/include" AND EXISTS "${CSVZALL
   add_subdirectory("${CSVZALL_CSV_PARSER_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/csv-parser-local-build" EXCLUDE_FROM_ALL)
 elseif(CSVZALL_FETCH_CSV_PARSER)
   message(STATUS "Fetching csv-parser with FetchContent")
+  csvzall_pinned_fetch_dirs(_csvzall_csv_parser_fetch_dirs csv_parser "${CSVZALL_CSV_PARSER_GIT_TAG}")
   FetchContent_Declare(
     csv_parser
     GIT_REPOSITORY https://github.com/vincentlaucsb/csv-parser.git
     GIT_TAG ${CSVZALL_CSV_PARSER_GIT_TAG}
     UPDATE_DISCONNECTED TRUE
+    ${_csvzall_csv_parser_fetch_dirs}
   )
   FetchContent_MakeAvailable(csv_parser)
   FetchContent_GetProperties(csv_parser SOURCE_DIR CSVZALL_CSV_PARSER_SOURCE_DIR)
@@ -318,7 +338,7 @@ if(CSVZALL_NLOHMANN_JSON_TARGET STREQUAL "")
 endif()
 
 set(SVGPLOT_ROOT "" CACHE PATH "Path to svgplot checkout or single-header distribution")
-set(CSVZALL_SVGPLOT_GIT_TAG "0.4.0"
+set(CSVZALL_SVGPLOT_GIT_TAG "0.4.2"
     CACHE STRING "svgplot revision used by FetchContent fallback")
 set(CSVZALL_HAVE_SVGPLOT OFF)
 set(CSVZALL_SVGPLOT_TARGET "")
@@ -382,6 +402,8 @@ function(csvzall_try_svgplot_root root_path source_description)
         training_heatmap_svg
         multi_series_line_svg
         stacked_bar_svg
+        monthly_bar_svg
+        nice_axis_bar_svg
         svgplot_tests)
       if(TARGET ${_csvzall_svgplot_aux_target})
         set_target_properties(${_csvzall_svgplot_aux_target} PROPERTIES EXCLUDE_FROM_ALL TRUE)
@@ -423,12 +445,14 @@ if(CSVZALL_ENABLE_SVGPLOT)
 
   if(NOT CSVZALL_HAVE_SVGPLOT AND CSVZALL_FETCH_SVGPLOT)
     message(STATUS "Fetching svgplot with FetchContent")
+    csvzall_pinned_fetch_dirs(_csvzall_svgplot_fetch_dirs svgplot "${CSVZALL_SVGPLOT_GIT_TAG}")
     FetchContent_Declare(
       svgplot
       GIT_REPOSITORY https://github.com/vincentlaucsb/svgplot.git
       GIT_TAG ${CSVZALL_SVGPLOT_GIT_TAG}
       GIT_SHALLOW TRUE
       UPDATE_DISCONNECTED TRUE
+      ${_csvzall_svgplot_fetch_dirs}
     )
     FetchContent_GetProperties(svgplot)
     if(NOT svgplot_POPULATED)

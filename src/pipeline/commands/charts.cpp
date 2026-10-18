@@ -14,11 +14,25 @@ int RunCharts(const std::string& config_path,
               const LoggerCallbacks& logger,
               RunStats& stats) {
   try {
-    const auto config = common::LoadChartConfig(
+    // Invalid entries are reported only when selected (or when running all
+    // charts), so one bad chart doesn't block unrelated ones.
+    const auto config = common::LoadChartConfigAllowingInvalidCharts(
         config_path.empty() ? common::DefaultChartConfigPath()
                             : std::filesystem::path(config_path));
 
     bool matched = false;
+    int result = 0;
+    for (const auto& invalid : config.invalid_charts) {
+      if (!chart_id.empty() && invalid.id != chart_id) {
+        continue;
+      }
+      matched = true;
+      result = 1;
+      if (logger.error) {
+        logger.error("charts: " + invalid.message);
+      }
+    }
+
     for (const auto& chart : config.charts) {
       if (!chart_id.empty() && chart.id != chart_id) {
         continue;
@@ -28,7 +42,7 @@ int RunCharts(const std::string& config_path,
           ? ValidateChart(chart, options, logger, stats)
           : RunChart(chart, options, logger, stats);
       if (rc != 0) {
-        return rc;
+        result = rc;
       }
     }
 
@@ -40,12 +54,12 @@ int RunCharts(const std::string& config_path,
       }
       return 1;
     }
-    if (validate_only && logger.info) {
+    if (result == 0 && validate_only && logger.info) {
       logger.info(chart_id.empty()
                       ? "charts: config is valid"
                       : "charts: chart config is valid: " + chart_id);
     }
-    return 0;
+    return result;
   } catch (const std::exception& ex) {
     if (logger.error) {
       logger.error(std::string("charts: ") + ex.what());

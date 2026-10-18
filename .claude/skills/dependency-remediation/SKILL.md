@@ -71,14 +71,17 @@ choosing a number; never trust memory, tags, or issue text alone.
 | Repo | Version markers (must agree with each other and the tag) |
 |---|---|
 | svg | `CMakeLists.txt` `project(... VERSION ...)` plus anything its `AGENTS.md`/README lists |
-| svgplot | `CMakeLists.txt` `project(svgplot VERSION ...)`, `package.json` `version` |
+| svgplot | `node scripts/version.mjs bump X.Y.Z` / `check` (CMakeLists.txt, `svgplot.hpp` banner, package.json, package-lock.json) |
 | csv-parser | `CMakeLists.txt` `project(... VERSION ...)`, Python package metadata validated by `python-publish.yml`, plus anything its `AGENTS.md` lists |
-| csvzall | `CMakeLists.txt` `project(csvzall VERSION ...)`, `Doxyfile` `PROJECT_NUMBER`, `src/main.cpp` `argparse::ArgumentParser program("csvzall", "...")` |
+| csvzall | `node scripts/version.mjs bump X.Y.Z` / `check` (CMakeLists.txt, Doxyfile, `src/main.cpp`) |
 | obsidian-csvzall | everything under "Version Locations" in its `AGENTS.md` (`manifest.json`, `versions.json`, `package.json`, `package-lock.json`, `native-binaries/*`, `mobile-src/manifest.json`) |
 
-If the markers already disagree with each other or with the latest tag (for
-example svgplot's latest tag `0.4.0` while `project(svgplot VERSION 0.3.0)`),
-stop and report the mismatch before picking a new number. Fix the drift as part
+When a repo has `scripts/version.mjs`, bump only through it and run its
+`check` before opening the PR; for repos without one, consider adding one
+(markers list + `check` in CI + `check --tag` in the release workflow).
+
+If the markers already disagree with each other or with the latest tag (as
+svgplot's did before 0.4.1: tag `0.4.0`, sources `0.3.0`), stop and report the mismatch before picking a new number. Fix the drift as part
 of the bump only once the intended baseline is confirmed.
 
 Patch vs. minor (semver, pre-1.0 rules for 0.x repos):

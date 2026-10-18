@@ -768,6 +768,17 @@ Minimal config:
 Supported chart types:
   heatmap, bar, line, markdown-table
 
+Aggregate with SQL (any chart type): options.sql is a SELECT against table
+`data` loaded from input; label/value/x/y/date then name result columns:
+  {"id":"monthly","type":"bar","input":"runs.csv","output":"charts/monthly.svg",
+   "options":{"sql":"SELECT substr(date,1,7) AS month, SUM(miles) AS miles FROM data GROUP BY month",
+              "label":"month","value":"miles"}}
+
+Invalid entries:
+  `charts run <id>` only fails if the selected chart is invalid. A full
+  `charts run` renders every valid chart, reports each invalid or failing
+  chart on stderr, and exits non-zero.
+
 Use `csvzall charts schema` for the full config reference, including option
 value grammar such as heatmap lookback values.
 

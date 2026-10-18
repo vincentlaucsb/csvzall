@@ -77,13 +77,13 @@ CsvChartResult RenderBarCsv(csv::CSVReader& reader,
       AccumulateRowBytes(row, result);
     }
 
+    // One series: every bar shares the series color (explicit values[].color or
+    // the scheme's first color); per-category colors would imply a legend.
+    const auto series_color = ValueColor(value_specs.front(), 0, spec.color_scheme);
     std::vector<svgplot::Bar> bars;
     bars.reserve(order.size());
-    for (std::size_t i = 0; i < order.size(); ++i) {
-      bars.push_back({
-          order[i],
-          totals[order[i]],
-          svgplot::default_series_color(i)});
+    for (const auto& label : order) {
+      bars.push_back({label, totals[label], series_color});
     }
     result.svg = svgplot::bar_chart(bars, chart_options).str();
     return result;
