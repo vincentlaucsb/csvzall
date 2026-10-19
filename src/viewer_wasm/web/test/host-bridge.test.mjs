@@ -2,6 +2,26 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHostBridge, HOST_CAPABILITIES, VIEWER_SOURCE } from '../src/host-bridge.js';
 
+test('only a trusted versioned mobile UI flag changes host controls', async () => {
+  const { windowRef } = createFakeWindow();
+  const modes = [];
+  const bridge = createHostBridge({ windowRef, onOpenFile() {},
+    onHostModeChange(enabled, ui) { modes.push({ enabled, ui }); },
+  });
+  bridge.start();
+  const message = { source: 'obsidian-csvzall', type: 'open-file', name: 'a.csv', buffer: csvBuffer(), hostUi: { version: 1, mobile: true } };
+  windowRef.dispatchMessage(message, {});
+  assert.equal(modes.length, 0);
+  windowRef.dispatchMessage(message);
+  assert.deepEqual(modes.at(-1), { enabled: true, ui: { mobile: true } });
+  for (const hostUi of [undefined, { version: 2, mobile: true }, { version: 1, mobile: 'true' }, { version: 1, mobile: false }]) {
+    windowRef.dispatchMessage({ ...message, hostUi });
+    assert.deepEqual(modes.at(-1), { enabled: true, ui: { mobile: false } });
+  }
+  await bridge.markReady();
+  bridge.destroy();
+});
+
 test('host-requested Save waits for the parent file-write acknowledgment', async () => {
   const { windowRef, posts } = createFakeWindow();
   let dirty = true, saves = 0;

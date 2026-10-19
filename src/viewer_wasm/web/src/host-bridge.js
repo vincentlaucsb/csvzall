@@ -1,6 +1,7 @@
 export const HOST_SOURCE = 'obsidian-csvzall';
 export const VIEWER_SOURCE = 'csvzall-wasm-viewer';
 export const HOST_CAPABILITIES = Object.freeze([
+  'csvzall-host-mobile-ui-v1',
   'csvzall-csv-options-v1',
   'csvzall-shared-shell-v1',
   'csvzall-compact-layout-v1',
@@ -26,6 +27,7 @@ function cloneOpenFileMessage(data) {
   return {
     name: data.name || 'input.csv',
     buffer: data.buffer,
+    hostUi: { mobile: data.hostUi?.version === 1 && data.hostUi.mobile === true },
   };
 }
 
@@ -63,16 +65,13 @@ export function createHostBridge({
     }, '*', transfer);
   }
 
-  function enterHostMode() {
-    if (hostMode) {
-      return;
-    }
+  function enterHostMode(hostUi) {
     hostMode = true;
-    onHostModeChange(true);
+    onHostModeChange(true, hostUi);
   }
 
   function enqueueOpenFile(file) {
-    enterHostMode();
+    enterHostMode(file.hostUi);
     if (!initialized) {
       queuedOpenFiles.push(file);
       return;

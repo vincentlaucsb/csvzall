@@ -94,6 +94,13 @@ it does not require a standalone csvzall release. Until the source changes are
 committed and pinned, test them through a custom path to the local executable.
 Lite receives the shared shell through the embedded viewer refresh.
 
+The WASM host may include `hostUi: { version: 1, mobile: true }` in its trusted
+`open-file` message. The `csvzall-host-mobile-ui-v1` receiver hides Options on
+mobile, including More actions, while keeping dialect preservation and automatic
+header safeguards active. Desktop hosts, legacy messages without this policy,
+and standalone viewers retain Options. The shared shell owns visibility; the
+host never rewrites the imported viewer JavaScript.
+
 ## Compact layout
 
 The shared shell uses compact mode at portrait widths up to 600 CSS pixels or

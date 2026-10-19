@@ -1,7 +1,21 @@
-import { updateHeaderToggle } from '../src/viewer/modules/csv-options.mjs';
+import { applyCsvOptionsHostUi, updateHeaderToggle } from '../src/viewer/modules/csv-options.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installDialogDismiss, installDialogDismissals } from '../src/viewer/modules/dialog-dismiss.mjs';
+
+test('CSV options are hidden only for mobile hosts and close an already-open dialog', () => {
+  const button = { hidden: false };
+  const dialog = { open: true, close() { this.open = false; } };
+  applyCsvOptionsHostUi(button, dialog, true, { mobile: true });
+  assert.equal(button.hidden, true);
+  assert.equal(dialog.open, false);
+  applyCsvOptionsHostUi(button, dialog, true, { mobile: false });
+  assert.equal(button.hidden, false);
+  applyCsvOptionsHostUi(button, dialog, true);
+  assert.equal(button.hidden, false);
+  applyCsvOptionsHostUi(button, dialog, false, { mobile: true });
+  assert.equal(button.hidden, false);
+});
 
 function harness() {
   const dialog = new EventTarget();

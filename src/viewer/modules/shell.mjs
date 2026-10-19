@@ -1,4 +1,4 @@
-import { updateHeaderToggle } from './csv-options.mjs';
+import { applyCsvOptionsHostUi, updateHeaderToggle } from './csv-options.mjs';
 import { applyHostGridTheme } from './host-theme.mjs';
 import './dialog-dismiss.mjs';
 import { mountViewerShell } from './shell-markup.mjs';
@@ -174,8 +174,9 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     URL.revokeObjectURL(url);
   }
 
-  function setHostMode(enabled) {
+  function setHostMode(enabled, hostUi) {
     document.body.toggleAttribute('data-host-mode', enabled);
+    applyCsvOptionsHostUi(csvOptionsButton, csvOptionsDialog, enabled, hostUi);
     if (filePicker) {
       filePicker.hidden = enabled;
     }
@@ -733,9 +734,10 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   });
 
   csvOptionsButton.addEventListener('click', async () => {
+    if (csvOptionsButton.hidden) return;
     await finishEditing();
     await csvMutations.settle();
-    if (!viewOpen || !editable || !csvOptions) return;
+    if (csvOptionsButton.hidden || !viewOpen || !editable || !csvOptions) return;
     csvDelimiter.value = csvOptions.delimiter === '\t' ? '\\t' : csvOptions.delimiter;
     csvQuote.value = csvOptions.quote;
     csvInputDelimiter.value = csvDelimiter.value;

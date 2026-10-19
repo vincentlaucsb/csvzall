@@ -88,14 +88,27 @@ const csv = 'name,count\n' + Array.from({ length: 40 }, (_, index) => `Row ${ind
     await frame.locator('body[data-compact]').waitFor();
     assert.equal(await frame.locator('.file-meta').isVisible(), false);
     await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await frame.locator('#csv-options').evaluate(button => button.hidden), false);
+    await page.evaluate(csv => {
+      const buffer = new TextEncoder().encode(csv).buffer;
+      document.getElementById('viewer').contentWindow.postMessage({ source: 'obsidian-csvzall', type: 'open-file',
+        name: 'mobile.csv', buffer, hostUi: { version: 1, mobile: true } }, '*', [buffer]);
+    }, csv);
+    await frame.locator('#csv-options[hidden]').waitFor({ state: 'attached' });
+    await frame.locator('#csv-options').evaluate(button => button.click());
+    assert.equal(await frame.locator('#csv-options-dialog').evaluate(dialog => dialog.open), false);
+    await frame.locator('#more-actions').click();
+    assert.equal(await rootMenu.getByRole('menuitem', { name: 'Options', exact: true }).count(), 0);
+    await frame.locator('#record-count').click();
     await page.screenshot({ path: path.join(output, 'compact-hosted-viewer.png') });
     await page.goto(base + (options['viewer-path'] || '/index.html'));
     await page.locator('#file-input:not(:disabled)').waitFor();
     await page.locator('#file-input').setInputFiles({ name: 'standalone.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
     await page.getByRole('gridcell', { name: 'Row 1', exact: true }).waitFor();
+    assert.equal(await page.locator('#csv-options').evaluate(button => button.hidden), false);
     assert.equal(await page.locator('.file-meta').isVisible(), true);
     assert.match(await page.locator('#file-name').textContent(), /standalone.csv/);
     assert.deepEqual(errors, []);
-    console.log('Compact viewer: portrait/landscape, preserved edit focus, nested actions, disabled states, real scroll clearance, 40-row save, and standalone filename passed.');
+    console.log('Compact viewer: portrait/landscape, preserved edit focus, nested actions, disabled states, real scroll clearance, 40-row save, mobile Options hidden, and standalone controls passed.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

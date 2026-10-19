@@ -6,3 +6,9 @@ export function updateHeaderToggle(checkbox, message, options, banner = message)
   message.textContent = reason;
   banner.hidden = !reason;
 }
+
+/** Mobile hosts preserve the dialect automatically without exposing controls. */
+export function applyCsvOptionsHostUi(button, dialog, hosted, hostUi = {}) {
+  button.hidden = hosted && hostUi.mobile === true;
+  if (button.hidden && dialog.open) dialog.close('cancel');
+}
