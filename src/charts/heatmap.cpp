@@ -1,5 +1,7 @@
 #include "csv_chart_common.hpp"
 
+#include "../pipeline/common/flexible_date.hpp"
+
 #include <svgplot/svgplot.hpp>
 
 #include <algorithm>
@@ -19,99 +21,28 @@ namespace csvzall::charts {
 namespace {
 
 using Day = std::chrono::sys_days;
-
-enum class DateOrder {
-  MonthDay,
-  DayMonth,
-};
-
-struct DateParts {
-  std::string raw;
-  std::string first;
-  std::string second;
-  std::string third;
-  unsigned a = 0;
-  unsigned b = 0;
-  unsigned c = 0;
-};
-
-std::optional<unsigned> ParseDatePart(std::string_view text) {
-  if (text.empty()) {
-    return std::nullopt;
-  }
-  unsigned value = 0;
-  for (const unsigned char ch : text) {
-    if (std::isdigit(ch) == 0) {
-      return std::nullopt;
-    }
-    value = value * 10 + static_cast<unsigned>(ch - '0');
-  }
-  return value;
-}
-
-DateParts SplitDateParts(std::string_view text) {
-  DateParts parts;
-  parts.raw = Trim(text);
-  const auto first_sep = parts.raw.find_first_of("-/");
-  if (first_sep == std::string::npos) {
-    throw std::runtime_error("invalid heatmap date: " + std::string(text));
-  }
-  const auto second_sep = parts.raw.find_first_of("-/", first_sep + 1);
-  if (second_sep == std::string::npos ||
-      parts.raw.find_first_of("-/", second_sep + 1) != std::string::npos) {
-    throw std::runtime_error("invalid heatmap date: " + std::string(text));
-  }
-
-  parts.first = parts.raw.substr(0, first_sep);
-  parts.second = parts.raw.substr(first_sep + 1, second_sep - first_sep - 1);
-  parts.third = parts.raw.substr(second_sep + 1);
-  const auto a = ParseDatePart(parts.first);
-  const auto b = ParseDatePart(parts.second);
-  const auto c = ParseDatePart(parts.third);
-  if (!a || !b || !c) {
-    throw std::runtime_error("invalid heatmap date: " + std::string(text));
-  }
-  parts.a = *a;
-  parts.b = *b;
-  parts.c = *c;
-  return parts;
-}
-
-Day MakeDate(int year, unsigned month, unsigned day, std::string_view raw) {
-  const std::chrono::year_month_day ymd{
-      std::chrono::year{year}, std::chrono::month{month}, std::chrono::day{day}};
-  if (!ymd.ok()) {
-    throw std::runtime_error("invalid heatmap date: " + std::string(raw));
-  }
-  return Day{ymd};
-}
-
-std::optional<DateOrder> DateOrderClue(std::string_view text) {
-  const auto parts = SplitDateParts(text);
-  if (parts.first.size() == 4) {
-    return std::nullopt;
-  }
-  if (parts.third.size() != 4) {
-    throw std::runtime_error("invalid heatmap date: " + std::string(text));
-  }
-  if (parts.a > 12 && parts.b <= 12) {
-    return DateOrder::DayMonth;
-  }
-  if (parts.b > 12 && parts.a <= 12) {
-    return DateOrder::MonthDay;
-  }
-  return std::nullopt;
-}
+using DateOrder = ::csvzall::pipeline::common::DateOrder;
+using ::csvzall::pipeline::common::FormatIsoDate;
 
 DateOrder InferDateOrder(const std::vector<std::string>& values) {
+  using ::csvzall::pipeline::common::DateOrderClue;
   std::optional<DateOrder> inferred;
   for (const auto& value : values) {
     if (value.empty()) {
       continue;
     }
-    const auto clue = DateOrderClue(value);
-    if (!clue) {
-      continue;
+    std::optional<DateOrder> clue;
+    switch (::csvzall::pipeline::common::FindDateOrderClue(value)) {
+      case DateOrderClue::Invalid:
+        throw std::runtime_error("invalid heatmap date: " + value);
+      case DateOrderClue::None:
+        continue;
+      case DateOrderClue::MonthDay:
+        clue = DateOrder::MonthDay;
+        break;
+      case DateOrderClue::DayMonth:
+        clue = DateOrder::DayMonth;
+        break;
     }
     if (inferred && *inferred != *clue) {
       throw std::runtime_error("conflicting heatmap date formats near: " + value);
@@ -121,34 +52,12 @@ DateOrder InferDateOrder(const std::vector<std::string>& values) {
   return inferred.value_or(DateOrder::MonthDay);
 }
 
-Day ParseFlexibleDate(std::string_view text, DateOrder order = DateOrder::MonthDay) {
-  const auto parts = SplitDateParts(text);
-  if (parts.first.size() == 4) {
-    return MakeDate(static_cast<int>(parts.a), parts.b, parts.c, text);
+Day ParseHeatmapDate(std::string_view text, DateOrder order = DateOrder::MonthDay) {
+  const auto day = ::csvzall::pipeline::common::ParseFlexibleDate(text, order);
+  if (!day) {
+    throw std::runtime_error("invalid heatmap date: " + std::string(text));
   }
-  if (parts.third.size() == 4) {
-    if (parts.a > 12 && parts.b <= 12) {
-      return MakeDate(static_cast<int>(parts.c), parts.b, parts.a, text);
-    }
-    if (parts.b > 12 && parts.a <= 12) {
-      return MakeDate(static_cast<int>(parts.c), parts.a, parts.b, text);
-    }
-    if (order == DateOrder::DayMonth) {
-      return MakeDate(static_cast<int>(parts.c), parts.b, parts.a, text);
-    }
-    return MakeDate(static_cast<int>(parts.c), parts.a, parts.b, text);
-  }
-
-  throw std::runtime_error("invalid heatmap date: " + std::string(text));
-}
-
-std::string FormatIsoDate(Day day) {
-  const auto ymd = std::chrono::year_month_day{day};
-  std::ostringstream output;
-  output << static_cast<int>(ymd.year()) << '-'
-         << std::setw(2) << std::setfill('0') << static_cast<unsigned>(ymd.month()) << '-'
-         << std::setw(2) << std::setfill('0') << static_cast<unsigned>(ymd.day());
-  return output.str();
+  return *day;
 }
 
 Day TodayLocalDate() {
@@ -230,14 +139,14 @@ std::pair<std::string, std::string> ResolveHeatmapDateRange(const HeatmapSpec& s
     if (spec.start_date.empty() || spec.end_date.empty()) {
       throw std::runtime_error("start and end dates are required unless lookback is set");
     }
-    return {FormatIsoDate(ParseFlexibleDate(spec.start_date, order)),
-            FormatIsoDate(ParseFlexibleDate(spec.end_date, order))};
+    return {FormatIsoDate(ParseHeatmapDate(spec.start_date, order)),
+            FormatIsoDate(ParseHeatmapDate(spec.end_date, order))};
   }
   if (!spec.start_date.empty()) {
     throw std::runtime_error("lookback cannot be combined with start");
   }
   const auto end =
-      spec.end_date.empty() ? TodayLocalDate() : ParseFlexibleDate(spec.end_date, order);
+      spec.end_date.empty() ? TodayLocalDate() : ParseHeatmapDate(spec.end_date, order);
   const auto start = StartForLookback(end, spec.lookback);
   return {FormatIsoDate(start), FormatIsoDate(end)};
 }
@@ -380,7 +289,7 @@ CsvChartResult RenderHeatmapCsv(csv::CSVReader& reader,
   const auto date_order = InferDateOrder(dates_for_inference);
   cells.reserve(pending_cells.size());
   for (auto& pending : pending_cells) {
-    const auto iso_date = FormatIsoDate(ParseFlexibleDate(pending.date, date_order));
+    const auto iso_date = FormatIsoDate(ParseHeatmapDate(pending.date, date_order));
     cells.push_back({
         svgplot::parse_date(iso_date),
         pending.value,

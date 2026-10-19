@@ -17,6 +17,10 @@ namespace csvzall::postgres {
 struct ConnectionConfig;
 }
 
+namespace SQLite {
+class Database;
+}
+
 namespace csvzall::pipeline::commands {
 
 // ---------------------------------------------------------------------------
@@ -200,6 +204,23 @@ int RunSqlExport(const std::string& input_path,
                  const RunOptions& options,
                  const LoggerCallbacks& logger,
                  RunStats& stats);
+int RunSqlExport(const std::string& input_path,
+                 const std::string& dest_path,
+                 const std::string& table_name,
+                 SqlExportTableMode mode,
+                 std::istream& input,
+                 const RunOptions& options,
+                 const LoggerCallbacks& logger,
+                 RunStats& stats);
+
+// Load one CSV input (options.input_path, or input for stdin) into a new table
+// inside a caller-owned database. Returns 0 on success.
+int LoadCsvInputIntoTable(SQLite::Database& db,
+                          const std::string& table_name,
+                          std::istream& input,
+                          const RunOptions& options,
+                          const LoggerCallbacks& logger,
+                          RunStats& stats);
 
 // Run an arbitrary SQL query against a CSV loaded into a SQLite table.
 // The result set is streamed as CSV to output.
@@ -211,6 +232,17 @@ int RunSqlQueryCsv(const std::string& sql_query,
                    const RunOptions& options,
                    const LoggerCallbacks& logger,
                    RunStats& stats);
+
+// Load several CSVs as named tables in one database, then run sql_query.
+// stdin_input backs the (at most one) table whose path is "-".
+int RunSqlQueryCsvTables(const std::string& sql_query,
+                         const std::vector<SqlCsvTable>& tables,
+                         const std::string& format,
+                         std::istream& stdin_input,
+                         std::ostream& output,
+                         const RunOptions& options,
+                         const LoggerCallbacks& logger,
+                         RunStats& stats);
 
 enum class SqlQueryInputKind {
   kCsv,
@@ -231,7 +263,8 @@ int RunSqlQueryDb(const std::string& sql_query,
                   const std::string& format,
                   std::ostream& output,
                   const LoggerCallbacks& logger,
-                  RunStats& stats);
+                  RunStats& stats,
+                  const std::vector<std::string>& load_extensions = {});
 
 // Heuristic detector for likely integer division in SQL expressions.
 // Ignores quoted strings and SQL comments.

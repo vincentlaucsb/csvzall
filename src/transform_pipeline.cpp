@@ -146,6 +146,18 @@ int RunSqlExport(const std::string& input_path,
   return commands::RunSqlExport(input_path, dest_path, table_name, input, options, logger, stats);
 }
 
+int RunSqlExport(const std::string& input_path,
+                 const std::string& dest_path,
+                 const std::string& table_name,
+                 SqlExportTableMode mode,
+                 std::istream& input,
+                 const RunOptions& options,
+                 const LoggerCallbacks& logger,
+                 RunStats& stats) {
+  return commands::RunSqlExport(input_path, dest_path, table_name, mode, input, options, logger,
+                                stats);
+}
+
 int RunSqlQueryCsv(const std::string& sql_query,
                    const std::string& table_name,
                    const std::string& format,
@@ -155,6 +167,18 @@ int RunSqlQueryCsv(const std::string& sql_query,
                    const LoggerCallbacks& logger,
                    RunStats& stats) {
   return commands::RunSqlQueryCsv(sql_query, table_name, format, input, output, options, logger, stats);
+}
+
+int RunSqlQueryCsvTables(const std::string& sql_query,
+                         const std::vector<SqlCsvTable>& tables,
+                         const std::string& format,
+                         std::istream& stdin_input,
+                         std::ostream& output,
+                         const RunOptions& options,
+                         const LoggerCallbacks& logger,
+                         RunStats& stats) {
+  return commands::RunSqlQueryCsvTables(sql_query, tables, format, stdin_input, output, options,
+                                        logger, stats);
 }
 
 SqlQueryInputKind DetectSqlQueryInputKind(const std::string& path) {
@@ -174,8 +198,10 @@ int RunSqlQueryDb(const std::string& sql_query,
                   const std::string& format,
                   std::ostream& output,
                   const LoggerCallbacks& logger,
-                  RunStats& stats) {
-  return commands::RunSqlQueryDb(sql_query, db_path, format, output, logger, stats);
+                  RunStats& stats,
+                  const std::vector<std::string>& load_extensions) {
+  return commands::RunSqlQueryDb(sql_query, db_path, format, output, logger, stats,
+                                 load_extensions);
 }
 
 bool ShouldWarnIntegerDivision(const std::string& sql_query) {

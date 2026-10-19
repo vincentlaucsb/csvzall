@@ -132,10 +132,12 @@ bool LoadCsvIntoTable(csv::CSVReader& reader,
       db.exec("PRAGMA journal_mode = OFF");
     }
 
+    // Create the table inside the load transaction so a failed or interrupted
+    // load into an existing database leaves no empty or partial table behind.
+    SQLite::Transaction tx(db);
     db.exec(BuildCreateTable(table_name, headers, column_affinities));
 
     SQLite::Statement stmt(db, BuildInsert(table_name, headers.size()));
-    SQLite::Transaction tx(db);
 
     for (auto& row : reader) {
       const int n = static_cast<int>(headers.size());

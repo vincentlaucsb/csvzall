@@ -14,6 +14,8 @@ inline ::csvzall::sqlite::SqliteDbOpenOptions MakeSqliteDbOpenOptions(
       options.input_is_stdin,
       options.input_path,
       options.sqlite_threshold_mb,
+      {},
+      options.sqlite_load_extensions,
   };
 }
 

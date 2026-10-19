@@ -143,7 +143,9 @@ csvzall merge todoist_activity_store.csv incoming.csv --key event_id --in-place 
 
 Optional, missing, and null values become empty CSV cells. Nested API payload
 paths such as `$.extra_data.content` are evaluated relative to each selected
-row. Scalars are emitted as stable text; objects and arrays selected as column
+row. Start a column path with `$$` to read from the document root instead; for
+example, `"fetched_at": "$$.as_of"` copies snapshot metadata onto every row.
+Scalars are emitted as stable text; objects and arrays selected as column
 values are rejected.
 
 ### `sql query --csv <input.csv> --sql <query>`
@@ -169,14 +171,36 @@ csvzall sql query --csv gym-attendance.csv --format markdown --sql \
   "SELECT substr(date, 1, 7) AS month, COUNT(*) AS attendance_days FROM data GROUP BY month ORDER BY month"
 ```
 
-SQLite-backed commands support regular expressions through both the `REGEXP`
-operator and `regexp_like(value, pattern)`. Prefix a pattern with `(?i)` for
-case-insensitive matching.
+SQLite-backed commands support PCRE2 regular expressions through the `REGEXP`
+operator, `regexp_like(value, pattern)`, `regexp_substr`, `regexp_capture`, and
+`regexp_replace`. Matching is UTF-8 and Unicode-aware; start a pattern with
+`(?i)` for case-insensitive matching.
 
 ```sh
 csvzall sql query --csv gym-events.csv --sql \
   "SELECT content FROM data WHERE regexp_like(content, '(?i)\b(gym|workout|lift|weights)\b')"
 ```
+
+Hand-entered dates such as `5/26/2026`, `4/??/2026`, or `2026` become ISO dates
+with `parse_date(value [, 'mdy'|'dmy'])`; `date_precision` reports `day`,
+`month`, or `year`. SQLite math functions (`sqrt`, `pow`, `ln`, ...) and
+compiled-in [sqlean](https://github.com/nalgeon/sqlean) modules (`fuzzy_leven`,
+`median`, `percentile`, `sha256`, `uuid4`, ...) are also available. See
+[SQLite capabilities](docs/sqlite-capabilities.md) for the full list.
+
+Repeat `--csv <name>=<path>` to load several CSVs as named tables in one
+database and `JOIN` them without a temporary `.db` file:
+
+```sh
+csvzall sql query --csv rides=strava.csv --csv log=maintenance.csv --sql \
+  "SELECT log.Item, SUM(rides.distance) AS km FROM log JOIN rides ON rides.date >= parse_date(log.Date) GROUP BY log.Item"
+```
+
+`csvzall sql load <input.csv> --dest work.db --table <name>` writes a SQLite
+database file. Pass `--add-table` to add another table to an existing database,
+or `--replace-table` to replace one. In query mode, `--load-extension <path>`
+loads a native SQLite extension through the C API; SQL's `load_extension()`
+stays disabled, and chart configs and the viewer cannot load extensions.
 
 ### `max [input] --column <name>`
 
@@ -533,7 +557,10 @@ release runner.
 | [indicators](https://github.com/p-ranav/indicators) v2.3 | [Pranav](https://github.com/p-ranav) | Terminal progress bars for long-running imports | FetchContent |
 | [zlib](https://github.com/madler/zlib) v1.3.1 | [Mark Adler](https://github.com/madler) and contributors | Optional gzip and ZIP/deflate decompression for compressed CSV inputs | System package if available; FetchContent fallback; omitted when `CSVZALL_ENABLE_COMPRESSED_INPUT=OFF` |
 | [keychain](https://github.com/hrantzsch/keychain) v1.3.1 | [hrantzsch](https://github.com/hrantzsch) | Optional OS credential storage for PostgreSQL passwords | System package if available; FetchContent fallback; Linux requires libsecret |
-| [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite | FetchContent, with a local CMake patch |
+| [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite (built with `SQLITE_ENABLE_MATH_FUNCTIONS`) | FetchContent, with a local CMake patch |
+| [sqlean](https://github.com/nalgeon/sqlean) 0.28.5 (MIT) | [Anton Zhiyanov](https://github.com/nalgeon) and contributors | SQL functions compiled into every csvzall SQLite connection: the `fuzzy`, `stats`, `text`, `crypto`, `uuid`, and `regexp` modules | FetchContent (pinned tag); module sources compiled statically; `cmake/sqlean_patches.cmake` writes patched copies of two files into the build tree |
+| [PCRE2](https://github.com/PCRE2Project/pcre2) 10.42 (BSD-3-Clause) | [Philip Hazel](https://github.com/PhilipHazel) and contributors | Regular-expression engine behind `REGEXP` and the `regexp_*` SQL functions | Vendored inside sqlean's `regexp` module; compiled statically with Unicode support, without JIT |
+| [SQLite `sqlite3ext.h`](https://github.com/sqlite/sqlite/blob/version-3.46.1/src/sqlite3ext.h) 3.46.1 | [SQLite developers](https://sqlite.org/crew.html) | Loadable-extension header for the test extension used by `--load-extension` tests | Test-only download with a pinned SHA-256; skipped when offline |
 | [libpqxx](https://github.com/jtv/libpqxx) v7.10.1 | [Jeroen T. Vermeulen](https://pqxx.org/libpqxx/) | PostgreSQL C++ client API used by the `postgres` command | System package if available; FetchContent fallback |
 | [PostgreSQL libpq](https://www.postgresql.org/docs/current/libpq.html) | [PostgreSQL Global Development Group](https://www.postgresql.org/community/) | PostgreSQL client C library required by libpqxx | System PostgreSQL installation |
 
@@ -592,8 +619,8 @@ release runner.
 - Data flows on **stdout**, diagnostics on **stderr**. Every command is safe to pipe.
 - `-` as the input path means stdin. All commands accept it.
 - `filter` and `derive` use SQL syntax — standard `WHERE` clauses and SQL expressions.
-- SQLite-backed commands support `REGEXP` and `regexp_like(value, pattern)`;
-  NULL input does not match and invalid patterns fail the query.
+- SQLite-backed commands support PCRE2 `REGEXP` and `regexp_*` functions;
+  NULL input does not match, and NULL or invalid patterns fail the query.
 - `merge` is the keyed rerunnable import primitive; `append` is only exact-header concatenation.
 - Column matching is case-insensitive by default (SQLite identifier resolution).
 - `calendar` consumes fixed-shape `date,content` CSV, rejects duplicate dates, and renders locale-independent Sunday-first month tables.
