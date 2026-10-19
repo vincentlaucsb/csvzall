@@ -33,6 +33,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const csvDelimiter = document.getElementById('csv-options-delimiter');
   const csvQuote = document.getElementById('csv-options-quote');
   const csvHasHeaders = document.getElementById('csv-options-has-headers');
+  const csvHeaderWarning = document.getElementById('csv-options-header-warning');
+  document.getElementById('csv-options-warning-icon').append(createIcon('alert-triangle'));
   const csvInputDelimiter = document.getElementById('csv-input-delimiter');
   const csvInputQuote = document.getElementById('csv-input-quote');
   const csvInputRead = document.getElementById('csv-input-read');
@@ -742,7 +744,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     document.getElementById('csv-input-help').textContent = dirty
       ? 'Save or reset changes before changing the input dialect.'
       : 'Reading changes the view without writing the file.';
-    updateHeaderToggle(csvHasHeaders, document.getElementById('csv-options-header-help'), csvOptions);
+    updateHeaderToggle(csvHasHeaders, document.getElementById('csv-options-header-help'), csvOptions, csvHeaderWarning);
     document.getElementById('csv-options-current').textContent =
       `Current dialect: delimiter ${JSON.stringify(csvOptions.delimiter)}, quote ${csvOptions.quote ? JSON.stringify(csvOptions.quote) : 'none'}. BOM: ${csvOptions.bom ? 'present' : 'absent'}.`;
     document.getElementById('csv-options-headers').textContent =

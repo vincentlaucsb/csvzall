@@ -156,6 +156,17 @@ test('embedded build contains its worker and engine while the standalone release
           }
         }
       }
+      for (const delimiter of ['\t', ';']) {
+        const contents = `name, role\nAlice, admin${delimiter}London\nBob${delimiter}Paris\nCarol${delimiter}Rome\nDan${delimiter}Berlin\n`;
+        const opened = await check('open', { name: 'later-fields.csv', buffer: new TextEncoder().encode(contents).buffer });
+        assert.equal(opened.csvOptions.delimiter, delimiter);
+        assert.equal(opened.csvOptions.hasHeaders, false);
+        assert.match(opened.csvOptions.headersDisabledReason, /2 versus 1/);
+        const expected = [['name, role', ''], ['Alice, admin', 'London'], ['Bob', 'Paris'], ['Carol', 'Rome'], ['Dan', 'Berlin']];
+        assert.equal(JSON.stringify((await check('readRows', { offset: 0, limit: 100 })).rows), JSON.stringify(expected));
+        assert.equal(await savedText(), contents.replace('name, role\n', `name, role${delimiter}\n`));
+        assert.equal(JSON.stringify((await check('readRows', { offset: 0, limit: 100 })).rows), JSON.stringify(expected));
+      }
       const sparse = await check('open', { name: 'sparse.tsv', buffer: new TextEncoder().encode('cargo\tdestination\nGlitter\tMoon\nThunder\tCloud\tEXTRA\nSpoon\n').buffer });
       assert.equal(sparse.csvOptions.delimiter, '\t');
       assert.equal(sparse.csvOptions.hasHeaders, false);

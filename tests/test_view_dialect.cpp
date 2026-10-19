@@ -360,6 +360,23 @@ TEST_CASE("view dialect: sparse ragged samples do not collapse to an absent deli
   CHECK(data.read_rows(0, 1).at(0) == std::vector<std::string>{"plain value"});
 }
 
+TEST_CASE("view dialect: later records preserve an inferred delimiter despite punctuation in the first row", "[view-dialect]") {
+  for (const char separator : {'\t', ';'}) {
+    const std::string d(1, separator);
+    CsvFixture file("name, role\nAlice, admin" + d + "London\nBob" + d + "Paris\nCarol" + d + "Rome\nDan" + d + "Berlin\n");
+    auto data = file.open();
+    CHECK(data.delimiter() == d);
+    CHECK_FALSE(data.has_headers());
+    CHECK_FALSE(data.headers_disabled_reason().empty());
+    const std::vector<std::vector<std::string>> expected{
+        {"name, role", ""}, {"Alice, admin", "London"}, {"Bob", "Paris"}, {"Carol", "Rome"}, {"Dan", "Berlin"}};
+    CHECK(data.read_rows(0, 100) == expected);
+    data.save();
+    CHECK(file.bytes() == "name, role" + d + "\nAlice, admin" + d + "London\nBob" + d + "Paris\nCarol" + d + "Rome\nDan" + d + "Berlin\n");
+    CHECK(data.read_rows(0, 100) == expected);
+  }
+}
+
 TEST_CASE("view dialect: blank records cannot shift page offsets", "[view-dialect]") {
   CsvFixture file("a,b\n1,2\n\n3,4\n");
   auto data = file.open(csv::CSVFormat().delimiter(',').header_row(0));

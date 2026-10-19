@@ -73,18 +73,19 @@ test('only ordinary dialogs opt into backdrop dismissal', () => {
 
 test('variable-width files disable and uncheck headers with remediation; corrected files reset the control', () => {
   const checkbox = { checked: true, disabled: false };
-  const message = { textContent: '', hidden: true };
+  const message = { textContent: '' };
+  const banner = { hidden: true };
   const reason = 'Headers are disabled. Add missing header names, then save and reopen.';
-  updateHeaderToggle(checkbox, message, { hasHeaders: true, headersDisabledReason: reason });
+  updateHeaderToggle(checkbox, message, { hasHeaders: true, headersDisabledReason: reason }, banner);
   assert.equal(checkbox.checked, false);
   assert.equal(checkbox.disabled, true);
-  assert.equal(message.hidden, false);
+  assert.equal(banner.hidden, false);
   assert.equal(message.textContent, reason);
-  updateHeaderToggle(checkbox, message, { hasHeaders: false });
+  updateHeaderToggle(checkbox, message, { hasHeaders: false }, banner);
   assert.equal(checkbox.disabled, false);
   assert.equal(checkbox.checked, false);
-  assert.equal(message.hidden, true);
+  assert.equal(banner.hidden, true);
   assert.equal(message.textContent, '');
-  updateHeaderToggle(checkbox, message, { hasHeaders: true });
+  updateHeaderToggle(checkbox, message, { hasHeaders: true }, banner);
   assert.equal(checkbox.checked, true);
 });

@@ -207,8 +207,12 @@ csv::CSVFormat InferViewerDelimiter(const std::string& path, csv::CSVFormat form
     auto probe_format = format;
     probe_format.no_header();
     csv::CSVReader guessed(guessed_stream, probe_format);
-    auto first = guessed.begin();
-    if (first == guessed.end() || first->size() > 1) return format;
+    bool has_records = false;
+    for (const auto& row : guessed) {
+      has_records = true;
+      if (row.size() > 1) return format;
+    }
+    if (!has_records) return format;
     std::size_t best_width = 1;
     char best_delimiter = guessed.get_format().get_delim();
     for (const auto candidate : candidates) {
