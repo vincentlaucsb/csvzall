@@ -8,6 +8,7 @@
 
 namespace csvzall::pipeline::commands::view_internal {
 
+std::string PreviewCurrentCsvChart(const CsvViewData& data, std::string_view body, const LoggerCallbacks& logger);
 std::string BuildChartConfigListJson(const CsvViewData& data);
 std::string GenerateCurrentCsvChart(const CsvViewData& data,
                                     std::string_view body,

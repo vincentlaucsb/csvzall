@@ -1500,3 +1500,37 @@ TEST_CASE("view: startup-json wraps the tokenized localhost URL") {
       pipeline::commands::FormatViewStartupOutput(url, true) ==
       R"({"url":"http://127.0.0.1:49152/?token=abc123"})");
 }
+
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+TEST_CASE("view: chart previews render current options without saving or overwriting output") {
+  const auto dir = TempDir("csvzall_view_chart_preview");
+  const auto path = dir / "volume.csv";
+  { std::ofstream output(path); output << "week,volume\n1,100\n2,125\n"; }
+  { std::ofstream output(dir / "original.svg"); output << "original output"; }
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_mode = pipeline::ViewModeSelection::Paged;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(path.string(), options, tests::MakeNullLogger(), stats);
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, false, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+  const std::string body = R"({"type":"bar","id":"preview","label":"week","value":"volume","title":"Unsaved title","output":"original.svg"})";
+  const auto denied = client.Post("/api/chart-config/preview", body, "application/json");
+  REQUIRE(denied); CHECK(denied->status == 403);
+  const auto response = client.Post("/api/chart-config/preview", headers, body, "application/json");
+  REQUIRE(response); REQUIRE(response->status == 200);
+  CHECK(response->body.find("<svg") != std::string::npos);
+  CHECK(response->body.find("Unsaved title") != std::string::npos);
+  CHECK_FALSE(std::filesystem::exists(dir / ".csvzall" / "charts.json"));
+  CHECK(ReadTextFile(dir / "original.svg") == "original output");
+  const auto invalid = client.Post("/api/chart-config/preview", headers,
+      R"({"type":"bar","id":"preview","label":"missing","value":"volume","output":"original.svg"})", "application/json");
+  REQUIRE(invalid); CHECK(invalid->status == 400);
+  CHECK(ReadTextFile(dir / "original.svg") == "original output");
+  server.Stop();
+  std::filesystem::remove_all(dir);
+}
+#endif

@@ -29,6 +29,7 @@ using view_internal::BuildRowsJson;
 using view_internal::BuildSchemaJson;
 using view_internal::BuildSqlQueryResultJson;
 using view_internal::GenerateCurrentCsvChart;
+using view_internal::PreviewCurrentCsvChart;
 using view_internal::GenerateSessionToken;
 using view_internal::JsonStringArrayField;
 using view_internal::JsonStringArrayFieldOr;
@@ -513,6 +514,20 @@ int ViewServer::Start(const ViewServerOptions& options) {
                          response.status = 409;
                          response.set_content(std::string(ex.what()) + "\n",
                                               "text/plain; charset=utf-8");
+                       }
+                     });
+
+  impl_->server.Post("/api/chart-config/preview",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       try {
+                         response.set_content(PreviewCurrentCsvChart(impl_->data, request.body, impl_->logger),
+                                              "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
                        }
                      });
 

@@ -116,3 +116,16 @@ engine, portrait/landscape transitions, nested commands, 40-row saves and traili
 clearance. It accepts the same Playwright module and `--browser` option as the
 shared smoke test. Add `--viewer-path=/dist-embedded/index.html` after an embedded
 build to exercise the exact self-contained distribution.
+
+
+## Chart previews
+
+The native chart form places Preview immediately after Cancel and renders current,
+unsaved options beside the form only on click. The authenticated
+`POST /api/chart-config/preview` endpoint returns either SVG text (`svg`) or
+Markdown (`markdown`). It shares chart specification construction with Save,
+renders into a unique temporary directory, and removes that directory on success
+or failure. It never writes charts.json or the configured output. Hosts can
+provide a `previewChart(payload)` callback to the shared form instead of using
+the HTTP endpoint. Edits invalidate visible and pending previews; closing the form
+ignores late responses.
