@@ -125,6 +125,12 @@ shared smoke test. Add `--viewer-path=/dist-embedded/index.html` after an embedd
 build to exercise the exact self-contained distribution.
 
 
+`node scripts/smoke_mobile_csv_options.cjs` checks mobile host policy independently
+of the broader editing/focus smoke flow. It accepts the same options, verifies
+that Options and its divider are hidden on mobile and absent from More actions,
+checks every uneven row, and retains desktop/standalone controls. It writes
+`mobile-hidden-options.png` in its output directory.
+
 ## Chart previews
 
 The native chart form places Preview immediately after Cancel and renders current,

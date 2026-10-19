@@ -210,6 +210,7 @@ button:disabled {
 }
 
 .toolbar-divider:where([hidden]),
+.edit-toolbar:where(:not([hidden])) > #csv-options[hidden] + .toolbar-divider,
 .edit-toolbar:where(:not([hidden])) > #csv-options[data-overflowed] + .toolbar-divider {
   display: none;
 }
