@@ -19,6 +19,7 @@ set(_assets
   "/assets/modules/host-grid.mjs|${VIEWER_SOURCE_DIR}/modules/host-grid.mjs|application/javascript|viewer_host_grid"
   "/assets/modules/shell-markup.mjs|${VIEWER_SOURCE_DIR}/modules/shell-markup.mjs|application/javascript|viewer_shell_markup"
   "/assets/modules/shell.mjs|${VIEWER_SOURCE_DIR}/modules/shell.mjs|application/javascript|viewer_shell"
+  "/assets/modules/csv-options.mjs|${VIEWER_SOURCE_DIR}/modules/csv-options.mjs|application/javascript|viewer_csv_options"
   "/assets/modules/compact-layout.mjs|${VIEWER_SOURCE_DIR}/modules/compact-layout.mjs|application/javascript|viewer_compact_layout"
   "/|${VIEWER_SOURCE_DIR}/index.html|text/html|index_html"
   "/assets/viewer.css|${VIEWER_SOURCE_DIR}/viewer.css|text/css|viewer_css"

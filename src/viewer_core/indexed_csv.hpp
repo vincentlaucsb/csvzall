@@ -44,6 +44,7 @@ class CsvIndexedFile {
   [[nodiscard]] std::string delimiter() const;
   [[nodiscard]] std::string quote() const;
   [[nodiscard]] bool has_headers() const;
+  [[nodiscard]] const std::string& headers_disabled_reason() const;
   [[nodiscard]] bool has_bom() const;
   void set_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);
   void read_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);
@@ -91,6 +92,7 @@ class CsvIndexedFile {
   csv::CSVFormat format_;
   csv::CSVFormat output_format_;
   bool has_headers_ = true;
+  std::string headers_disabled_reason_;
   bool has_bom_ = false;
   bool modified_ = false;
   std::string newline_ = "\n";
@@ -117,6 +119,7 @@ class CsvViewData {
   [[nodiscard]] std::string delimiter() const;
   [[nodiscard]] std::string quote() const;
   [[nodiscard]] bool has_headers() const;
+  [[nodiscard]] const std::string& headers_disabled_reason() const;
   [[nodiscard]] bool has_bom() const;
   void set_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);
   void read_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);

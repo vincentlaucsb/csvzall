@@ -301,7 +301,7 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   // Every transitive module and optional stylesheet must be reachable from a
   // production binary. Nested feature routes are covered as HTTP, not just
   // entries in the generated asset table.
-  for (const auto* route : {"shell.mjs", "shell-markup.mjs", "compact-layout.mjs", "host-grid.mjs", "save-state.mjs", "local-file.mjs",
+  for (const auto* route : {"shell.mjs", "shell-markup.mjs", "csv-options.mjs", "compact-layout.mjs", "host-grid.mjs", "save-state.mjs", "local-file.mjs",
        "adapters/native.mjs", "features/sql.mjs", "features/charts.mjs", "features/style.mjs", "chart-form.mjs"}) {
     const auto module = client.Get(std::string("/assets/modules/") + route);
     INFO(route);

@@ -68,6 +68,7 @@ class CsvViewData {
   [[nodiscard]] std::string delimiter() const;
   [[nodiscard]] std::string quote() const;
   [[nodiscard]] bool has_headers() const;
+  [[nodiscard]] const std::string& headers_disabled_reason() const;
   [[nodiscard]] bool has_bom() const;
   void set_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);
   void read_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);

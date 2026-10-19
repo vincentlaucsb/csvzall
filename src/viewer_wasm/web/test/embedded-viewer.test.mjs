@@ -156,6 +156,29 @@ test('embedded build contains its worker and engine while the standalone release
           }
         }
       }
+      const sparse = await check('open', { name: 'sparse.tsv', buffer: new TextEncoder().encode('cargo\tdestination\nGlitter\tMoon\nThunder\tCloud\tEXTRA\nSpoon\n').buffer });
+      assert.equal(sparse.csvOptions.delimiter, '\t');
+      assert.equal(sparse.csvOptions.hasHeaders, false);
+      assert.equal(sparse.rowCount, 4);
+      const ragged = await check('open', { name: 'ragged.tsv', buffer: new TextEncoder().encode('a\tb\n1\t2\n3\t4\tEXTRA\n5\t6\n').buffer });
+      assert.equal(ragged.csvOptions.hasHeaders, false);
+      assert.match(ragged.csvOptions.headersDisabledReason, /3 versus 2/);
+      assert.equal(ragged.columns.join(','), 'A,B,C');
+      assert.equal(ragged.rowCount, 4);
+      const expected = [['a', 'b', ''], ['1', '2', ''], ['3', '4', 'EXTRA'], ['5', '6', '']];
+      assert.equal(JSON.stringify((await check('readRows', { offset: 0, limit: 100 })).rows), JSON.stringify(expected));
+      for (let i = 0; i < expected.length; ++i) {
+        assert.equal(JSON.stringify((await check('readRows', { offset: i, limit: 1 })).rows[0]), JSON.stringify(expected[i]));
+      }
+      const unsafeHeaders = await request('csvOptions', { delimiter: '\t', quote: '"', hasHeaders: true });
+      assert.equal(unsafeHeaders.ok, false);
+      assert.match(unsafeHeaders.error, /Headers are disabled/);
+      await check('editCell', { rowIndex: 0, column: 'C', value: 'c' });
+      assert.equal(await savedText(), 'a\tb\tc\n1\t2\t\n3\t4\tEXTRA\n5\t6\t\n');
+      const corrected = await check('csvOptions', { delimiter: '\t', quote: '"', hasHeaders: true });
+      assert.equal(corrected.csvOptions.hasHeaders, true);
+      assert.equal(corrected.csvOptions.headersDisabledReason, undefined);
+      assert.equal(corrected.rowCount, 3);
     } else {
       assert.equal(outputs.filter(file => file.fileName.endsWith('.wasm')).length, 1);
       assert.equal(outputs.filter(file => /csv-worker.*\.js$/.test(file.fileName)).length, 1);

@@ -245,3 +245,126 @@ TEST_CASE("view dialect: native options endpoint validates authentication and pr
   readonly.Stop();
   CHECK(readonly.Wait() == 0);
 }
+
+
+TEST_CASE("view dialect: wider rows force headerless mode without losing records", "[view-dialect]") {
+  for (const char separator : {',', '\t'}) {
+    const std::string d(1, separator);
+    CsvFixture file("a" + d + "b\n1" + d + "2\n3" + d + "4" + d + "EXTRA\n5" + d + "6\n7\n");
+    const auto original = file.bytes();
+    auto data = file.open(csv::CSVFormat().delimiter(separator).header_row(0));
+    CHECK_FALSE(data.has_headers());
+    CHECK(data.headers() == std::vector<std::string>{"A", "B", "C"});
+    CHECK(data.row_count() == 5);
+    CHECK(data.headers_disabled_reason().find("3 versus 2") != std::string::npos);
+    CHECK(data.headers_disabled_reason().find("Add missing header names") != std::string::npos);
+    const std::vector<std::vector<std::string>> expected{{"a", "b", ""}, {"1", "2", ""},
+        {"3", "4", "EXTRA"}, {"5", "6", ""}, {"7", "", ""}};
+    CHECK(data.read_rows(0, 100) == expected);
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+      CHECK(data.read_rows(index, 1).at(0) == expected[index]);
+    }
+    CHECK_THROWS(data.set_csv_options(d, "\"", true));
+    CHECK(file.bytes() == original);
+    CHECK(data.read_rows(0, 100) == expected);
+    data.edit_cell(2, "C", "kept");
+    data.save();
+    CHECK(file.bytes() == "a" + d + "b" + d + "\n1" + d + "2" + d + "\n3" + d + "4" + d + "kept\n5" + d + "6" + d + "\n7" + d + d + "\n");
+    CHECK(data.row_count() == 5);
+  }
+}
+
+TEST_CASE("view dialect: shorter records retain headers and page without skipping", "[view-dialect]") {
+  CsvFixture file("a,b,c\n1,2,3\n4\n5,6\n7,8,9\n");
+  auto data = file.open();
+  CHECK(data.has_headers());
+  CHECK(data.headers_disabled_reason().empty());
+  const std::vector<std::vector<std::string>> expected{{"1", "2", "3"}, {"4", "", ""},
+      {"5", "6", ""}, {"7", "8", "9"}};
+  CHECK(data.row_count() == expected.size());
+  CHECK(data.read_rows(0, 100) == expected);
+  for (std::size_t index = 0; index < expected.size(); ++index) CHECK(data.read_rows(index, 1).at(0) == expected[index]);
+  data.save();
+  CHECK(data.read_rows(0, 100) == expected);
+}
+
+TEST_CASE("view dialect: correcting the first row restores header availability", "[view-dialect]") {
+  CsvFixture file("a,b\n1,2,3\n");
+  auto data = file.open();
+  REQUIRE_FALSE(data.has_headers());
+  REQUIRE_FALSE(data.headers_disabled_reason().empty());
+  data.edit_cell(0, "C", "c");
+  CHECK_THROWS(data.set_csv_options(",", "\"", true));
+  data.save();
+  CHECK(data.headers_disabled_reason().empty());
+  data.set_csv_options(",", "\"", true);
+  CHECK(data.headers() == std::vector<std::string>{"a", "b", "c"});
+  CHECK(data.row_count() == 1);
+  CHECK(data.read_rows(0, 1).at(0) == std::vector<std::string>{"1", "2", "3"});
+  data.save();
+  CHECK(file.bytes() == "a,b,c\n1,2,3\n");
+  CHECK(file.open().has_headers());
+}
+
+TEST_CASE("view dialect: correcting input parsing clears the header restriction without writing", "[view-dialect]") {
+  CsvFixture file("a;b,c\n1;2,3,extra\n");
+  auto data = file.open(csv::CSVFormat().delimiter(',').header_row(0));
+  REQUIRE_FALSE(data.headers_disabled_reason().empty());
+  const auto original = file.bytes();
+  data.read_csv_options(";", "\"", true);
+  CHECK(data.has_headers());
+  CHECK(data.headers_disabled_reason().empty());
+  CHECK(file.bytes() == original);
+  CHECK(data.read_rows(0, 1).at(0) == std::vector<std::string>{"1", "2,3,extra"});
+}
+
+TEST_CASE("view dialect: native API reports and enforces header restriction", "[view-dialect]") {
+  CsvFixture file("a,b\n1,2\n3,4,EXTRA\n5,6\n");
+  csvzall::pipeline::RunOptions options;
+  csvzall::pipeline::RunStats stats;
+  const auto data = csvzall::pipeline::commands::CsvViewData::Open(
+      file.path.string(), options, csvzall::tests::MakeNullLogger(), stats);
+  csvzall::pipeline::commands::ViewServer server(data, csvzall::tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, true, "ragged-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  const httplib::Headers headers{{"X-Session-Token", "ragged-token"}};
+  auto response = client.Get("/api/schema", headers);
+  REQUIRE(response);
+  CHECK(response->body.find(R"("hasHeaders":false)") != std::string::npos);
+  CHECK(response->body.find(R"("headersDisabledReason":)") != std::string::npos);
+  CHECK(response->body.find(R"("totalRows":4)") != std::string::npos);
+  response = client.Post("/api/csv-options", headers,
+      R"({"delimiter":",","quote":"\"","hasHeaders":true})", "application/json");
+  REQUIRE(response); CHECK(response->status == 400);
+  CHECK(response->body.find("Headers are disabled") != std::string::npos);
+  response = client.Get("/api/rows?offset=2&limit=1", headers);
+  REQUIRE(response);
+  CHECK(response->body.find(R"("rows":[["3","4","EXTRA"]])") != std::string::npos);
+  server.Stop(); CHECK(server.Wait() == 0);
+}
+
+
+TEST_CASE("view dialect: sparse ragged samples do not collapse to an absent delimiter", "[view-dialect]") {
+  for (const char separator : {',', '\t'}) {
+    const std::string d(1, separator);
+    CsvFixture file("cargo" + d + "destination\nGlitter" + d + "Moon\nThunder" + d + "Cloud" + d + "EXTRA\nSpoon\n");
+    auto data = file.open();
+    CHECK(data.delimiter() == d);
+    CHECK_FALSE(data.has_headers());
+    CHECK(data.row_count() == 4);
+    CHECK(data.read_rows(2, 1).at(0) == std::vector<std::string>{"Thunder", "Cloud", "EXTRA"});
+  }
+  CsvFixture single("name; literal punctuation\nplain value\nanother value\n");
+  auto data = single.open();
+  CHECK(data.headers().size() == 1);
+  CHECK(data.read_rows(0, 1).at(0) == std::vector<std::string>{"plain value"});
+}
+
+TEST_CASE("view dialect: blank records cannot shift page offsets", "[view-dialect]") {
+  CsvFixture file("a,b\n1,2\n\n3,4\n");
+  auto data = file.open(csv::CSVFormat().delimiter(',').header_row(0));
+  const std::vector<std::vector<std::string>> expected{{"1", "2"}, {"", ""}, {"3", "4"}};
+  CHECK(data.row_count() == expected.size());
+  CHECK(data.read_rows(0, 100) == expected);
+  for (std::size_t index = 0; index < expected.size(); ++index) CHECK(data.read_rows(index, 1).at(0) == expected[index]);
+}

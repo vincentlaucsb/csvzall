@@ -65,7 +65,8 @@ function schema() {
     columns,
     fileSize: view.fileSize(),
     rowCount: view.rowCount(),
-    csvOptions: { delimiter: view.delimiter(), quote: view.quote(), hasHeaders: view.hasHeaders(), bom: view.hasBom() },
+    csvOptions: { delimiter: view.delimiter(), quote: view.quote(), hasHeaders: view.hasHeaders(), bom: view.hasBom(),
+      ...(view.headersDisabledReason() ? { headersDisabledReason: view.headersDisabledReason() } : {}) },
   };
 }
 

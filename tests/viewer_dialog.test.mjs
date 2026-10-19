@@ -1,3 +1,4 @@
+import { updateHeaderToggle } from '../src/viewer/modules/csv-options.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installDialogDismiss, installDialogDismissals } from '../src/viewer/modules/dialog-dismiss.mjs';
@@ -67,4 +68,23 @@ test('only ordinary dialogs opt into backdrop dismissal', () => {
   cleanup();
   pointer('pointerdown', 50, 50); pointer('click', 50, 50);
   assert.equal(dialog.open, true);
+});
+
+
+test('variable-width files disable and uncheck headers with remediation; corrected files reset the control', () => {
+  const checkbox = { checked: true, disabled: false };
+  const message = { textContent: '', hidden: true };
+  const reason = 'Headers are disabled. Add missing header names, then save and reopen.';
+  updateHeaderToggle(checkbox, message, { hasHeaders: true, headersDisabledReason: reason });
+  assert.equal(checkbox.checked, false);
+  assert.equal(checkbox.disabled, true);
+  assert.equal(message.hidden, false);
+  assert.equal(message.textContent, reason);
+  updateHeaderToggle(checkbox, message, { hasHeaders: false });
+  assert.equal(checkbox.disabled, false);
+  assert.equal(checkbox.checked, false);
+  assert.equal(message.hidden, true);
+  assert.equal(message.textContent, '');
+  updateHeaderToggle(checkbox, message, { hasHeaders: true });
+  assert.equal(checkbox.checked, true);
 });

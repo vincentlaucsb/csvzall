@@ -192,6 +192,44 @@ csv::CSVFormat WithDialect(csv::CSVFormat format, const std::string& delimiter, 
   return format;
 }
 
+// Ragged samples can make the generic consistency heuristic pick an absent
+// delimiter and collapse a delimited file into one column. Only reconsider a
+// one-field result when the first record and another record provide evidence.
+csv::CSVFormat InferViewerDelimiter(const std::string& path, csv::CSVFormat format) {
+  const auto candidates = format.get_possible_delims();
+  if (candidates.size() <= 1) return format;
+  std::ifstream input(path, std::ios::binary);
+  std::string sample(256 * 1024, '\0');
+  input.read(sample.data(), static_cast<std::streamsize>(sample.size()));
+  sample.resize(static_cast<std::size_t>(input.gcount()));
+  try {
+    std::stringstream guessed_stream(sample);
+    auto probe_format = format;
+    probe_format.no_header();
+    csv::CSVReader guessed(guessed_stream, probe_format);
+    auto first = guessed.begin();
+    if (first == guessed.end() || first->size() > 1) return format;
+    std::size_t best_width = 1;
+    char best_delimiter = guessed.get_format().get_delim();
+    for (const auto candidate : candidates) {
+      auto candidate_format = probe_format;
+      candidate_format.delimiter(candidate);
+      std::stringstream stream(sample);
+      csv::CSVReader reader(stream, candidate_format);
+      auto row = reader.begin();
+      if (row == reader.end() || row->size() <= best_width) continue;
+      const auto first_width = row->size();
+      for (int count = 0; ++row != reader.end() && count < 16; ++count) {
+        if (row->size() > 1) { best_width = first_width; best_delimiter = candidate; break; }
+      }
+    }
+    if (best_width > 1) format.delimiter(best_delimiter);
+  } catch (const std::exception&) {
+    // Leave ambiguous/truncated samples to the existing parser inference.
+  }
+  return format;
+}
+
 csv::CSVFormat InferViewerQuote(const std::string& path, csv::CSVFormat format) {
   if (!format.is_quoting_enabled() || format.get_quote_char() != '"') return format;
   // csv-parser accepts configurable quote characters. Resolve the common single
@@ -263,7 +301,7 @@ CsvIndexedFile CsvIndexedFile::Open(
   indexed.file_name_ = std::filesystem::path(input_path).filename().string();
 
   RequireNonEmptyCsvFile(GetFileSize(input_path));
-  indexed.format_ = InferViewerQuote(input_path, std::move(format));
+  indexed.format_ = InferViewerQuote(input_path, InferViewerDelimiter(input_path, std::move(format)));
   indexed.reload();
 
   if (verbose) {
@@ -298,6 +336,7 @@ std::string CsvIndexedFile::quote() const {
   return output_format_.is_quoting_enabled() ? std::string(1, output_format_.get_quote_char()) : "";
 }
 bool CsvIndexedFile::has_headers() const { return has_headers_; }
+const std::string& CsvIndexedFile::headers_disabled_reason() const { return headers_disabled_reason_; }
 bool CsvIndexedFile::has_bom() const { return has_bom_; }
 
 void CsvIndexedFile::relabel_columns(const std::vector<std::string>& names) {
@@ -316,6 +355,7 @@ void CsvIndexedFile::relabel_columns(const std::vector<std::string>& names) {
 
 void CsvIndexedFile::set_csv_options(const std::string& delimiter,
                                     const std::string& quote, const bool has_headers) {
+  if (has_headers && !headers_disabled_reason_.empty()) throw std::runtime_error(headers_disabled_reason_);
   auto next_format = WithDialect(output_format_, delimiter, quote);
   if (delimiter == this->delimiter() && quote == this->quote() && has_headers == has_headers_) return;
 
@@ -457,7 +497,9 @@ std::vector<std::vector<std::string>> CsvIndexedFile::read_rows(
         *row.source_row == *first_source_row + i;
   }
   if (direct_source_page) {
-    return read_source_rows(*first_source_row, count);
+    auto page = read_source_rows(*first_source_row, count);
+    for (auto& row : page) if (row.size() < columns_.size()) row.resize(columns_.size());
+    return page;
   }
 
   std::vector<std::vector<std::string>> rows;
@@ -652,14 +694,18 @@ void CsvIndexedFile::reload() {
   const bool bom_only = file_size_ == 3 && std::string(bom, 3) == "\xEF\xBB\xBF";
   if ((file_size_ == 0 || bom_only) && options_format.get_header() < 0 && !columns_.empty()) {
     index_.clear(); rows_.clear();
-    has_headers_ = false; has_bom_ = bom_only; output_format_ = format_;
+    has_headers_ = false; headers_disabled_reason_.clear(); has_bom_ = bom_only; output_format_ = format_;
     headers_ = SyntheticHeaders(columns_.size());
     for (std::size_t i = 0; i < columns_.size(); ++i) columns_[i] = {headers_[i], i, ""};
     modified_ = false;
     return;
   }
 
-  csv::CSVReader reader(input_path, options_format);
+  // Index every record using the same policy as page reads. Skipping malformed
+  // rows here would make logical row offsets disagree with later page reads.
+  auto read_format = options_format;
+  read_format.variable_columns(csv::VariableColumnPolicy::KEEP);
+  csv::CSVReader reader(input_path, read_format);
   format_ = reader.get_format();
   has_headers_ = options_format.get_header() >= 0;
   // get_format includes inferred column names. Clear them without forcing a
@@ -673,12 +719,28 @@ void CsvIndexedFile::reload() {
   index_.clear();
   rows_.clear();
   std::size_t width = headers_.size();
+  std::size_t first_width = has_headers_ ? headers_.size() : 0;
+  bool first_record = true;
   for (auto& row : reader) {
+    if (!has_headers_ && first_record) first_width = row.size();
+    first_record = false;
     width = std::max(width, row.size());
     const auto source_row = static_cast<std::uint64_t>(index_.size());
     index_.push_back({static_cast<std::uint64_t>(row.byte_offset())});
     rows_.push_back({source_row, {}});
   }
+  if (has_headers_ && width > first_width) {
+    // Re-read the original first record as data, retaining its byte offset and
+    // every extra field. Do not convert only the already-indexed rows.
+    format_.header_row(-1);
+    reload();
+    return;
+  }
+  headers_disabled_reason_ = width > first_width
+      ? "Headers are disabled because some rows have more fields than the first row (" +
+            std::to_string(width) + " versus " + std::to_string(first_width) +
+            "). The first row is shown as data to preserve every value. Add missing header names in the first row, or remove surplus columns, then save and reopen. If the delimiter or quoting is wrong, correct the input dialect and read the file again."
+      : "";
   if (!has_headers_) headers_ = SyntheticHeaders(width);
   if (headers_.empty()) throw std::runtime_error("input appears to have no header row");
   columns_.clear();
@@ -781,6 +843,7 @@ std::uint64_t CsvViewData::file_size() const {
 std::string CsvViewData::delimiter() const { return data_.delimiter(); }
 std::string CsvViewData::quote() const { return data_.quote(); }
 bool CsvViewData::has_headers() const { return data_.has_headers(); }
+const std::string& CsvViewData::headers_disabled_reason() const { return data_.headers_disabled_reason(); }
 bool CsvViewData::has_bom() const { return data_.has_bom(); }
 void CsvViewData::set_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers) {
   data_.set_csv_options(delimiter, quote, has_headers);

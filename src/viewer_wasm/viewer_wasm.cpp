@@ -57,6 +57,7 @@ std::string FileName(const CsvViewData& data) {
 std::string Delimiter(const CsvViewData& data) { return data.delimiter(); }
 std::string Quote(const CsvViewData& data) { return data.quote(); }
 bool HasHeaders(const CsvViewData& data) { return data.has_headers(); }
+std::string HeadersDisabledReason(const CsvViewData& data) { return data.headers_disabled_reason(); }
 bool HasBom(const CsvViewData& data) { return data.has_bom(); }
 void SetCsvOptions(CsvViewData& data, const std::string& delimiter,
                    const std::string& quote, bool has_headers) {
@@ -125,6 +126,7 @@ EMSCRIPTEN_BINDINGS(csvzall_viewer_wasm) {
       .function("delimiter", &Delimiter)
       .function("quote", &Quote)
       .function("hasHeaders", &HasHeaders)
+      .function("headersDisabledReason", &HeadersDisabledReason)
       .function("hasBom", &HasBom)
       .function("setCsvOptions", &SetCsvOptions)
       .function("readCsvOptions", &ReadCsvOptions)

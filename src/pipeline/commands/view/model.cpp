@@ -153,6 +153,7 @@ std::uint64_t CsvViewData::file_size() const {
 std::string CsvViewData::delimiter() const { return data_.delimiter(); }
 std::string CsvViewData::quote() const { return data_.quote(); }
 bool CsvViewData::has_headers() const { return data_.has_headers(); }
+const std::string& CsvViewData::headers_disabled_reason() const { return data_.headers_disabled_reason(); }
 bool CsvViewData::has_bom() const { return data_.has_bom(); }
 void CsvViewData::set_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers) {
   data_.set_csv_options(delimiter, quote, has_headers);

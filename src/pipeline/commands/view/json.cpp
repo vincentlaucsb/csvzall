@@ -61,6 +61,7 @@ std::string BuildSchemaJson(const CsvViewData& data, bool editable) {
   json["sqlTableName"] = kViewerSqlTableName;
   json["csvOptions"] = {{"delimiter", data.delimiter()}, {"quote", data.quote()},
                          {"hasHeaders", data.has_headers()}, {"bom", data.has_bom()}};
+  if (!data.headers_disabled_reason().empty()) json["csvOptions"]["headersDisabledReason"] = data.headers_disabled_reason();
   return json.dump();
 }
 

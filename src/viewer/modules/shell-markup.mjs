@@ -38,7 +38,8 @@ export const shellMarkup = `
       <h2 id="csv-options-title">CSV options</h2>
       <p id="csv-options-current"></p>
       <p id="csv-options-headers"></p>
-      <label class="csv-options-header-toggle"><input id="csv-options-has-headers" type="checkbox"><span>First row contains headers</span></label>
+      <label class="csv-options-header-toggle"><input id="csv-options-has-headers" type="checkbox" aria-describedby="csv-options-header-help"><span>First row contains headers</span></label>
+      <p id="csv-options-header-help" role="status" hidden></p>
       <p>When headers are off, A, B, C, … are display labels only and are never saved.</p>
       <details>
         <summary>Correct input dialect</summary>

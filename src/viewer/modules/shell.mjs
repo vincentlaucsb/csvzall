@@ -1,3 +1,4 @@
+import { updateHeaderToggle } from './csv-options.mjs';
 import { applyHostGridTheme } from './host-theme.mjs';
 import './dialog-dismiss.mjs';
 import { mountViewerShell } from './shell-markup.mjs';
@@ -741,13 +742,13 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     document.getElementById('csv-input-help').textContent = dirty
       ? 'Save or reset changes before changing the input dialect.'
       : 'Reading changes the view without writing the file.';
-    csvHasHeaders.checked = csvOptions.hasHeaders;
+    updateHeaderToggle(csvHasHeaders, document.getElementById('csv-options-header-help'), csvOptions);
     document.getElementById('csv-options-current').textContent =
       `Current dialect: delimiter ${JSON.stringify(csvOptions.delimiter)}, quote ${csvOptions.quote ? JSON.stringify(csvOptions.quote) : 'none'}. BOM: ${csvOptions.bom ? 'present' : 'absent'}.`;
     document.getElementById('csv-options-headers').textContent =
       `${csvOptions.hasHeaders ? 'Headers' : 'Display labels'}: ${activeColumns.join(', ')}`;
     csvOptionsError.hidden = true;
-    showDialog(csvOptionsDialog, csvHasHeaders);
+    showDialog(csvOptionsDialog, csvHasHeaders.disabled ? csvDelimiter : csvHasHeaders);
   });
   csvInputRead.addEventListener('click', async () => {
     if (dirty || saving || readingCsv) return;

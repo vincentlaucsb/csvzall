@@ -6,13 +6,29 @@ the dialect and BOM, including the source record line ending. Conversion happens
 only after selecting an output dialect and saving. The comma/double-quote preset
 changes the output controls; it does not write the file immediately.
 
-Headers are enabled initially. Turning them off exposes the first row as data
+Headers are enabled initially when the first row covers every column. Turning them off exposes the first row as data
 and assigns A through Z, AA, AB, etc. display labels. Those labels never become a
 saved header row. Turning headers back on consumes the current first row as names;
 empty or duplicate names are rejected without changing the table. Pending cell
 edits survive header toggles. Headerless insert/delete operations relabel columns,
 and synthetic labels cannot be renamed. Header mode is a session interpretation,
 since plain CSV has no header-mode metadata.
+
+## Variable row widths
+
+Every record is indexed and shorter rows display empty cells for missing fields.
+If any row has more fields than the first row, the viewer reopens the file without
+headers, retains the first row as data, and uses A, B, C, … through the maximum
+record width. Header mode is unchecked and disabled, including at the native and
+WASM engine boundaries. The Options dialog explains the width mismatch and repair
+steps. Opening the file does not change its bytes; saves retain all records and
+pad short records to the displayed width.
+
+To repair the file in the viewer, fill in the missing header names in the first
+row or remove surplus columns, then save and reopen. Correcting an input delimiter
+or quote and rereading can also clear the restriction without writing the file.
+Header availability is recalculated on reread/reset/save. Empty or duplicate
+header names must still be corrected before header mode can be enabled.
 
 ## Input interpretation
 
