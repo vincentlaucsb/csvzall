@@ -45,11 +45,12 @@ mkdirSync(output, { recursive: true });
     assert.equal(await frame.locator('#csv-options + .toolbar-divider').isVisible(), false);
     await frame.locator('#csv-options').evaluate(button => button.click());
     assert.equal(await frame.locator('#csv-options-dialog').evaluate(dialog => dialog.open), false);
-    if (await frame.locator('#more-actions').isVisible()) {
-      await frame.locator('#more-actions').click();
-      assert.equal(await frame.getByRole('menuitem', { name: 'Options', exact: true }).count(), 0);
-      await frame.locator('#record-count').click();
-    }
+    await page.setViewportSize({ width: 200, height: 740 });
+    await frame.locator('#more-actions').waitFor({ state: 'visible' });
+    await frame.locator('#more-actions').click();
+    assert.equal(await frame.getByRole('menuitem', { name: 'Options', exact: true }).count(), 0);
+    await frame.locator('#record-count').click();
+    await page.setViewportSize({ width: 320, height: 740 });
     await page.screenshot({ path: path.join(output, 'mobile-hidden-options.png') });
 
     await page.setViewportSize({ width: 1000, height: 900 });
