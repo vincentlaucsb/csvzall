@@ -85,9 +85,10 @@ SELECT regexp_substr('ride 42 km', '\d+') AS first_number,
 the whole match). `regexp_replace(value, pattern, replacement)` replaces every
 match; `$1`, `${name}`, and other PCRE2 extended substitutions are available.
 
-Inline flags work anywhere in a pattern, for example `(?i)` for
-case-insensitive matching, `(?m)` for multi-line anchors, and `(?x)` for
-free-spacing patterns:
+Inline flags such as `(?i)` (case-insensitive), `(?m)` (multi-line anchors),
+and `(?x)` (free spacing) apply from where they appear to the end of the
+enclosing group, so put `(?i)` first to make the whole pattern
+case-insensitive; `regexp_like('Ab', 'a(?i)b')` is `0`:
 
 ```sql
 SELECT regexp_like('ALICE', '(?i)^alice$') AS case_insensitive,
@@ -133,7 +134,8 @@ Accepted values:
 
 A run of `?` marks an unknown part. Partial dates return the first day of the
 period, so `parse_date('4/??/2026')` is `2026-04-01`. `order` is `'mdy'`
-(default) or `'dmy'` and only decides values such as `6/9/2026` where both
+(default) or `'dmy'`, case-insensitive; any other value, including `NULL`,
+fails the query. It only decides values such as `6/9/2026` where both
 leading parts are 12 or less; `26/5/2026` is always read day-first and
 `5/26/2026` month-first. Unlike heatmap, a scalar SQL function cannot infer the
 order from the rest of the column, so pass `'dmy'` for day-first data.
@@ -201,7 +203,9 @@ Windows). Load any of them yourself with `--load-extension` when you need them.
 ## Several CSVs in one query
 
 `csvzall sql query` loads each `--csv <name>=<path>` as table `<name>` in one
-in-memory database, so queries can `JOIN` them without a temporary file:
+database, so queries can `JOIN` them without managing a `.db` file. The
+database is in memory unless the CSVs together exceed the SQLite size threshold
+(256 MB), in which case a self-deleting temporary file is used:
 
 ```sh
 csvzall sql query --csv rides=strava.csv --csv log="Bike Maintenance Log.csv" \
@@ -210,18 +214,26 @@ csvzall sql query --csv rides=strava.csv --csv log="Bike Maintenance Log.csv" \
          GROUP BY log.Item"
 ```
 
-One `--csv` may omit the name and uses `--table` (default `data`). At most one
-table can read stdin (`name=-`). Table names are case-insensitive and must be
+One `--csv` may omit the name and uses `--table` (default `data`); passing
+`--table` when every `--csv` is named is an error. At most one table can read
+stdin (`name=-`). `--delimiter` and `--zip-entry` apply to every table. Table names are case-insensitive and must be
 unique. A value is treated as `name=path` only when the text before `=` is an
 identifier and the whole value is not an existing file, so paths containing `=`
 keep working.
 
 To build a reusable database instead, `csvzall sql load` writes one table per
 run. The first load creates the file; pass `--add-table` to add further tables
-(it fails if the name is already used) or `--replace-table` to replace an
-existing table. Replacement loads into a staging table first, so a failed load
-leaves the old table and any views on it intact. Loads into an existing database
-keep SQLite journaling on and never change its journal mode.
+(it fails if a table, view, or index already uses the name) or
+`--replace-table` to replace an existing table. Each load creates its table
+inside one transaction, so a failed or interrupted load leaves no partial table
+behind. Replacement loads into a staging table first, so a failed load leaves
+the old table intact; a successful replacement drops the old table's indexes
+and triggers, while views that name the table keep working. Loads into an
+existing database keep SQLite journaling on and never change its journal mode.
+If a load is killed mid-way, SQLite rolls it back the next time the database is
+opened for writing (for example by the next `sql load`); until then,
+`sql query --db` may report `attempt to write a readonly database`.
+
 ## Querying CSV data in the viewer
 
 The native viewer exposes the current CSV as table `data`, including unsaved

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <SQLiteCpp/SQLiteCpp.h>
+#include <csv.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -9,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "../src/sqlite/csv_loader.hpp"
 #include "../src/sqlite/sqlite_db.hpp"
 #include "../src/transform_pipeline.hpp"
 #include "common_test_utils.hpp"
@@ -124,6 +126,7 @@ TEST_CASE("sql query multi-table validates table names and stdin use", "[sql-tab
 
   auto missing = QueryTables("SELECT 1", {{"a", a}, {"b", files.path("missing.csv")}});
   CHECK(missing.rc == 1);
+  CHECK(missing.error.find("table b: ") != std::string::npos);
 
   auto bad_sql = QueryTables("SELECT * FROM nope", {{"a", a}});
   CHECK(bad_sql.rc == 1);
@@ -222,4 +225,74 @@ TEST_CASE("sql load into an existing database never deletes it on failure", "[sq
   const auto text = files.write("notes.db", "not a database\n");
   CHECK(Load("x\n1\n", text, "data", Mode::AddTable).rc == 1);
   REQUIRE(std::filesystem::exists(text));
+}
+
+TEST_CASE("sql load leaves no table behind when the load fails after CREATE TABLE",
+          "[sql-tables]") {
+  TableWorkspace files;
+  const auto db = files.path("work.db");
+  using Mode = pipeline::SqlExportTableMode;
+  REQUIRE(Load("km\n10\n", db, "rides", Mode::CreateDatabase).rc == 0);
+
+  {
+    // A reader holding a SHARED lock lets CREATE TABLE and the inserts run but
+    // makes COMMIT fail with "database is locked".
+    SQLite::Database reader(db, SQLite::OPEN_READONLY);
+    reader.exec("BEGIN");
+    SQLite::Statement hold(reader, "SELECT km FROM rides");
+    REQUIRE(hold.executeStep());
+
+    const auto add = Load("item\nchain\n", db, "log", Mode::AddTable);
+    CHECK(add.rc == 1);
+    CHECK(add.error.find("locked") != std::string::npos);
+    const auto replace = Load("km\n1\n", db, "rides", Mode::ReplaceTable);
+    CHECK(replace.rc == 1);
+  }
+
+  CHECK(QueryDb(db, "SELECT name FROM sqlite_schema ORDER BY name") == Rows{{"name"}, {"rides"}});
+  CHECK(QueryDb(db, "SELECT km FROM rides") == Rows{{"km"}, {"10"}});
+  // The failed add left nothing to clean up, so a retry succeeds.
+  REQUIRE(Load("item\nchain\n", db, "log", Mode::AddTable).rc == 0);
+}
+
+TEST_CASE("sql load table names do not conflict with same-named triggers", "[sql-tables]") {
+  TableWorkspace files;
+  const auto db = files.path("work.db");
+  using Mode = pipeline::SqlExportTableMode;
+  REQUIRE(Load("km\n10\n", db, "rides", Mode::CreateDatabase).rc == 0);
+  {
+    SQLite::Database raw(db, SQLite::OPEN_READWRITE);
+    raw.exec("CREATE TRIGGER log AFTER INSERT ON rides BEGIN SELECT 1; END");
+  }
+  const auto add = Load("item\nchain\n", db, "log", Mode::AddTable);
+  INFO(add.error);
+  REQUIRE(add.rc == 0);
+  CHECK(QueryDb(db, "SELECT item FROM log") == Rows{{"item"}, {"chain"}});
+  REQUIRE(Load("item\nbrakes\n", db, "log", Mode::ReplaceTable).rc == 0);
+  CHECK(QueryDb(db, "SELECT item FROM log") == Rows{{"item"}, {"brakes"}});
+}
+
+TEST_CASE("LoadCsvIntoTable rolls back CREATE TABLE when inserts fail", "[sql-tables]") {
+  TableWorkspace files;
+  SQLite::Database db(files.path("full.db"), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
+  db.exec("CREATE TABLE keep (x)");
+  // Leave room for the new table's root page but not for its rows, so the
+  // load fails with SQLITE_FULL after CREATE TABLE has run.
+  const auto pages = db.execAndGet("PRAGMA page_count").getInt();
+  db.exec("PRAGMA max_page_count = " + std::to_string(pages + 2));
+
+  std::string csv = "value\n";
+  for (int i = 0; i < 2000; ++i) {
+    csv += std::string(200, 'x') + std::to_string(i) + "\n";
+  }
+  std::istringstream input(csv);
+  csv::CSVReader reader(input);
+  const auto headers = reader.get_col_names();
+  std::string error;
+  sqlite::SqliteLogCallbacks logger{[&](const std::string& msg) { error = msg; }, nullptr};
+  CHECK_FALSE(sqlite::LoadCsvIntoTable(reader, headers, db, "big",
+                                       {sqlite::SqliteColumnAffinity::Text},
+                                       sqlite::CsvLoadOptions{true}, logger));
+  CHECK(error.find("full") != std::string::npos);
+  CHECK(db.execAndGet("SELECT count(*) FROM sqlite_schema WHERE name = 'big'").getInt() == 0);
 }

@@ -173,8 +173,8 @@ csvzall sql query --csv gym-attendance.csv --format markdown --sql \
 
 SQLite-backed commands support PCRE2 regular expressions through the `REGEXP`
 operator, `regexp_like(value, pattern)`, `regexp_substr`, `regexp_capture`, and
-`regexp_replace`. Matching is UTF-8 and Unicode-aware; `(?i)` anywhere in a
-pattern enables case-insensitive matching.
+`regexp_replace`. Matching is UTF-8 and Unicode-aware; start a pattern with
+`(?i)` for case-insensitive matching.
 
 ```sh
 csvzall sql query --csv gym-events.csv --sql \
@@ -189,7 +189,7 @@ compiled-in [sqlean](https://github.com/nalgeon/sqlean) modules (`fuzzy_leven`,
 [SQLite capabilities](docs/sqlite-capabilities.md) for the full list.
 
 Repeat `--csv <name>=<path>` to load several CSVs as named tables in one
-in-memory database and `JOIN` them:
+database and `JOIN` them without a temporary `.db` file:
 
 ```sh
 csvzall sql query --csv rides=strava.csv --csv log=maintenance.csv --sql \

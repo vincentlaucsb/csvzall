@@ -77,16 +77,40 @@ endif()
 set(CSVZALL_TEST_SQLITE3EXT_DIR "${CMAKE_CURRENT_BINARY_DIR}/sqlite3ext")
 set(CSVZALL_TEST_SQLITE3EXT "${CSVZALL_TEST_SQLITE3EXT_DIR}/sqlite3ext.h")
 set(CSVZALL_TEST_SQLITE3EXT_SHA256 "b184dd1586d935133d37ad76fa353faf0a1021ff2fdedeedcc3498fff74bbb94")
-if(NOT EXISTS "${CSVZALL_TEST_SQLITE3EXT}")
+function(csvzall_sqlite3ext_is_valid out_var)
+  set(_valid OFF)
+  if(EXISTS "${CSVZALL_TEST_SQLITE3EXT}")
+    file(SHA256 "${CSVZALL_TEST_SQLITE3EXT}" _hash)
+    if(_hash STREQUAL CSVZALL_TEST_SQLITE3EXT_SHA256)
+      set(_valid ON)
+    endif()
+  endif()
+  set(${out_var} ${_valid} PARENT_SCOPE)
+endfunction()
+
+csvzall_sqlite3ext_is_valid(_csvzall_sqlite3ext_valid)
+if(NOT _csvzall_sqlite3ext_valid)
+  # Download without EXPECTED_HASH: with it, a network failure is a fatal
+  # configure error. Verify the hash ourselves and only then move it in place,
+  # so an offline configure skips these tests instead of failing.
+  file(REMOVE "${CSVZALL_TEST_SQLITE3EXT}")
+  set(_csvzall_sqlite3ext_tmp "${CSVZALL_TEST_SQLITE3EXT}.download")
   file(DOWNLOAD
     "https://raw.githubusercontent.com/sqlite/sqlite/version-3.46.1/src/sqlite3ext.h"
-    "${CSVZALL_TEST_SQLITE3EXT}"
-    EXPECTED_HASH "SHA256=${CSVZALL_TEST_SQLITE3EXT_SHA256}"
+    "${_csvzall_sqlite3ext_tmp}"
     STATUS _csvzall_sqlite3ext_status)
   list(GET _csvzall_sqlite3ext_status 0 _csvzall_sqlite3ext_code)
-  if(NOT _csvzall_sqlite3ext_code EQUAL 0)
-    file(REMOVE "${CSVZALL_TEST_SQLITE3EXT}")
-    message(STATUS "sqlite3ext.h download failed; skipping --load-extension success tests: ${_csvzall_sqlite3ext_status}")
+  set(_csvzall_sqlite3ext_hash "")
+  if(_csvzall_sqlite3ext_code EQUAL 0)
+    file(SHA256 "${_csvzall_sqlite3ext_tmp}" _csvzall_sqlite3ext_hash)
+  endif()
+  if(_csvzall_sqlite3ext_hash STREQUAL CSVZALL_TEST_SQLITE3EXT_SHA256)
+    file(RENAME "${_csvzall_sqlite3ext_tmp}" "${CSVZALL_TEST_SQLITE3EXT}")
+  else()
+    file(REMOVE "${_csvzall_sqlite3ext_tmp}")
+    message(STATUS
+      "sqlite3ext.h download failed or did not match its SHA-256; "
+      "skipping --load-extension success tests: ${_csvzall_sqlite3ext_status}")
   endif()
 endif()
 set(CSVZALL_TEST_EXTENSION_ARGS "")

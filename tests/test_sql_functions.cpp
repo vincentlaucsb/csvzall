@@ -77,6 +77,8 @@ TEST_CASE("SQL regex operator, inline flags, and long inputs", "[sql-functions]"
   CHECK(Scalar("'Gym Day' REGEXP '(?i)gym'") == "1");
   CHECK(Scalar("regexp('^a', 'abc')") == "1");
   CHECK(Scalar("regexp_like('ab', 'a(?i)B')") == "1");
+  // Inline flags apply from where they appear, not to the whole pattern.
+  CHECK(Scalar("regexp_like('Ab', 'a(?i)b')") == "0");
   // std::regex ran out of stack near 80k characters; PCRE2 is heap-based.
   CHECK(Scalar("regexp_like(printf('%.100000c', 'a') || 'b', '^(a|b)*$')") == "1");
   CHECK(Scalar("length(printf('%.100000c', 'a'))") == "100000");

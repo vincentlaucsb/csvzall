@@ -948,8 +948,9 @@ Pipeline example:
   --csv <path> reads CSV directly.
   --csv - reads CSV from stdin.
   --csv <name>=<path> loads that CSV as table <name>. Repeat it to load several
-    CSVs into one in-memory database and JOIN them; one --csv may omit the
-    name and uses --table. At most one table can read stdin (name=-).
+    CSVs into one database (in memory unless large) and JOIN them; one --csv
+    may omit the name and uses --table. At most one table can read stdin
+    (name=-). --zip-entry and --delimiter apply to every table.
   --db <path> queries an existing SQLite database.
   --sql <query> is required for query mode.
   --format csv|markdown controls query output; default is csv.
@@ -965,21 +966,24 @@ sql load contract:
   Writes a CSV into a SQLite database file (--dest, default <input>.db) as
   table --table. By default the destination must not exist.
   --add-table adds the table to an existing database; fails if it already has
-    a table, view, index, or trigger with that name.
+    a table, view, or index with that name.
   --replace-table also replaces an existing table of that name. The old table
-    stays intact if loading fails.
+    stays intact if loading fails; on success its indexes and triggers are
+    dropped with it, while views that name it keep working.
 
 Useful SQL features:
   WHERE, GROUP BY, COUNT, COUNT(DISTINCT ...), ORDER BY, substr, CASE, JOIN.
   Math: sqrt, pow, ln, log, exp, floor, ceil, sin, cos, pi, ...
   Regex (PCRE2, UTF-8): REGEXP, regexp_like(value, pattern),
     regexp_substr, regexp_capture, regexp_replace(value, pattern, replacement).
-    (?i) anywhere enables case-insensitive matching. A NULL value never
-    matches; a NULL pattern is an error.
+    Inline flags such as (?i) apply from where they appear; put (?i) first to
+    match the whole pattern case-insensitively. A NULL value never matches; a
+    NULL pattern is an error.
   Dates: parse_date(value [, 'mdy'|'dmy']) -> YYYY-MM-DD or NULL, accepting
     YYYY-MM-DD, M/D/YYYY, D/M/YYYY, month-only 6/2026, 4/??/2026, 2026-06, and
     year-only 2026 (partial dates return the first day of the period).
     date_precision(value [, order]) -> 'day', 'month', 'year', or NULL.
+    Any order other than 'mdy' or 'dmy', including NULL, is an error.
   sqlean (compiled in, see sqlean_version()): fuzzy_leven, fuzzy_jarowin,
     fuzzy_soundex, ...; median, percentile, stddev, variance; text_* string
     functions; md5, sha256, encode, decode; uuid4, uuid7.
@@ -1598,6 +1602,11 @@ Examples:
           }
           saw_unnamed = true;
           table.table_name = default_table;
+        }
+        if (!saw_unnamed && sql_cmd.is_used("--table")) {
+          logger.Error("sql query: --table only names an unnamed --csv; every --csv here "
+                       "already has a name.");
+          return 1;
         }
         warn_integer_division();
 

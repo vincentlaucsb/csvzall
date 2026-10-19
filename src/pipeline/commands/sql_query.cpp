@@ -398,12 +398,20 @@ int RunSqlQueryCsvTables(const std::string& sql_query,
     sqlite::SqliteDb sdb = sqlite::OpenSqliteDb(open_options);
 
     for (const auto& table : tables) {
+      const std::string name = common::Trim(table.table_name);
       RunOptions table_options = options;
       table_options.input_path = table.path;
       table_options.input_is_stdin = table.path == "-";
+      // Name the table in load diagnostics; several inputs load in one run.
+      LoggerCallbacks table_logger = logger;
+      if (logger.error) {
+        table_logger.error = [&logger, &name](const std::string& message) {
+          logger.error("sql query: table " + name + ": " + message);
+        };
+      }
       RunStats load_stats;
-      if (LoadCsvInputIntoTable(sdb.db(), common::Trim(table.table_name), stdin_input,
-                                table_options, logger, load_stats) != 0) {
+      if (LoadCsvInputIntoTable(sdb.db(), name, stdin_input, table_options, table_logger,
+                                load_stats) != 0) {
         return 1;
       }
     }

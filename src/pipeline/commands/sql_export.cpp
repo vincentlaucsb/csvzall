@@ -29,12 +29,15 @@ std::string DeriveDatabasePath(const std::string& input_path) {
   return p.string();
 }
 
-// SQLite object type ("table", "view", "index", "trigger") already using
-// name, compared case-insensitively like SQLite identifiers.
+// SQLite object type ("table", "view", "index") already using name, compared
+// case-insensitively like SQLite identifiers. Triggers live in their own
+// namespace and never conflict with a table name.
 std::optional<std::string> ExistingSchemaObjectType(SQLite::Database& db,
                                                     const std::string& name) {
   SQLite::Statement query(
-      db, "SELECT type FROM sqlite_schema WHERE name = ? COLLATE NOCASE LIMIT 1");
+      db,
+      "SELECT type FROM sqlite_schema WHERE name = ? COLLATE NOCASE AND type <> 'trigger' "
+      "ORDER BY type = 'table' DESC LIMIT 1");
   query.bind(1, name);
   if (query.executeStep()) {
     return query.getColumn(0).getString();
