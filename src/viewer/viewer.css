@@ -203,6 +203,48 @@ button:disabled {
   visibility: hidden;
 }
 
+.toolbar-divider {
+  height: 1.25rem;
+  border-inline-start: 1px solid var(--csvzall-border);
+  margin-inline: 0.25rem;
+}
+
+.toolbar-divider:where([hidden]),
+.edit-toolbar:where(:not([hidden])) > #csv-options[data-overflowed] + .toolbar-divider {
+  display: none;
+}
+
+#csv-options-dialog fieldset {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+#csv-options-dialog {
+  width: min(32rem, calc(100vw - 2rem));
+}
+
+#csv-options-form p {
+  margin: 0;
+}
+
+#csv-options-form .csv-options-header-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#csv-options-has-headers {
+  width: auto;
+  height: auto;
+  padding: 0;
+}
+
+#csv-options-current,
+#csv-options-headers {
+  overflow-wrap: anywhere;
+}
+
 .feature-toolbar button,
 .edit-toolbar button,
 .overflow-toolbar button {

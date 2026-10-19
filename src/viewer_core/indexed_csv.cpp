@@ -117,6 +117,123 @@ std::vector<std::string> ColumnNames(const std::vector<CsvColumnDescriptor>& col
   return names;
 }
 
+std::vector<std::string> SyntheticHeaders(const std::size_t count) {
+  std::vector<std::string> names;
+  for (std::size_t i = 0; i < count; ++i) {
+    std::string name;
+    for (auto n = i + 1; n != 0; n = (n - 1) / 26) {
+      name.insert(name.begin(), static_cast<char>('A' + (n - 1) % 26));
+    }
+    names.push_back(std::move(name));
+  }
+  return names;
+}
+
+// csv-parser's DelimWriter fixes delimiter and quote at compile time. Viewer
+// conversion needs runtime characters, while still escaping fields losslessly.
+void WriteRow(std::ostream& output, const std::vector<std::string>& values,
+              const csv::CSVFormat& format, const std::string& newline) {
+  const auto delimiter = format.get_delim();
+  const auto quote = format.get_quote_char();
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    if (i != 0) output.put(delimiter);
+    const auto& value = values[i];
+    const bool needs_quote = value.find(delimiter) != std::string::npos ||
+        value.find_first_of("\r\n") != std::string::npos ||
+        (format.is_quoting_enabled() && value.find(quote) != std::string::npos) ||
+        (values.size() == 1 && value.empty());
+    if (needs_quote && !format.is_quoting_enabled()) {
+      throw std::runtime_error("This value requires quoting; choose a quoting character in Options.");
+    }
+    if (needs_quote) output.put(quote);
+    for (const auto c : value) {
+      if (needs_quote && c == quote) output.put(quote);
+      output.put(c);
+    }
+    if (needs_quote) output.put(quote);
+  }
+  output << newline;
+}
+
+std::string RecordNewline(const std::string& path, const csv::CSVFormat& format) {
+  std::ifstream input(path, std::ios::binary);
+  char prefix[3]{};
+  input.read(prefix, 3);
+  if (std::string(prefix, 3) != "\xEF\xBB\xBF") { input.clear(); input.seekg(0); }
+  bool quoted = false, field_start = true;
+  char c;
+  while (input.get(c)) {
+    if (format.is_quoting_enabled() && c == format.get_quote_char()) {
+      if (quoted && input.peek() == c) { input.get(c); continue; }
+      if (quoted || field_start) quoted = !quoted;
+    } else if (!quoted) {
+      if (c == '\r') return input.peek() == '\n' ? "\r\n" : "\r";
+      if (c == '\n') return "\n";
+    }
+    field_start = !quoted && c == format.get_delim();
+  }
+  return "\n";
+}
+
+csv::CSVFormat WithDialect(csv::CSVFormat format, const std::string& delimiter, const std::string& quote) {
+  const auto valid_char = [](const std::string& value) {
+    return value.size() == 1 && (value[0] == '\t' || (value[0] >= ' ' && value[0] <= '~'));
+  };
+  if (!valid_char(delimiter) || (!quote.empty() && !valid_char(quote))) {
+    throw std::runtime_error("Delimiter and quote must be single ASCII characters (or no quote).");
+  }
+  if (!quote.empty() && delimiter == quote) {
+    throw std::runtime_error("Delimiter and quoting character must differ.");
+  }
+  // CSVFormat validates its stored quote even when quoting is disabled. A
+  // temporary unused delimiter allows swapping delimiter and quote safely.
+  format.delimiter('\x1f').quote(quote.empty() ? '\0' : quote[0]);
+  format.delimiter(delimiter[0]).quote(!quote.empty());
+  return format;
+}
+
+csv::CSVFormat InferViewerQuote(const std::string& path, csv::CSVFormat format) {
+  if (!format.is_quoting_enabled() || format.get_quote_char() != '"') return format;
+  // csv-parser accepts configurable quote characters. Resolve the common single
+  // quote dialect from complete quoted fields in a bounded sample, retaining
+  // double quotes when there is no evidence or the sample is ambiguous.
+  std::ifstream input(path, std::ios::binary);
+  std::string sample(256 * 1024, '\0');
+  input.read(sample.data(), static_cast<std::streamsize>(sample.size()));
+  sample.resize(static_cast<std::size_t>(input.gcount()));
+  char delimiter;
+  try {
+    std::stringstream stream(sample);
+    csv::CSVReader probe(stream, format);
+    delimiter = probe.get_format().get_delim();
+  } catch (const std::exception&) {
+    return format;
+  }
+  const auto boundary = [delimiter](char c) {
+    return c == '\r' || c == '\n' || c == delimiter;
+  };
+  const auto evidence = [&](char quote, bool require_structure) {
+    std::size_t count = 0;
+    bool start = true;
+    for (std::size_t i = sample.starts_with("\xEF\xBB\xBF") ? 3 : 0; i < sample.size(); ++i) {
+      const auto c = sample[i];
+      if (start && c == quote) {
+        bool structural = false;
+        for (++i; i < sample.size(); ++i) {
+          if (sample[i] != quote) { structural = structural || boundary(sample[i]); continue; }
+          if (i + 1 < sample.size() && sample[i + 1] == quote) { ++i; continue; }
+          if ((i + 1 < sample.size() ? boundary(sample[i + 1]) : input.eof()) && (!require_structure || structural)) ++count;
+          break;
+        }
+      }
+      start = boundary(c);
+    }
+    return count;
+  };
+  if (evidence('"', false) == 0 && evidence('\'', true) > 0 && delimiter != '\'') format.quote('\'');
+  return format;
+}
+
 std::string GenerateSaveToken() {
   std::random_device rd;
   std::uniform_int_distribution<unsigned int> dist(0, 255);
@@ -145,28 +262,9 @@ CsvIndexedFile CsvIndexedFile::Open(
   indexed.input_path_ = input_path;
   indexed.file_name_ = std::filesystem::path(input_path).filename().string();
 
-  indexed.file_size_ = GetFileSize(input_path);
-  RequireNonEmptyCsvFile(indexed.file_size_);
-  indexed.source_mtime_ = GetFileMtime(input_path);
-
-  csv::CSVReader reader(input_path, format);
-  indexed.format_ = reader.get_format();
-  indexed.format_.header_row(0);
-  indexed.headers_ = reader.get_col_names();
-  if (indexed.headers_.empty()) {
-    throw std::runtime_error("input appears to have no header row");
-  }
-
-  indexed.columns_.reserve(indexed.headers_.size());
-  for (std::size_t i = 0; i < indexed.headers_.size(); ++i) {
-    indexed.columns_.push_back({indexed.headers_[i], i, ""});
-  }
-
-  for (auto& row : reader) {
-    const auto source_row = static_cast<std::uint64_t>(indexed.index_.size());
-    indexed.index_.push_back({static_cast<std::uint64_t>(row.byte_offset())});
-    indexed.rows_.push_back({source_row, {}});
-  }
+  RequireNonEmptyCsvFile(GetFileSize(input_path));
+  indexed.format_ = InferViewerQuote(input_path, std::move(format));
+  indexed.reload();
 
   if (verbose) {
     verbose("view: indexed " + std::to_string(indexed.index_.size()) +
@@ -193,6 +291,71 @@ std::uint64_t CsvIndexedFile::row_count() const {
 
 std::uint64_t CsvIndexedFile::file_size() const {
   return file_size_;
+}
+
+std::string CsvIndexedFile::delimiter() const { return std::string(1, output_format_.get_delim()); }
+std::string CsvIndexedFile::quote() const {
+  return output_format_.is_quoting_enabled() ? std::string(1, output_format_.get_quote_char()) : "";
+}
+bool CsvIndexedFile::has_headers() const { return has_headers_; }
+bool CsvIndexedFile::has_bom() const { return has_bom_; }
+
+void CsvIndexedFile::relabel_columns(const std::vector<std::string>& names) {
+  for (auto& row : rows_) {
+    std::unordered_map<std::string, std::string> cells;
+    for (std::size_t i = 0; i < columns_.size(); ++i) {
+      if (const auto it = row.cells.find(columns_[i].name); it != row.cells.end()) {
+        cells[names[i]] = it->second;
+      }
+    }
+    row.cells = std::move(cells);
+  }
+  for (std::size_t i = 0; i < columns_.size(); ++i) columns_[i].name = names[i];
+  refresh_headers();
+}
+
+void CsvIndexedFile::set_csv_options(const std::string& delimiter,
+                                    const std::string& quote, const bool has_headers) {
+  auto next_format = WithDialect(output_format_, delimiter, quote);
+  if (delimiter == this->delimiter() && quote == this->quote() && has_headers == has_headers_) return;
+
+  if (has_headers != has_headers_) {
+    if (!has_headers) {
+      CsvLogicalRow first;
+      for (const auto& column : columns_) first.cells[column.name] = column.name;
+      rows_.insert(rows_.begin(), std::move(first));
+      relabel_columns(SyntheticHeaders(columns_.size()));
+    } else {
+      if (rows_.empty()) throw std::runtime_error("There is no first row to use as headers.");
+      const auto names = row_values_for_columns(rows_.front(), columns_);
+      std::unordered_map<std::string, bool> seen;
+      for (const auto& name : names) {
+        if (name.empty() || !seen.emplace(name, true).second) {
+          throw std::runtime_error("The first row must have non-empty, unique column names to enable headers.");
+        }
+      }
+      rows_.erase(rows_.begin());
+      relabel_columns(names);
+    }
+    has_headers_ = has_headers;
+  }
+  output_format_ = std::move(next_format);
+  modified_ = true;
+}
+
+void CsvIndexedFile::read_csv_options(const std::string& delimiter,
+                                     const std::string& quote, bool has_headers) {
+  if (modified_) throw std::runtime_error("Save or reset changes before changing the input dialect.");
+  auto next_format = WithDialect(format_, delimiter, quote);
+  next_format.header_row(has_headers ? 0 : -1);
+  recover_renamed_source();
+  CsvIndexedFile next;
+  next.input_path_ = input_path_;
+  next.file_name_ = file_name_;
+  next.format_ = std::move(next_format);
+  next.columns_ = columns_;  // Retain the known width of an empty headerless file.
+  next.reload();  // Explicit input characters must bypass automatic inference.
+  *this = std::move(next);
 }
 
 std::vector<std::vector<std::string>> CsvIndexedFile::read_source_rows(
@@ -373,6 +536,7 @@ void CsvIndexedFile::edit_cell(const std::uint64_t row,
     throw std::runtime_error("unknown column: " + column);
   }
   rows_[static_cast<std::size_t>(row)].cells[column] = value;
+  modified_ = true;
 }
 
 void CsvIndexedFile::delete_row(const std::uint64_t row) {
@@ -380,6 +544,7 @@ void CsvIndexedFile::delete_row(const std::uint64_t row) {
     throw std::out_of_range("row index out of bounds");
   }
   rows_.erase(rows_.begin() + static_cast<std::ptrdiff_t>(row));
+  modified_ = true;
 }
 
 void CsvIndexedFile::insert_row(const std::uint64_t row, const std::vector<std::string>& values) {
@@ -395,6 +560,7 @@ void CsvIndexedFile::insert_row(const std::uint64_t row, const std::vector<std::
     inserted.cells[headers_[i]] = values[i];
   }
   rows_.insert(rows_.begin() + static_cast<std::ptrdiff_t>(row), std::move(inserted));
+  modified_ = true;
 }
 
 void CsvIndexedFile::swap_rows(const std::uint64_t first, const std::uint64_t second) {
@@ -405,26 +571,33 @@ void CsvIndexedFile::swap_rows(const std::uint64_t first, const std::uint64_t se
     return;
   }
   std::swap(rows_[static_cast<std::size_t>(first)], rows_[static_cast<std::size_t>(second)]);
+  modified_ = true;
 }
 
 void CsvIndexedFile::insert_column(const std::uint64_t column,
                                    const std::string& name,
                                    const std::string& value) {
-  if (name.empty()) {
+  if (has_headers_ && name.empty()) {
     throw std::runtime_error("column name is required");
   }
-  if (has_column(name)) {
+  if (has_headers_ && has_column(name)) {
     throw std::runtime_error("column already exists: " + name);
   }
   if (column > columns_.size()) {
     throw std::out_of_range("column index out of bounds");
   }
+  // A temporary unique key avoids colliding with existing synthetic labels.
+  auto key = name;
+  if (!has_headers_) { key = "_new"; while (has_column(key)) key += '_'; }
   columns_.insert(columns_.begin() + static_cast<std::ptrdiff_t>(column),
-                  CsvColumnDescriptor{name, std::nullopt, value});
+                  CsvColumnDescriptor{key, std::nullopt, value});
+  if (!has_headers_) relabel_columns(SyntheticHeaders(columns_.size()));
   refresh_headers();
+  modified_ = true;
 }
 
 void CsvIndexedFile::rename_column(const std::string& column, const std::string& name) {
+  if (!has_headers_) throw std::runtime_error("Synthetic column labels cannot be renamed.");
   if (name.empty()) {
     throw std::runtime_error("column name is required");
   }
@@ -443,6 +616,7 @@ void CsvIndexedFile::rename_column(const std::string& column, const std::string&
       row.cells.erase(iter);
     }
   }
+  modified_ = true;
   refresh_headers();
 }
 
@@ -455,7 +629,9 @@ void CsvIndexedFile::delete_column(const std::string& column) {
   for (auto& row : rows_) {
     row.cells.erase(column);
   }
+  if (!has_headers_) relabel_columns(SyntheticHeaders(columns_.size()));
   refresh_headers();
+  modified_ = true;
 }
 
 bool CsvIndexedFile::recover_renamed_source() {
@@ -467,30 +643,47 @@ void CsvIndexedFile::reload() {
   const auto options_format = format_;
 
   file_size_ = GetFileSize(input_path);
-  RequireNonEmptyCsvFile(file_size_);
   source_mtime_ = GetFileMtime(input_path);
+
+  // An empty headerless file can result from deleting its last data row.
+  std::ifstream prefix(input_path, std::ios::binary);
+  char bom[3]{};
+  prefix.read(bom, 3);
+  const bool bom_only = file_size_ == 3 && std::string(bom, 3) == "\xEF\xBB\xBF";
+  if ((file_size_ == 0 || bom_only) && options_format.get_header() < 0 && !columns_.empty()) {
+    index_.clear(); rows_.clear();
+    has_headers_ = false; has_bom_ = bom_only; output_format_ = format_;
+    headers_ = SyntheticHeaders(columns_.size());
+    for (std::size_t i = 0; i < columns_.size(); ++i) columns_[i] = {headers_[i], i, ""};
+    modified_ = false;
+    return;
+  }
 
   csv::CSVReader reader(input_path, options_format);
   format_ = reader.get_format();
-  format_.header_row(0);
+  has_headers_ = options_format.get_header() >= 0;
+  // get_format includes inferred column names. Clear them without forcing a
+  // header on a headerless source, otherwise reload would skip its first row.
+  format_.header_row(has_headers_ ? 0 : -1);
+  output_format_ = format_;
+  has_bom_ = reader.utf8_bom();
+  newline_ = RecordNewline(input_path, format_);
   headers_ = reader.get_col_names();
-  if (headers_.empty()) {
-    throw std::runtime_error("input appears to have no header row");
-  }
-
-  columns_.clear();
-  columns_.reserve(headers_.size());
-  for (std::size_t i = 0; i < headers_.size(); ++i) {
-    columns_.push_back({headers_[i], i, ""});
-  }
 
   index_.clear();
   rows_.clear();
+  std::size_t width = headers_.size();
   for (auto& row : reader) {
+    width = std::max(width, row.size());
     const auto source_row = static_cast<std::uint64_t>(index_.size());
     index_.push_back({static_cast<std::uint64_t>(row.byte_offset())});
     rows_.push_back({source_row, {}});
   }
+  if (!has_headers_) headers_ = SyntheticHeaders(width);
+  if (headers_.empty()) throw std::runtime_error("input appears to have no header row");
+  columns_.clear();
+  for (std::size_t i = 0; i < headers_.size(); ++i) columns_.push_back({headers_[i], i, ""});
+  modified_ = false;
 }
 
 void CsvIndexedFile::reset() {
@@ -516,12 +709,11 @@ void CsvIndexedFile::save(const std::vector<std::string>& columns) {
       if (!output) {
         throw std::runtime_error("unable to open temporary save file: " + temp.string());
       }
-      auto writer = csv::make_csv_writer(output).set_auto_flush(false);
-      writer << ColumnNames(save_columns);
+      if (has_bom_) output << "\xEF\xBB\xBF";
+      if (has_headers_) WriteRow(output, ColumnNames(save_columns), output_format_, newline_);
       for (const auto& row : rows_) {
-        writer << row_values_for_columns(row, save_columns);
+        WriteRow(output, row_values_for_columns(row, save_columns), output_format_, newline_);
       }
-      writer.flush();
       output.close();
       if (!output) {
         throw std::runtime_error("failed to write temporary save file: " + temp.string());
@@ -538,6 +730,8 @@ void CsvIndexedFile::save(const std::vector<std::string>& columns) {
 #else
     std::filesystem::rename(temp, target);
 #endif
+    format_ = output_format_;
+    format_.header_row(has_headers_ ? 0 : -1);
     reload();
   } catch (...) {
     std::error_code ec;
@@ -582,6 +776,17 @@ std::uint64_t CsvViewData::row_count() const {
 
 std::uint64_t CsvViewData::file_size() const {
   return data_.file_size();
+}
+
+std::string CsvViewData::delimiter() const { return data_.delimiter(); }
+std::string CsvViewData::quote() const { return data_.quote(); }
+bool CsvViewData::has_headers() const { return data_.has_headers(); }
+bool CsvViewData::has_bom() const { return data_.has_bom(); }
+void CsvViewData::set_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers) {
+  data_.set_csv_options(delimiter, quote, has_headers);
+}
+void CsvViewData::read_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers) {
+  data_.read_csv_options(delimiter, quote, has_headers);
 }
 
 std::vector<std::vector<std::string>> CsvViewData::read_rows(

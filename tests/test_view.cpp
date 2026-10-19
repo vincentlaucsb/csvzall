@@ -374,7 +374,7 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_server.csv","columns":["name","value"],"readOnly":true,"editable":false,"mode":"paged","totalRows":3,"sqlTableName":"data"})");
+      R"({"file":"csvzall_view_server.csv","columns":["name","value"],"readOnly":true,"editable":false,"mode":"paged","totalRows":3,"sqlTableName":"data","csvOptions":{"delimiter":",","quote":"\"","hasHeaders":true,"bom":false}})");
 
   const auto rows = client.Get("/api/rows?offset=1&limit=1", headers);
   REQUIRE(rows);
@@ -1122,7 +1122,7 @@ TEST_CASE("view edit: save follows a source file renamed on disk") {
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"after.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data"})");
+      R"({"file":"after.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data","csvOptions":{"delimiter":",","quote":"\"","hasHeaders":true,"bom":false}})");
 
   const auto edit = client.Post(
       "/api/edit-cell", headers, R"({"row":1,"column":"value","value":"25"})",
@@ -1370,7 +1370,7 @@ TEST_CASE("view edit: save applies column order with pending edits atomically") 
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_edit_reorder_column.csv","columns":["value","name","note"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data"})");
+      R"({"file":"csvzall_view_edit_reorder_column.csv","columns":["value","name","note"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data","csvOptions":{"delimiter":",","quote":"\"","hasHeaders":true,"bom":false}})");
 
   const auto rows = client.Get("/api/rows?offset=0&limit=2", headers);
   REQUIRE(rows);
@@ -1423,7 +1423,7 @@ TEST_CASE("view edit: reset reloads source from disk and discards unsaved change
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_edit_reset.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data"})");
+      R"({"file":"csvzall_view_edit_reset.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data","csvOptions":{"delimiter":",","quote":"\"","hasHeaders":true,"bom":false}})");
 
   const auto rows = client.Get("/api/rows?offset=0&limit=2", headers);
   REQUIRE(rows);

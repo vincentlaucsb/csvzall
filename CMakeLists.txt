@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(csvzall VERSION 0.7.0 LANGUAGES CXX)
+project(csvzall VERSION 0.8.0 LANGUAGES CXX)
 
 set(CSVZALL_CXX_STANDARD 23 CACHE STRING "C++ standard used by csvzall and in-tree dependencies")
 
@@ -203,7 +203,7 @@ if((EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten") AND CSVZALL_ENABLE_VI
   set_property(TARGET csvzall_viewer_wasm PROPERTY CXX_STANDARD ${CSVZALL_CXX_STANDARD})
   set_property(TARGET csvzall_viewer_wasm PROPERTY CXX_STANDARD_REQUIRED ON)
   set_property(TARGET csvzall_viewer_wasm PROPERTY CXX_EXTENSIONS OFF)
-  target_compile_options(csvzall_viewer_wasm PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(csvzall_viewer_wasm PRIVATE -Wall -Wextra -Wpedantic -fexceptions)
   target_link_options(csvzall_viewer_wasm
     PRIVATE
       -lembind
@@ -213,7 +213,8 @@ if((EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten") AND CSVZALL_ENABLE_VI
       -sEXPORT_NAME=createCsvzallViewerModule
       -sALLOW_MEMORY_GROWTH=1
       -sFORCE_FILESYSTEM=1
-      "-sEXPORTED_RUNTIME_METHODS=['FS']")
+      -sDISABLE_EXCEPTION_CATCHING=0
+      "-sEXPORTED_RUNTIME_METHODS=['FS','getExceptionMessage','decrementExceptionRefcount']")
   return()
 endif()
 

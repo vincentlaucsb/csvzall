@@ -26,9 +26,15 @@ before opening against a dirty document.
 An adapter exposes `capabilities`, `request(type, payload, transfer?)`,
 `save({columns})`, `persist(result, context)`, and optional `destroy()`.
 Requests cover `init`, `open`, `readRows`, `editCell`, row/column mutations, and
-`reset`. Schemas contain `columns`, `rowCount`, optional `file`, and `editable`.
+`reset`, plus `csvOptions` for output/header choices and `readCsvOptions` for
+explicit input interpretation. Schemas include `csvOptions` with delimiter, quote,
+hasHeaders, and BOM values alongside `columns`, `rowCount`, optional `file`, and `editable`.
 Pages contain `offset`, `totalRows`, and arrays of cell values. The shell assigns
 absolute source row identities independently of displayed row positions.
+
+See [CSV options](csv-options.md) for dialect preservation, headerless editing,
+explicit conversion and input overrides. The source bridge advertises
+`csvzall-csv-options-v1` so downstream packaging can require these capabilities.
 
 The native adapter translates operations into same-origin requests with the
 session token. SQL/chart HTTP access belongs to its optional feature surface

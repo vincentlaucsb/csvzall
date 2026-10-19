@@ -65,7 +65,22 @@ function schema() {
     columns,
     fileSize: view.fileSize(),
     rowCount: view.rowCount(),
+    csvOptions: { delimiter: view.delimiter(), quote: view.quote(), hasHeaders: view.hasHeaders(), bom: view.hasBom() },
   };
+}
+
+function errorMessage(error) {
+  // Emscripten C++ exceptions carry a native allocation. Decode and release it
+  // after catching at the worker boundary, keeping validation errors recoverable.
+  if (moduleInstance && (typeof error === 'number' || typeof error?.excPtr === 'number')) {
+    try {
+      const [type, message] = moduleInstance.getExceptionMessage(error);
+      return message || type;
+    } finally {
+      moduleInstance.decrementExceptionRefcount(error);
+    }
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 const handlers = {
@@ -152,6 +167,18 @@ const handlers = {
     return schema();
   },
 
+  csvOptions({ delimiter, quote, hasHeaders }) {
+    ensureView();
+    view.setCsvOptions(delimiter, quote, hasHeaders);
+    return schema();
+  },
+
+  readCsvOptions({ delimiter, quote, hasHeaders }) {
+    ensureView();
+    view.readCsvOptions(delimiter, quote, hasHeaders);
+    return schema();
+  },
+
   reset() {
     ensureView();
     view.reset();
@@ -163,7 +190,7 @@ const handlers = {
     view.save();
     const bytes = moduleInstance.FS.readFile(activePath);
     const copy = bytes.slice();
-    return { buffer: copy.buffer, byteOffset: copy.byteOffset, byteLength: copy.byteLength };
+    return { buffer: copy.buffer, byteOffset: copy.byteOffset, byteLength: copy.byteLength, schema: schema() };
   },
 };
 
@@ -192,7 +219,7 @@ self.addEventListener('message', (event) => {
       self.postMessage({
         id,
         ok: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage(error),
       });
     });
 });

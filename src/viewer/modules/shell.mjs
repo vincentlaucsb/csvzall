@@ -26,6 +26,16 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const recordCountNode = document.getElementById('record-count');
   const saveButton = document.getElementById('save');
   const resetButton = document.getElementById('reset');
+  const csvOptionsButton = document.getElementById('csv-options');
+  const csvOptionsDialog = document.getElementById('csv-options-dialog');
+  const csvOptionsForm = document.getElementById('csv-options-form');
+  const csvDelimiter = document.getElementById('csv-options-delimiter');
+  const csvQuote = document.getElementById('csv-options-quote');
+  const csvHasHeaders = document.getElementById('csv-options-has-headers');
+  const csvInputDelimiter = document.getElementById('csv-input-delimiter');
+  const csvInputQuote = document.getElementById('csv-input-quote');
+  const csvInputRead = document.getElementById('csv-input-read');
+  const csvOptionsError = document.getElementById('csv-options-error');
   const insertMenuButton = document.getElementById('insert-menu');
   const deleteMenuButton = document.getElementById('delete-menu');
   const gridElement = document.getElementById('grid');
@@ -50,6 +60,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   let resultMode = false;
   let activeName = '';
   let activeColumns = [];
+  let csvOptions = null;
+  let readingCsv = false;
   let rowCount = 0;
   let viewGeneration = 0;
   let dirty = false;
@@ -61,7 +73,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   let pendingOpenFile = null;
   const saveState = createSaveState();
   const csvMutations = createMutationTracker(() => setDirty(true));
-  const mutationTypes = new Set(['editCell', 'insertColumn', 'insertRow', 'deleteRow', 'swapRows', 'deleteColumn', 'renameColumn', 'reset']);
+  const mutationTypes = new Set(['editCell', 'insertColumn', 'insertRow', 'deleteRow', 'swapRows', 'deleteColumn', 'renameColumn', 'reset', 'csvOptions']);
   const hostGrid = createHostGridAdapter({
     getGrid: () => gridApi,
     isHostMode: () => hostBridge?.isHostMode() ?? false,
@@ -103,7 +115,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   function request(type, payload = {}, transfer = []) {
-    if (mutationTypes.has(type) && (!editable || !viewOpen)) return Promise.reject(new Error('This CSV is read-only.'));
+    if ((mutationTypes.has(type) || type === 'readCsvOptions') && (!editable || !viewOpen)) return Promise.reject(new Error('This CSV is read-only.'));
     return mutationTypes.has(type) ? csvMutations.run(() => sendRequest(type, payload, transfer)) : sendRequest(type, payload, transfer);
   }
 
@@ -120,6 +132,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   function refreshActionState() {
     saveButton.disabled = !viewOpen || !dirty;
     resetButton.disabled = !viewOpen || !dirty;
+    csvOptionsButton.disabled = !viewOpen || !editable || !csvOptions;
     insertMenuButton.disabled = !viewOpen;
     deleteMenuButton.disabled = !viewOpen;
   }
@@ -138,6 +151,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
 
   function applySchema(schema) {
     activeColumns = schema.columns;
+    csvOptions = schema.csvOptions ?? null;
     rowCount = schema.rowCount;
     updateRecordCount(rowCount);
   }
@@ -502,12 +516,20 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   function showInsertColumnDialog(column = '', offset = 0) {
     const columnIndex = columnIndexFor(column);
     pendingInsertColumn = Math.min(columnIndex + offset, activeColumns.length);
+    if (csvOptions?.hasHeaders === false) {
+      void insertColumnAt(pendingInsertColumn, '').catch(error => setStatus(error.message));
+      return;
+    }
     insertColumnName.value = '';
     clearColumnError();
     showDialog(insertColumnDialog, insertColumnName);
   }
 
   function showRenameColumnDialog(column) {
+    if (csvOptions?.hasHeaders === false) {
+      setStatus('Synthetic column labels cannot be renamed.');
+      return;
+    }
     if (!column || !activeColumns.includes(column)) {
       setStatus('Choose a column to rename.');
       return;
@@ -565,7 +587,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     items: () => [
       ...columnFeatures.map(feature => ({ id: feature.id, label: feature.label, icon: () => createIcon(feature.icon) })),
       ...(editable ? [
-      { id: 'rename-column', label: 'Rename Column', icon: () => createIcon('pencil') },
+      { id: 'rename-column', label: 'Rename Column', icon: () => createIcon('pencil'), disabled: csvOptions?.hasHeaders === false },
       { type: 'separator' },
       { id: 'delete-column', label: 'Delete Column', icon: () => createIcon('column-remove'), variant: 'danger' },
       ] : []),
@@ -707,6 +729,75 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     renameColumnDialog.close('cancel');
   });
 
+  csvOptionsButton.addEventListener('click', async () => {
+    await finishEditing();
+    await csvMutations.settle();
+    if (!viewOpen || !editable || !csvOptions) return;
+    csvDelimiter.value = csvOptions.delimiter === '\t' ? '\\t' : csvOptions.delimiter;
+    csvQuote.value = csvOptions.quote;
+    csvInputDelimiter.value = csvDelimiter.value;
+    csvInputQuote.value = csvQuote.value;
+    csvInputRead.disabled = dirty;
+    document.getElementById('csv-input-help').textContent = dirty
+      ? 'Save or reset changes before changing the input dialect.'
+      : 'Reading changes the view without writing the file.';
+    csvHasHeaders.checked = csvOptions.hasHeaders;
+    document.getElementById('csv-options-current').textContent =
+      `Current dialect: delimiter ${JSON.stringify(csvOptions.delimiter)}, quote ${csvOptions.quote ? JSON.stringify(csvOptions.quote) : 'none'}. BOM: ${csvOptions.bom ? 'present' : 'absent'}.`;
+    document.getElementById('csv-options-headers').textContent =
+      `${csvOptions.hasHeaders ? 'Headers' : 'Display labels'}: ${activeColumns.join(', ')}`;
+    csvOptionsError.hidden = true;
+    showDialog(csvOptionsDialog, csvHasHeaders);
+  });
+  csvInputRead.addEventListener('click', async () => {
+    if (dirty || saving || readingCsv) return;
+    readingCsv = true;
+    csvInputRead.disabled = true;
+    const apply = document.getElementById('csv-options-apply');
+    apply.disabled = true;
+    const generation = viewGeneration;
+    try {
+      const schema = await request('readCsvOptions', {
+        delimiter: csvInputDelimiter.value === '\\t' ? '\t' : csvInputDelimiter.value,
+        quote: csvInputQuote.value, hasHeaders: csvHasHeaders.checked,
+      });
+      if (generation !== viewGeneration) return;
+      loadView(schema, activeName);
+      csvOptionsDialog.close('read');
+    } catch (error) {
+      csvOptionsError.textContent = error instanceof Error ? error.message : 'Could not read this dialect.';
+      csvOptionsError.hidden = false;
+    } finally { readingCsv = false; csvInputRead.disabled = dirty; apply.disabled = false; }
+  });
+  document.getElementById('csv-options-standard').addEventListener('click', () => {
+    csvDelimiter.value = ',';
+    csvQuote.value = '"';
+  });
+  document.getElementById('csv-options-cancel').addEventListener('click', () => csvOptionsDialog.close('cancel'));
+  csvOptionsForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    const apply = document.getElementById('csv-options-apply');
+    if (apply.disabled || saving || readingCsv) return;
+    apply.disabled = true;
+    try {
+      const next = { delimiter: csvDelimiter.value === '\\t' ? '\t' : csvDelimiter.value,
+        quote: csvQuote.value, hasHeaders: csvHasHeaders.checked };
+      if (next.delimiter !== csvOptions.delimiter || next.quote !== csvOptions.quote || next.hasHeaders !== csvOptions.hasHeaders) {
+        const order = currentGridColumns(gridApi, activeColumns).map(column => activeColumns.indexOf(column));
+        const schema = await request('csvOptions', next);
+        applySchema(schema);
+        setGridColumnDefs(activeColumns);
+        if (backend.capabilities.columnOrder) gridApi.applyColumnState({ state: order.map(index => ({ colId: activeColumns[index] })), applyOrder: true });
+        refreshRows();
+        markDataDirty('CSV options applied. Save to write the current dialect and header mode.');
+      }
+      csvOptionsDialog.close('apply');
+    } catch (error) {
+      csvOptionsError.textContent = error instanceof Error ? error.message : 'Could not apply CSV options.';
+      csvOptionsError.hidden = false;
+    } finally { apply.disabled = false; }
+  });
+
   fileInput.addEventListener('change', () => {
     const file = fileInput.files?.[0];
     fileInput.value = '';
@@ -722,6 +813,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       throw new Error('No CSV is open.');
     }
     if (saving) throw new Error('A save is already in progress.');
+    if (readingCsv) throw new Error('The input dialect is being applied.');
     saving = true;
     const wasInert = document.body.inert;
     document.body.inert = true;
@@ -741,7 +833,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
         persist: result => backend.persist(result, { name, hostBridge, downloadBytes }),
         onSaved() {
           if (savedResult.schema) {
-            const changed = JSON.stringify(activeColumns) !== JSON.stringify(savedResult.schema.columns);
+            const changed = JSON.stringify(activeColumns) !== JSON.stringify(savedResult.schema.columns) || savedResult.schema.csvOptions?.hasHeaders === false;
             applySchema(savedResult.schema);
             if (changed) setGridColumnDefs(activeColumns);
           }
@@ -793,6 +885,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   decorateMenuButton(insertMenuButton, 'plus', 'Insert');
   decorateMenuButton(deleteMenuButton, 'trash', 'Delete');
   decorateButton(resetButton, 'restore', 'Reset');
+  decorateButton(csvOptionsButton, 'settings', 'Options');
   decorateButton(saveButton, 'device-floppy', 'Save');
   decorateIconButton(document.getElementById('more-actions'), 'dots', 'More actions');
   compactLayout = createCompactLayout({ toolbar: document.querySelector('.toolbar-actions'),

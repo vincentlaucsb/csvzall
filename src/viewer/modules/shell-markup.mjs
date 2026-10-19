@@ -14,6 +14,8 @@ export const shellMarkup = `
       <div id="viewer-tools" class="feature-toolbar" role="group" aria-label="CSV tools">
       </div>
       <div id="edit-toolbar" class="edit-toolbar">
+        <button id="csv-options" type="button" disabled>Options</button>
+        <span class="toolbar-divider" aria-hidden="true"></span>
         <button id="insert-menu" type="button">Insert</button>
         <button id="delete-menu" type="button">Delete</button>
         <button id="reset" type="button" disabled>Reset</button>
@@ -31,6 +33,38 @@ export const shellMarkup = `
       <span id="record-count"></span>
     </footer>
   </div>
+  <dialog id="csv-options-dialog" class="csvzall-dialog" aria-labelledby="csv-options-title">
+    <form id="csv-options-form" class="dialog-form">
+      <h2 id="csv-options-title">CSV options</h2>
+      <p id="csv-options-current"></p>
+      <p id="csv-options-headers"></p>
+      <label class="csv-options-header-toggle"><input id="csv-options-has-headers" type="checkbox"><span>First row contains headers</span></label>
+      <p>When headers are off, A, B, C, … are display labels only and are never saved.</p>
+      <details>
+        <summary>Correct input dialect</summary>
+        <fieldset>
+          <legend>Read existing bytes</legend>
+          <p>Ambiguous quoting keeps double quotes by default. If values look wrong, choose the file’s actual characters and read it again.</p>
+          <label><span>Input delimiter (use \\t for tab)</span><input id="csv-input-delimiter" type="text" autocomplete="off"></label>
+          <label><span>Input quoting character (empty for none)</span><input id="csv-input-quote" type="text" maxlength="1" autocomplete="off"></label>
+          <p id="csv-input-help">Reading changes the view without writing the file.</p>
+          <button id="csv-input-read" type="button">Read using these characters</button>
+        </fieldset>
+      </details>
+      <fieldset>
+        <legend>Output dialect</legend>
+        <p>Change these values to convert the file on its next save.</p>
+        <label><span>Delimiter (use \\t for tab)</span><input id="csv-options-delimiter" type="text" autocomplete="off" required></label>
+        <label><span>Quoting character (empty for none)</span><input id="csv-options-quote" type="text" maxlength="1" autocomplete="off"></label>
+        <button id="csv-options-standard" type="button">Use comma and double quotes</button>
+      </fieldset>
+      <p id="csv-options-error" class="dialog-error" hidden></p>
+      <div class="dialog-actions">
+        <button id="csv-options-cancel" type="button">Cancel</button>
+        <button id="csv-options-apply" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="insert-column-dialog" class="csvzall-dialog">
     <form id="insert-column-form" class="dialog-form">
       <h2>Insert column</h2>

@@ -150,6 +150,17 @@ std::uint64_t CsvViewData::file_size() const {
   return data_.file_size();
 }
 
+std::string CsvViewData::delimiter() const { return data_.delimiter(); }
+std::string CsvViewData::quote() const { return data_.quote(); }
+bool CsvViewData::has_headers() const { return data_.has_headers(); }
+bool CsvViewData::has_bom() const { return data_.has_bom(); }
+void CsvViewData::set_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers) {
+  data_.set_csv_options(delimiter, quote, has_headers);
+}
+void CsvViewData::read_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers) {
+  data_.read_csv_options(delimiter, quote, has_headers);
+}
+
 std::vector<std::vector<std::string>> CsvViewData::read_rows(
     const std::uint64_t offset,
     const std::uint64_t limit) const {

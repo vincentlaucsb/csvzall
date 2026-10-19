@@ -1,4 +1,5 @@
 const TABLER_ICON_PATHS = {
+  'settings': ['M4 7h9', 'M17 7h3', 'M4 17h3', 'M11 17h9', 'M13 4v6', 'M7 14v6'],
   'code': ['M7 8l-4 4l4 4', 'M17 8l4 4l-4 4', 'M14 4l-4 16'],
   'dots': ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
   'arrow-down': ['M12 5l0 14', 'M18 13l-6 6', 'M6 13l6 6'],

@@ -65,6 +65,12 @@ class CsvViewData {
   [[nodiscard]] const std::vector<std::string>& headers() const;
   [[nodiscard]] std::uint64_t row_count() const;
   [[nodiscard]] std::uint64_t file_size() const;
+  [[nodiscard]] std::string delimiter() const;
+  [[nodiscard]] std::string quote() const;
+  [[nodiscard]] bool has_headers() const;
+  [[nodiscard]] bool has_bom() const;
+  void set_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);
+  void read_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);
 
   [[nodiscard]] std::vector<std::vector<std::string>> read_rows(
       std::uint64_t offset,
