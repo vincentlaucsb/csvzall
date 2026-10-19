@@ -285,6 +285,93 @@ set(SQLITECPP_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(SQLITECPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(SQLiteCpp)
 
+# SQLite's built-in math functions (sqrt, pow, ln, floor, trig, ...) are off
+# in the plain amalgamation; enable them on the bundled sqlite3 target.
+if(NOT TARGET sqlite3)
+  message(FATAL_ERROR "SQLiteCpp did not create its bundled sqlite3 target; csvzall requires SQLITECPP_INTERNAL_SQLITE=ON.")
+endif()
+target_compile_definitions(sqlite3 PRIVATE SQLITE_ENABLE_MATH_FUNCTIONS)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(sqlite3 PUBLIC m)
+endif()
+
+# sqlean — selected SQLite extension modules compiled into csvzall so they
+# work without load_extension(). Only pure-function modules are included:
+# crypto, fuzzy, regexp (PCRE2, vendored by sqlean), stats, text, and uuid.
+# Modules that touch the filesystem (fileio, vsv), replace SQLite built-ins
+# (unicode), define SQL functions (define), duplicate SQLite math (math),
+# only parse ISO dates (time), or are not portable to Windows (ipaddr) are
+# deliberately excluded. Their SQL function lists are documented in
+# docs/sqlite-capabilities.md. cmake/sqlean_patches.cmake keeps SQLite built-ins
+# authoritative and lets regexp match non-UTF-8 text.
+enable_language(C)
+set(CSVZALL_SQLEAN_GIT_TAG "0.28.5"
+    CACHE STRING "sqlean release tag compiled into csvzall")
+csvzall_pinned_fetch_dirs(_csvzall_sqlean_fetch_dirs sqlean "${CSVZALL_SQLEAN_GIT_TAG}")
+FetchContent_Declare(
+  sqlean
+  GIT_REPOSITORY https://github.com/nalgeon/sqlean.git
+  GIT_TAG ${CSVZALL_SQLEAN_GIT_TAG}
+  GIT_SHALLOW TRUE
+  UPDATE_DISCONNECTED TRUE
+  ${_csvzall_sqlean_fetch_dirs}
+)
+# sqlean has no CMakeLists.txt, so this only populates the source tree.
+FetchContent_MakeAvailable(sqlean)
+FetchContent_GetProperties(sqlean SOURCE_DIR CSVZALL_SQLEAN_SOURCE_DIR)
+set(_csvzall_sqlean_src "${CSVZALL_SQLEAN_SOURCE_DIR}/src")
+if(NOT EXISTS "${_csvzall_sqlean_src}/regexp/pcre2/pcre2.h")
+  message(FATAL_ERROR "sqlean source tree is missing or incomplete: ${CSVZALL_SQLEAN_SOURCE_DIR}")
+endif()
+file(GLOB CSVZALL_SQLEAN_SOURCES CONFIGURE_DEPENDS
+  "${_csvzall_sqlean_src}/crypto/*.c"
+  "${_csvzall_sqlean_src}/fuzzy/*.c"
+  "${_csvzall_sqlean_src}/regexp/*.c"
+  "${_csvzall_sqlean_src}/regexp/pcre2/*.c"
+  "${_csvzall_sqlean_src}/stats/*.c"
+  "${_csvzall_sqlean_src}/text/*.c"
+  "${_csvzall_sqlean_src}/text/utf8/*.c"
+  "${_csvzall_sqlean_src}/uuid/*.c")
+include(cmake/sqlean_patches.cmake)
+csvzall_patch_sqlean_sources("${_csvzall_sqlean_src}" "${CMAKE_CURRENT_BINARY_DIR}/sqlean-patched"
+  _csvzall_sqlean_patched_pairs)
+while(_csvzall_sqlean_patched_pairs)
+  list(POP_FRONT _csvzall_sqlean_patched_pairs _csvzall_sqlean_original _csvzall_sqlean_patched)
+  list(REMOVE_ITEM CSVZALL_SQLEAN_SOURCES "${_csvzall_sqlean_original}")
+  list(APPEND CSVZALL_SQLEAN_SOURCES "${_csvzall_sqlean_patched}")
+endwhile()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${_csvzall_sqlean_src}/text/extension.c"
+  "${_csvzall_sqlean_src}/regexp/regexp.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/sqlean_patches.cmake")
+add_library(csvzall_sqlean STATIC ${CSVZALL_SQLEAN_SOURCES})
+target_include_directories(csvzall_sqlean
+  PRIVATE
+    # Supplies the sqlite3ext.h that sqlean includes; SQLiteCpp only bundles sqlite3.h.
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sqlite/sqlean_shim"
+    "${_csvzall_sqlean_src}")
+target_link_libraries(csvzall_sqlean PUBLIC SQLite::SQLite3)
+target_compile_definitions(csvzall_sqlean PUBLIC "CSVZALL_SQLEAN_VERSION=\"${CSVZALL_SQLEAN_GIT_TAG}\"")
+target_compile_definitions(csvzall_sqlean
+  PRIVATE
+    SQLITE_CORE
+    "SQLEAN_VERSION=\"${CSVZALL_SQLEAN_GIT_TAG}\""
+    # PCRE2 build constants from sqlean's src/regexp/constants.h.
+    PCRE2_CODE_UNIT_WIDTH=8
+    LINK_SIZE=2
+    HAVE_CONFIG_H
+    SUPPORT_UNICODE
+    PCRE2_STATIC)
+if(MSVC)
+  target_compile_options(csvzall_sqlean PRIVATE /w)
+else()
+  target_compile_options(csvzall_sqlean PRIVATE -w)
+  set_target_properties(csvzall_sqlean PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+if(UNIX AND NOT APPLE)
+  target_link_libraries(csvzall_sqlean PUBLIC m)
+endif()
+
 if(CSVZALL_PREFER_SYSTEM_SIMDJSON)
   find_package(simdjson CONFIG QUIET)
 endif()
@@ -724,6 +811,7 @@ set(CSVZALL_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/charts/chart_spec.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/column_lookup.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/file_replace.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/flexible_date.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/gzip_stream.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/json_path.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/markdown_calendar.cpp
@@ -731,6 +819,7 @@ set(CSVZALL_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/common/row_utils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/sqlite/sqlite_db.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/sqlite/csv_loader.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/sqlite/sql_functions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/viewer_core/indexed_csv.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/append.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/CsvInputCommand.cpp
@@ -784,7 +873,8 @@ function(csvzall_core_link_libraries out_var)
     ${CSVZALL_SIMDJSON_TARGET}
     ${CSVZALL_NLOHMANN_JSON_TARGET}
     csv
-    SQLiteCpp)
+    SQLiteCpp
+    csvzall_sqlean)
 
   if(CSVZALL_ENABLE_COMPRESSED_INPUT)
     list(APPEND LINK_LIBS ${CSVZALL_ZLIB_TARGET})

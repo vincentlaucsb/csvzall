@@ -148,7 +148,7 @@ std::string BuildSqlQueryResultJson(const CsvViewData& data, std::string_view sq
     query_text = "SELECT * FROM " + std::string(kViewerSqlTableName);
   }
   SQLite::Database db(":memory:", SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
-  sqlite::RegisterSqliteRegexFunctions(db);
+  sqlite::RegisterCsvzallSqliteFunctions(db);
   LoadViewerDataIntoSqlite(db, data);
   db.exec("PRAGMA query_only = ON");
   ValidateReadOnlyQuery(db, query_text);

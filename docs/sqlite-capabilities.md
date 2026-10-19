@@ -1,9 +1,10 @@
 # SQLite capabilities {#sqlite_capabilities}
 
-This reference describes SQL in the native desktop CSV viewer and csvzall's
-SQLite-backed CLI workflows. The standard distribution uses SQLiteCpp's bundled
-SQLite plus csvzall's regular-expression functions. The mobile/WASM viewer does
-not provide the native SQLite query toolbar.
+This reference describes SQL in the native desktop CSV viewer, chart `sql`
+options, and csvzall's SQLite-backed CLI workflows. The standard distribution
+uses SQLiteCpp's bundled SQLite with math functions enabled, selected sqlean
+modules (including PCRE2 regular expressions), and csvzall's date functions.
+The mobile/WASM viewer does not provide the native SQLite query toolbar.
 
 ## Built-in SQLite functions
 
@@ -23,9 +24,11 @@ Check your running helper with the inspection queries below.
 | --- | --- |
 | Core scalar functions | Includes `substr`, `replace`, `lower`, `upper`, `coalesce`, `abs`, and `round` |
 | Aggregates and windows | Includes `count`, `sum`, `avg`, `min`, `max`, and `row_number` |
-| Dates and times | Includes `date`, `datetime`, and `strftime`; CSV date strings must use a format SQLite understands |
+| Dates and times | Includes `date`, `datetime`, and `strftime` for ISO text; csvzall adds `parse_date` and `date_precision` for hand-entered dates |
 | JSON and JSONB | Includes `json_extract`, `json_valid`, `json_each`, `json_tree`, and `jsonb` |
-| Regular expressions | csvzall adds `REGEXP`, `regexp(pattern, value)`, and `regexp_like(value, pattern)` |
+| Math | `sqrt`, `pow`, `ln`, `log`, `exp`, `floor`, `ceil`, trigonometry |
+| Regular expressions | PCRE2: `REGEXP`, `regexp(pattern, value)`, `regexp_like(value, pattern)`, `regexp_substr`, `regexp_capture`, `regexp_replace` |
+| sqlean | `fuzzy`, `stats` (`median`, `percentile`), `text`, `crypto`, `uuid` modules |
 
 These examples are complete queries that need no particular CSV columns:
 
@@ -55,9 +58,11 @@ ordinary SQL values for display; the viewer presents results as cell text rather
 than a binary-data inspector. JSON support is built into the bundled SQLite;
 it is not a separate csvzall extension.
 
-## csvzall regular-expression functions
+## Regular expressions (PCRE2)
 
-All three forms below search for a match and return `1` or `0`:
+csvzall compiles in [sqlean](https://github.com/nalgeon/sqlean)'s `regexp`
+module, which uses [PCRE2](https://www.pcre.org/) in UTF-8 mode with Unicode
+properties. These forms search for a match and return `1` or `0`:
 
 ```sql
 SELECT 'Alice' REGEXP '^Ali' AS operator_match,
@@ -68,26 +73,155 @@ SELECT 'Alice' REGEXP '^Ali' AS operator_match,
 The direct `regexp` function takes the **pattern first**. `regexp_like` takes
 the **value first**. The `REGEXP` operator supplies the argument order for you.
 
-Patterns use C++ `std::regex` with ECMAScript syntax. Matching is case-sensitive
-unless the pattern starts with csvzall's supported `(?i)` prefix:
+Extraction and replacement functions return text:
+
+```sql
+SELECT regexp_substr('ride 42 km', '\d+') AS first_number,
+       regexp_capture('ride 42 km', '(\d+) km', 1) AS group_1,
+       regexp_replace('2026-06-09', '(\d+)-(\d+)-(\d+)', '$3/$2/$1') AS reordered;
+```
+
+`regexp_capture(value, pattern [, n])` returns capture group `n` (default `0`,
+the whole match). `regexp_replace(value, pattern, replacement)` replaces every
+match; `$1`, `${name}`, and other PCRE2 extended substitutions are available.
+
+Inline flags work anywhere in a pattern, for example `(?i)` for
+case-insensitive matching, `(?m)` for multi-line anchors, and `(?x)` for
+free-spacing patterns:
 
 ```sql
 SELECT regexp_like('ALICE', '(?i)^alice$') AS case_insensitive,
-       regexp_like('workout today', '\b(gym|workout|lift)\b') AS word_match;
+       regexp_like('workout today', '\b(gym|workout|lift)\b') AS word_match,
+       regexp_like('Café', '^Caf.$') AS one_character,
+       regexp_like('naïve', '^\w+$') AS unicode_word;
 ```
 
 - Matching searches within the value. Use `^` and `$` to require a whole-value
   match.
-- A SQL `NULL` value or pattern returns `0`, rather than SQL `NULL`.
-- Invalid patterns fail the query with an `invalid regex pattern` error.
-- This is not PCRE. PCRE-only constructs and general inline flag syntax are
-  unsupported; `(?i)` is specially recognized only at the start of the pattern.
-- csvzall does not add `regexp_replace`, `regexp_extract`, or regex aggregates.
+- `.` matches one Unicode character, `\w`, `\d`, and `\b` follow Unicode
+  properties, and `(?i)` folds case for non-ASCII letters such as `É`.
+- A SQL `NULL` value returns `0` from `regexp_like`/`REGEXP` and `NULL` from the
+  extraction functions. A `NULL` pattern fails the query with
+  `missing regexp pattern`. (csvzall 0.7.0 and earlier returned `0`.)
+- Invalid patterns fail the query with PCRE2's error message and offset, for
+  example `missing terminating ] for character class (offset 1)`.
+- Values that are not valid UTF-8, such as Latin-1 CSV text, still match on
+  their valid parts; the invalid bytes themselves never match.
+- Long values work: PCRE2 backtracks on the heap rather than the call stack.
 - Backslashes in these SQL examples are literal. Shell or programming-language
   quoting may require another escaping layer when passing the SQL to the CLI.
 
-The registration API is csvzall::sqlite::RegisterSqliteRegexFunctions().
+The registration API is csvzall::sqlite::RegisterCsvzallSqliteFunctions(),
+which also registers the date and sqlean functions below.
 
+## Dates written by hand
+
+SQLite's `date()` only reads ISO-style text. csvzall adds two functions built on
+the same parser as `csvzall heatmap`:
+
+| Function | Result |
+| --- | --- |
+| `parse_date(value [, order])` | ISO `YYYY-MM-DD`, or `NULL` when the value is not a date |
+| `date_precision(value [, order])` | `'day'`, `'month'`, `'year'`, or `NULL` |
+
+Accepted values:
+
+- Full dates: `YYYY-MM-DD`, `M/D/YYYY`, `M-D-YYYY`, `D/M/YYYY`, and `D-M-YYYY`.
+  A year-first value may carry a time suffix (`2026-05-26T10:00:00`).
+- Month precision: `6/2026`, `2026-06`, `4/??/2026`, `2026-04-??`.
+- Year precision: `2026`, `??/??/2026`, `2026-??`.
+
+A run of `?` marks an unknown part. Partial dates return the first day of the
+period, so `parse_date('4/??/2026')` is `2026-04-01`. `order` is `'mdy'`
+(default) or `'dmy'` and only decides values such as `6/9/2026` where both
+leading parts are 12 or less; `26/5/2026` is always read day-first and
+`5/26/2026` month-first. Unlike heatmap, a scalar SQL function cannot infer the
+order from the rest of the column, so pass `'dmy'` for day-first data.
+
+How to treat a partial date stays a choice in SQL:
+
+```sql
+SELECT Item,
+       CASE date_precision(Date)
+         WHEN 'day'   THEN parse_date(Date)
+         WHEN 'month' THEN date(parse_date(Date), '+14 days')
+       END AS service_date
+FROM data;
+```
+
+## Math functions
+
+The bundled SQLite is built with `SQLITE_ENABLE_MATH_FUNCTIONS`: `sqrt`, `pow`,
+`exp`, `ln`, `log`, `log2`, `log10`, `ceil`, `floor`, `trunc`, `mod`, `pi`,
+`degrees`, `radians`, and the trigonometric and hyperbolic functions.
+
+```sql
+SELECT sqrt(16) AS root, pow(2, 10) AS kib, round(pi(), 4) AS pi;
+```
+
+## sqlean modules
+
+These [sqlean](https://github.com/nalgeon/sqlean) 0.28.5 modules are compiled in
+and need no flag. `sqlean_version()` reports the bundled release. Module
+documentation lives in sqlean's `docs/` directory.
+
+| Module | Examples |
+| --- | --- |
+| `fuzzy` | `fuzzy_leven`, `fuzzy_damlev`, `fuzzy_jarowin`, `fuzzy_hamming`, `fuzzy_osadist`, `fuzzy_editdist`, `fuzzy_soundex`, `fuzzy_rsoundex`, `fuzzy_phonetic`, `fuzzy_caver`, `fuzzy_translit` |
+| `stats` | `median`, `percentile(x, p)`, `percentile_90`, `stddev`, `stddev_pop`, `variance`, `var_pop` |
+| `text` | `text_substring`, `text_split`, `text_join`, `text_upper`, `text_lower`, `text_title`, `text_casefold`, `text_lpad`, `text_replace`, `text_reverse`, `split_part`, `left`, `right`, `reverse`, `repeat` |
+| `crypto` | `md5`, `sha1`, `sha256`, `sha512`, `blake3`, `xxh64`, `encode(blob, 'hex')`, `decode` |
+| `uuid` | `uuid4`, `uuid7`, `uuid_str`, `uuid_blob` |
+| `regexp` | See [Regular expressions](#regular-expressions-pcre2) |
+
+```sql
+SELECT fuzzy_leven('kitten', 'sitting') AS edits,
+       fuzzy_soundex('Robert') AS soundex,
+       encode(sha256('csvzall'), 'hex') AS digest;
+```
+
+```sql
+SELECT median(value) AS median, percentile(value, 90) AS p90
+FROM data;
+```
+
+SQLite built-ins keep their standard meaning. sqlean's `text` module also
+defines `ltrim`, `rtrim`, `concat`, `concat_ws`, and `octet_length`, which would
+silently replace the SQLite built-ins of the same name; csvzall leaves those
+aliases out. Use the `text_ltrim`, `text_rtrim`, `text_concat`, `text_join`, and
+`text_size` spellings for sqlean's behavior.
+
+Deliberately not compiled in: `fileio` and `vsv` (read or write arbitrary files,
+which a synced `charts.json` could trigger), `unicode` (replaces `upper`,
+`lower`, and `LIKE`), `define` (lets SQL define functions), `math` (SQLite's
+built-in math is enabled instead), `time` (ISO-only parsing; see
+[Dates written by hand](#dates-written-by-hand)), and `ipaddr` (not built on
+Windows). Load any of them yourself with `--load-extension` when you need them.
+
+## Several CSVs in one query
+
+`csvzall sql query` loads each `--csv <name>=<path>` as table `<name>` in one
+in-memory database, so queries can `JOIN` them without a temporary file:
+
+```sh
+csvzall sql query --csv rides=strava.csv --csv log="Bike Maintenance Log.csv" \
+  --sql "SELECT log.Item, SUM(rides.distance) AS km
+         FROM log JOIN rides ON rides.date >= parse_date(log.Date)
+         GROUP BY log.Item"
+```
+
+One `--csv` may omit the name and uses `--table` (default `data`). At most one
+table can read stdin (`name=-`). Table names are case-insensitive and must be
+unique. A value is treated as `name=path` only when the text before `=` is an
+identifier and the whole value is not an existing file, so paths containing `=`
+keep working.
+
+To build a reusable database instead, `csvzall sql load` writes one table per
+run. The first load creates the file; pass `--add-table` to add further tables
+(it fails if the name is already used) or `--replace-table` to replace an
+existing table. Replacement loads into a staging table first, so a failed load
+leaves the old table and any views on it intact. Loads into an existing database
+keep SQLite journaling on and never change its journal mode.
 ## Querying CSV data in the viewer
 
 The native viewer exposes the current CSV as table `data`, including unsaved
@@ -147,19 +281,30 @@ command; for example, `csvzall sql query --db <path>` queries an existing databa
 In the standard native build:
 
 - FTS3/FTS4/FTS5 full-text search and RTree are not enabled.
-- Spatial extensions, ICU, and third-party extension suites such as sqlean are
-  not bundled.
-- Optional mathematical functions such as `sqrt`, `sin`, and `log` are not
-  enabled. Core functions such as `abs` and `round` remain available.
-- Statistical extensions such as `median` and `percentile` are not provided.
-  Standard aggregates such as `avg` and `sum` remain available.
-- Loading external extensions is disabled on csvzall-created connections;
-  `load_extension(...)` reports `not authorized`. Seeing that function in the
-  function list does not mean loading is permitted.
+- Spatial extensions, ICU, and the sqlean modules listed above as not compiled
+  in are not bundled.
+- SQL cannot load extensions: `load_extension(...)` reports `not authorized` on
+  every csvzall connection. Seeing that function in the function list does not
+  mean loading is permitted.
+
+### Loading a native extension from the CLI
+
+`csvzall sql query --load-extension <path>` (repeatable) loads a native SQLite
+extension into that query's database, with `--csv` or `--db`:
+
+```sh
+csvzall sql query --csv log.csv --load-extension ./unicode --sql "SELECT unicode_upper(Item) FROM data"
+```
+
+csvzall enables loading only through SQLite's C API
+(`SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION`), loads the named files, and disables
+it again before your SQL runs, so the query itself still cannot load anything.
+Chart configs (`charts.json`) and the viewer have no way to request an
+extension, so a synced or shared vault cannot make csvzall run native code. An
+extension runs with your user's full permissions; load only files you trust.
 
 Custom builds can differ. Consult the running helper rather than assuming that
 every function on SQLite's latest website is enabled.
-
 ## Inspect the running helper
 
 These read-only queries work in the viewer:

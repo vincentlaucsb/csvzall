@@ -15,6 +15,8 @@ add_executable(csvzall_tests
   test_sql_query.cpp
   test_sql_export.cpp
   test_sql_edges.cpp
+  test_sql_functions.cpp
+  test_sql_tables.cpp
   test_sqlite_db.cpp
   test_postgres_schema.cpp
   test_json_extract.cpp
@@ -68,6 +70,38 @@ else()
   endif()
 endif()
 
+# A tiny loadable SQLite extension proves `sql query --load-extension` loads
+# native code. SQLiteCpp bundles sqlite3.h but not sqlite3ext.h, so fetch the
+# loadable-extension header from the matching SQLite release (test-only; the
+# sqlite3_api_routines table is append-only, so later SQLite builds accept it).
+set(CSVZALL_TEST_SQLITE3EXT_DIR "${CMAKE_CURRENT_BINARY_DIR}/sqlite3ext")
+set(CSVZALL_TEST_SQLITE3EXT "${CSVZALL_TEST_SQLITE3EXT_DIR}/sqlite3ext.h")
+set(CSVZALL_TEST_SQLITE3EXT_SHA256 "b184dd1586d935133d37ad76fa353faf0a1021ff2fdedeedcc3498fff74bbb94")
+if(NOT EXISTS "${CSVZALL_TEST_SQLITE3EXT}")
+  file(DOWNLOAD
+    "https://raw.githubusercontent.com/sqlite/sqlite/version-3.46.1/src/sqlite3ext.h"
+    "${CSVZALL_TEST_SQLITE3EXT}"
+    EXPECTED_HASH "SHA256=${CSVZALL_TEST_SQLITE3EXT_SHA256}"
+    STATUS _csvzall_sqlite3ext_status)
+  list(GET _csvzall_sqlite3ext_status 0 _csvzall_sqlite3ext_code)
+  if(NOT _csvzall_sqlite3ext_code EQUAL 0)
+    file(REMOVE "${CSVZALL_TEST_SQLITE3EXT}")
+    message(STATUS "sqlite3ext.h download failed; skipping --load-extension success tests: ${_csvzall_sqlite3ext_status}")
+  endif()
+endif()
+set(CSVZALL_TEST_EXTENSION_ARGS "")
+if(EXISTS "${CSVZALL_TEST_SQLITE3EXT}")
+  add_library(csvzall_test_sqlite_extension MODULE test_sqlite_extension.c)
+  target_include_directories(csvzall_test_sqlite_extension
+    PRIVATE
+      "${CSVZALL_TEST_SQLITE3EXT_DIR}"
+      "$<TARGET_PROPERTY:sqlite3,INTERFACE_INCLUDE_DIRECTORIES>")
+  add_dependencies(csvzall_tests csvzall_test_sqlite_extension)
+  target_compile_definitions(csvzall_tests
+    PRIVATE "CSVZALL_TEST_EXTENSION_PATH=\"$<TARGET_FILE:csvzall_test_sqlite_extension>\"")
+  set(CSVZALL_TEST_EXTENSION_ARGS "-DCSVZALL_TEST_EXTENSION=$<TARGET_FILE:csvzall_test_sqlite_extension>")
+endif()
+
 add_test(NAME csvzall_tests COMMAND csvzall_tests)
 
 find_program(CSVZALL_NODE_EXE NAMES node nodejs)
@@ -91,5 +125,6 @@ add_test(
     -DCSVZALL_EXE=$<TARGET_FILE:csvzall>
     -DCSVZALL_HAVE_SVGPLOT=$<BOOL:${CSVZALL_HAVE_SVGPLOT}>
     -DCSVZALL_HAVE_COMPRESSED_INPUT=$<BOOL:${CSVZALL_ENABLE_COMPRESSED_INPUT}>
+    ${CSVZALL_TEST_EXTENSION_ARGS}
     -DCLI_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-smoke
     -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_smoke.cmake)

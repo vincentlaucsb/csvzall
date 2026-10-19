@@ -5,6 +5,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace csvzall::pipeline {
 
@@ -39,6 +40,10 @@ struct RunOptions {
   // false (default): disable SQLite journaling during load for speed.
   // true: keep default SQLite journal mode (safer for crash recovery).
   bool sqlite_journal_enabled = false;
+  // Native SQLite extensions to load into each query database (sql query
+  // --load-extension). CLI-only: chart configs and the viewer never set this,
+  // so shared files cannot make csvzall run native code.
+  std::vector<std::string> sqlite_load_extensions;
   // PostgreSQL COPY producer chunk size. Larger values can reduce queue churn
   // but increase peak memory; 10k was a good default on large local loads.
   std::size_t postgres_copy_batch_rows = 10000;
@@ -58,6 +63,22 @@ struct RunOptions {
   std::string view_asset_dir;
 };
 
+// How `sql load` treats an existing destination database.
+enum class SqlExportTableMode {
+  // The destination file must not exist (default).
+  CreateDatabase,
+  // Add a table to a new or existing database; fail if the table exists.
+  AddTable,
+  // Add a table to a new or existing database, replacing a same-named table.
+  ReplaceTable,
+};
+
+// One CSV input loaded as a named table for a multi-table SQL query.
+struct SqlCsvTable {
+  std::string table_name;
+  // CSV path, or "-" for stdin (at most one table may read stdin).
+  std::string path;
+};
 struct RunStats {
   std::uint64_t rows_processed = 0;
   std::uint64_t bytes_processed = 0;

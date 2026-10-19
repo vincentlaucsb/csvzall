@@ -122,6 +122,16 @@ int RunSqlExport(const std::string& input_path,
                  const LoggerCallbacks& logger,
                  RunStats& stats);
 
+// sql load with --add-table / --replace-table semantics; see SqlExportTableMode.
+int RunSqlExport(const std::string& input_path,
+                 const std::string& dest_path,
+                 const std::string& table_name,
+                 SqlExportTableMode mode,
+                 std::istream& input,
+                 const RunOptions& options,
+                 const LoggerCallbacks& logger,
+                 RunStats& stats);
+
 int RunSqlQueryCsv(const std::string& sql_query,
                    const std::string& table_name,
                    const std::string& format,
@@ -130,6 +140,17 @@ int RunSqlQueryCsv(const std::string& sql_query,
                    const RunOptions& options,
                    const LoggerCallbacks& logger,
                    RunStats& stats);
+
+// Load several CSVs as named tables in one database, then run sql_query.
+// stdin_input backs the (at most one) table whose path is "-".
+int RunSqlQueryCsvTables(const std::string& sql_query,
+                         const std::vector<SqlCsvTable>& tables,
+                         const std::string& format,
+                         std::istream& stdin_input,
+                         std::ostream& output,
+                         const RunOptions& options,
+                         const LoggerCallbacks& logger,
+                         RunStats& stats);
 
 enum class SqlQueryInputKind {
     kCsv,
@@ -144,7 +165,8 @@ int RunSqlQueryDb(const std::string& sql_query,
                   const std::string& format,
                   std::ostream& output,
                   const LoggerCallbacks& logger,
-                  RunStats& stats);
+                  RunStats& stats,
+                  const std::vector<std::string>& load_extensions = {});
 
 bool ShouldWarnIntegerDivision(const std::string& sql_query);
 

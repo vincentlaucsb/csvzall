@@ -256,7 +256,8 @@ TEST_CASE("SqlQueryCsv: invalid regex pattern returns a clear error") {
       stats);
 
   REQUIRE(rc == 1);
-  REQUIRE(error_msg.find("invalid regex pattern") != std::string::npos);
+  // PCRE2's own compile error, with the failing offset.
+  REQUIRE(error_msg.find("missing terminating ] for character class") != std::string::npos);
 }
 
 TEST_CASE("SqlQueryCsv: writes escaped Markdown tables") {

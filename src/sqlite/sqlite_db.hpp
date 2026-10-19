@@ -3,8 +3,11 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <SQLiteCpp/SQLiteCpp.h>
+
+#include "sql_functions.hpp"
 
 namespace csvzall::sqlite {
 
@@ -13,6 +16,12 @@ struct SqliteDbOpenOptions {
   bool input_is_stdin = false;
   std::string input_path;
   std::size_t threshold_mb = 256;
+  // Further inputs loaded into the same database (multi-table queries). Their
+  // sizes count toward threshold_mb; any stdin entry forces in-memory.
+  std::vector<std::string> additional_input_paths;
+  // Native extensions to load after csvzall's functions are registered. Only
+  // set from local CLI flags, never from shared chart or viewer config.
+  std::vector<std::string> load_extensions;
 };
 
 // RAII wrapper around SQLite::Database.
@@ -49,19 +58,12 @@ class SqliteDb {
 // Decision rules (evaluated in order):
 //   1. options.sqlite_db_path non-empty  -> use that path as-is (not deleted).
 //   2. options.input_is_stdin or options.input_path empty/"-" -> :memory:
-//   3. file_size(options.input_path) <= options.sqlite_threshold_mb MB -> :memory:
+//   3. combined size of input_path and additional_input_paths <=
+//      options.sqlite_threshold_mb MB -> :memory:
 //   4. otherwise -> temp-file database in system temp dir (deleted on exit).
+// Every database gets RegisterCsvzallSqliteFunctions(); load_extensions are then
+// loaded with LoadSqliteExtensions().
 SqliteDb OpenSqliteDb(const SqliteDbOpenOptions& options);
-
-/**
- * @brief Register REGEXP, regexp(pattern, value), and regexp_like(value, pattern).
- *
- * Uses ECMAScript std::regex search semantics with an optional leading (?i)
- * prefix for case-insensitive matching. Returns 1 or 0; NULL arguments return
- * 0, and invalid patterns report a SQLite error.
- * @see @ref sqlite_capabilities "SQLite capabilities" for SQL examples and limits.
- */
-void RegisterSqliteRegexFunctions(SQLite::Database& db);
 
 }  // namespace csvzall::sqlite
 

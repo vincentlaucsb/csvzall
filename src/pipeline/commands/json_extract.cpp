@@ -346,6 +346,9 @@ private:
 struct ColumnMapping {
   std::string name;
   common::JsonPath path;
+  // "$$..." paths start at the document root instead of the current row, so
+  // snapshot metadata beside the row array can be copied onto every row.
+  bool from_document_root = false;
 };
 
 struct JsonMapping {
@@ -412,7 +415,10 @@ JsonMapping LoadMapping(const std::string& mapping_path) {
     if (value.kind != JsonValue::Kind::String) {
       throw std::runtime_error("Column mapping for '" + name + "' must be a string path");
     }
-    mapping.columns.push_back({name, common::ParseJsonPath(value.text)});
+    const bool from_root = value.text.starts_with("$$");
+    mapping.columns.push_back(
+        {name, common::ParseJsonPath(std::string_view(value.text).substr(from_root ? 1 : 0)),
+         from_root});
   }
 
   if (mapping.columns.empty()) {
@@ -527,7 +533,8 @@ int RunJsonExtract(const std::string& input_path,
       std::vector<std::string> out_row;
       out_row.reserve(mapping.columns.size());
       for (const auto& column : mapping.columns) {
-        const auto values = EvaluateJsonPath(*row, column.path);
+        const auto values =
+            EvaluateJsonPath(column.from_document_root ? document : *row, column.path);
         if (values.empty()) {
           out_row.emplace_back();
         } else if (values.size() == 1) {

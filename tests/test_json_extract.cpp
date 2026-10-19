@@ -183,3 +183,28 @@ TEST_CASE("JSON extract: Todoist-shaped activity fixture") {
   REQUIRE(rows[1][5] == "2026-05-01T06:59:59Z");
   REQUIRE(rows[1][6] == "true");
 }
+
+TEST_CASE("JSON extract: $$ column paths read the document root") {
+  std::ostringstream output;
+  const int rc = RunJsonExtractForText(
+      R"({"as_of":"2026-10-18T17:45:00","meta":{"athlete":{"id":7}},"gear":[{"id":"14474159","name":"Primer","total_distance":2322593},{"id":"2","name":"Road"}]})",
+      R"({"rows":"$.gear[*]","columns":{"id":"$.id","as_of":"$$.as_of","athlete":"$$.meta.athlete.id","missing":"$$.nope","dist":"$.total_distance"}})",
+      output);
+
+  REQUIRE(rc == 0);
+  REQUIRE(tests::ParseCsv(output.str()) ==
+          std::vector<std::vector<std::string>>{
+              {"id", "as_of", "athlete", "missing", "dist"},
+              {"14474159", "2026-10-18T17:45:00", "7", "", "2322593"},
+              {"2", "2026-10-18T17:45:00", "7", "", ""}});
+}
+
+TEST_CASE("JSON extract: $$ paths keep row-path validation") {
+  std::ostringstream output;
+  // "$$" alone selects the whole document object, which is not a scalar cell.
+  CHECK(RunJsonExtractForText(R"({"rows":[{"id":1}]})",
+                              R"({"rows":"$.rows[*]","columns":{"doc":"$$"}})", output) == 1);
+  // A third '$' is still unsupported syntax.
+  CHECK(RunJsonExtractForText(R"({"rows":[{"id":1}]})",
+                              R"({"rows":"$.rows[*]","columns":{"x":"$$$.id"}})", output) == 1);
+}

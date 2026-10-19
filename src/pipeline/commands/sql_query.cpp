@@ -311,6 +311,11 @@ protected:
         logger().error(std::string("sql query: SQLite error: ") + ex.what());
       }
       return 1;
+    } catch (const std::runtime_error& ex) {
+      if (logger().error) {
+        logger().error(std::string("sql query: ") + ex.what());
+      }
+      return 1;
     }
 
     return 0;
@@ -332,6 +337,84 @@ int RunSqlQueryCsv(const std::string& sql_query,
                    RunStats& stats) {
   SqlQueryCsvCommand cmd(sql_query, table_name, format, input, output, options, logger, stats);
   return cmd.execute();
+}
+
+int RunSqlQueryCsvTables(const std::string& sql_query,
+                         const std::vector<SqlCsvTable>& tables,
+                         const std::string& format,
+                         std::istream& stdin_input,
+                         std::ostream& output,
+                         const RunOptions& options,
+                         const LoggerCallbacks& logger,
+                         RunStats& stats) {
+  auto fail = [&logger](const std::string& message) {
+    if (logger.error) {
+      logger.error("sql query: " + message);
+    }
+    return 1;
+  };
+
+  const std::string query_text = common::Trim(sql_query);
+  if (query_text.empty()) {
+    return fail("--sql cannot be empty.");
+  }
+  if (tables.empty()) {
+    return fail("at least one --csv table is required.");
+  }
+
+  std::vector<std::string> folded_names;
+  bool saw_stdin = false;
+  for (const auto& table : tables) {
+    const std::string name = common::Trim(table.table_name);
+    if (name.empty()) {
+      return fail("--csv table name cannot be empty.");
+    }
+    if (table.path.empty()) {
+      return fail("--csv path for table " + name + " cannot be empty.");
+    }
+    // SQLite table names are case-insensitive for ASCII letters.
+    std::string folded = name;
+    std::transform(folded.begin(), folded.end(), folded.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (std::find(folded_names.begin(), folded_names.end(), folded) != folded_names.end()) {
+      return fail("duplicate --csv table name: " + name);
+    }
+    folded_names.push_back(std::move(folded));
+    if (table.path == "-") {
+      if (saw_stdin) {
+        return fail("only one --csv table can read stdin ('-').");
+      }
+      saw_stdin = true;
+    }
+  }
+
+  try {
+    auto open_options = MakeSqliteDbOpenOptions(options);
+    open_options.input_is_stdin = false;
+    open_options.input_path = tables.front().path;
+    for (std::size_t i = 1; i < tables.size(); ++i) {
+      open_options.additional_input_paths.push_back(tables[i].path);
+    }
+    sqlite::SqliteDb sdb = sqlite::OpenSqliteDb(open_options);
+
+    for (const auto& table : tables) {
+      RunOptions table_options = options;
+      table_options.input_path = table.path;
+      table_options.input_is_stdin = table.path == "-";
+      RunStats load_stats;
+      if (LoadCsvInputIntoTable(sdb.db(), common::Trim(table.table_name), stdin_input,
+                                table_options, logger, load_stats) != 0) {
+        return 1;
+      }
+    }
+
+    SQLite::Statement query(sdb.db(), query_text);
+    return WriteQueryResult(query, format, output, stats, logger);
+  } catch (const SQLite::Exception& ex) {
+    return fail(std::string("SQLite error: ") + ex.what());
+  } catch (const std::runtime_error& ex) {
+    return fail(ex.what());
+  }
 }
 
 SqlQueryInputKind DetectSqlQueryInputKind(const std::string& path) {
@@ -357,7 +440,8 @@ int RunSqlQueryDb(const std::string& sql_query,
                   const std::string& format,
                   std::ostream& output,
                   const LoggerCallbacks& logger,
-                  RunStats& stats) {
+                  RunStats& stats,
+                  const std::vector<std::string>& load_extensions) {
   const std::string query_text = common::Trim(sql_query);
   if (query_text.empty()) {
     if (logger.error) {
@@ -374,12 +458,18 @@ int RunSqlQueryDb(const std::string& sql_query,
 
   try {
     SQLite::Database db(db_path, SQLite::OPEN_READONLY);
-    sqlite::RegisterSqliteRegexFunctions(db);
+    sqlite::RegisterCsvzallSqliteFunctions(db);
+    sqlite::LoadSqliteExtensions(db, load_extensions);
     SQLite::Statement query(db, query_text);
     return WriteQueryResult(query, format, output, stats, logger);
   } catch (const SQLite::Exception& ex) {
     if (logger.error) {
       logger.error(std::string("sql query: SQLite error: ") + ex.what());
+    }
+    return 1;
+  } catch (const std::runtime_error& ex) {
+    if (logger.error) {
+      logger.error(std::string("sql query: ") + ex.what());
     }
     return 1;
   }

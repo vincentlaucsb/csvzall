@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -395,6 +396,29 @@ csvzall::pipeline::RunOptions BuildTransformOptions(
   return options;
 }
 
+bool IsSqlTableNameText(std::string_view text) {
+  if (text.empty() ||
+      !(std::isalpha(static_cast<unsigned char>(text.front())) != 0 || text.front() == '_')) {
+    return false;
+  }
+  return std::all_of(text.begin(), text.end(), [](unsigned char ch) {
+    return std::isalnum(ch) != 0 || ch == '_';
+  });
+}
+
+// `sql query --csv` accepts `path` or `name=path`. A value is a named table
+// only when the text before the first '=' is an identifier and the whole
+// value is not itself an existing file, so paths containing '=' keep working.
+csvzall::pipeline::SqlCsvTable ParseSqlCsvArgument(const std::string& value) {
+  const auto equals = value.find('=');
+  if (equals != std::string::npos && IsSqlTableNameText(std::string_view(value).substr(0, equals))) {
+    std::error_code ec;
+    if (!std::filesystem::exists(value, ec)) {
+      return {value.substr(0, equals), value.substr(equals + 1)};
+    }
+  }
+  return {std::string{}, value};
+}
 ThroughputStats FinishStats(const csvzall::pipeline::RunStats& ps,
                              std::chrono::steady_clock::time_point start) {
   return {ps.rows_processed, ps.bytes_processed,
@@ -413,6 +437,8 @@ int main(int argc, char** argv) {
 
 SQL notes:
   sql query supports SQLite plus csvzall functions: REGEXP and regexp_like(value, pattern)
+  (PCRE2), parse_date/date_precision, SQLite math, and compiled-in sqlean modules.
+  Repeat --csv name=path to JOIN several CSVs; see `csvzall sql --help`.
 
 Workflow examples:
   csvzall json extract activities.json --map map.json > incoming.csv
@@ -847,13 +873,16 @@ Related:
   rows is required and selects the row objects.
   columns is required and maps output column names to paths.
   Column paths are evaluated relative to each selected row.
+  Column paths starting with $$ are evaluated from the document root instead,
+  copying root fields such as a snapshot timestamp onto every row:
+  "as_of": "$$.as_of".
   Optional, missing, or null fields become empty cells.
   Nested API payload paths such as $.extra_data.content are supported.
   Scalar values become CSV cells.
   Objects or arrays selected as column values fail by default.
 
 Supported JSONPath subset:
-  $
+  $  ($$ in a column path: document root)
   .field
   ["field name"]
   ['field name']
@@ -872,7 +901,8 @@ Mapping example:
       "completed_at": "$.event_date",
       "content": "$.extra_data.content",
       "due_date": "$.extra_data.due_date",
-      "was_overdue": "$.extra_data.was_overdue"
+      "was_overdue": "$.extra_data.was_overdue",
+      "fetched_at": "$$.fetched_at"
     }
   }
 
@@ -917,17 +947,42 @@ Pipeline example:
     sql_cmd.add_epilog(R"SQL(sql query contract:
   --csv <path> reads CSV directly.
   --csv - reads CSV from stdin.
+  --csv <name>=<path> loads that CSV as table <name>. Repeat it to load several
+    CSVs into one in-memory database and JOIN them; one --csv may omit the
+    name and uses --table. At most one table can read stdin (name=-).
   --db <path> queries an existing SQLite database.
   --sql <query> is required for query mode.
   --format csv|markdown controls query output; default is csv.
+  --load-extension <path> loads a native SQLite extension (repeatable) through
+    the C API only; SQL's load_extension() stays disabled. Chart configs and
+    the viewer cannot load extensions.
   CSV input is loaded into a SQLite table named by --table, default data.
   CSV-backed tables infer SQLite affinity before load: numeric-only columns use
   NUMERIC; text-like columns and very large integer IDs use TEXT for exact
   lexical projection.
 
+sql load contract:
+  Writes a CSV into a SQLite database file (--dest, default <input>.db) as
+  table --table. By default the destination must not exist.
+  --add-table adds the table to an existing database; fails if it already has
+    a table, view, index, or trigger with that name.
+  --replace-table also replaces an existing table of that name. The old table
+    stays intact if loading fails.
+
 Useful SQL features:
-  WHERE, GROUP BY, COUNT, COUNT(DISTINCT ...), ORDER BY, substr, CASE,
-  REGEXP, and regexp_like.
+  WHERE, GROUP BY, COUNT, COUNT(DISTINCT ...), ORDER BY, substr, CASE, JOIN.
+  Math: sqrt, pow, ln, log, exp, floor, ceil, sin, cos, pi, ...
+  Regex (PCRE2, UTF-8): REGEXP, regexp_like(value, pattern),
+    regexp_substr, regexp_capture, regexp_replace(value, pattern, replacement).
+    (?i) anywhere enables case-insensitive matching. A NULL value never
+    matches; a NULL pattern is an error.
+  Dates: parse_date(value [, 'mdy'|'dmy']) -> YYYY-MM-DD or NULL, accepting
+    YYYY-MM-DD, M/D/YYYY, D/M/YYYY, month-only 6/2026, 4/??/2026, 2026-06, and
+    year-only 2026 (partial dates return the first day of the period).
+    date_precision(value [, order]) -> 'day', 'month', 'year', or NULL.
+  sqlean (compiled in, see sqlean_version()): fuzzy_leven, fuzzy_jarowin,
+    fuzzy_soundex, ...; median, percentile, stddev, variance; text_* string
+    functions; md5, sha256, encode, decode; uuid4, uuid7.
 
 Examples:
   csvzall sql query --csv gym-attendance.csv --sql "SELECT substr(date, 1, 7) AS month, COUNT(*) AS attendance_days FROM data GROUP BY month ORDER BY month"
@@ -935,6 +990,10 @@ Examples:
   csvzall sql query --csv gym-events.csv --sql "SELECT COUNT(DISTINCT date) AS attendance_days FROM data"
   csvzall sql query --csv gym-attendance.csv --format markdown --sql "SELECT substr(date, 1, 7) AS month, COUNT(*) AS days FROM data GROUP BY month ORDER BY month"
   csvzall sql query --csv gym-events.csv --sql "SELECT content FROM data WHERE regexp_like(content, '(?i)\b(gym|workout)\b')"
+  csvzall sql query --csv rides=rides.csv --csv log=log.csv --sql "SELECT log.Item, SUM(rides.distance) AS km FROM log JOIN rides ON rides.date >= parse_date(log.Date) GROUP BY log.Item"
+  csvzall sql query --csv log.csv --sql "SELECT Date, parse_date(Date) AS iso, date_precision(Date) AS precision FROM data"
+  csvzall sql load rides.csv --dest work.db --table rides
+  csvzall sql load log.csv --dest work.db --table log --add-table
 )SQL");
 
     sql_cmd.add_argument("mode")
@@ -948,9 +1007,22 @@ Examples:
     sql_cmd.add_argument("--table")
       .help("Table name to create inside the database")
       .default_value(std::string{"data"});
+    sql_cmd.add_argument("--add-table")
+      .help("Load mode: add --table to an existing --dest database (fails if the table exists)")
+      .default_value(false)
+      .implicit_value(true);
+    sql_cmd.add_argument("--replace-table")
+      .help("Load mode: add --table to --dest, replacing an existing table of that name")
+      .default_value(false)
+      .implicit_value(true);
     sql_cmd.add_argument("--csv")
-      .help("Input CSV file path, or '-' for stdin")
-      .default_value(std::string{});
+      .help("Query input CSV path or '-' for stdin; name=path loads a named table (repeatable)")
+      .default_value(std::vector<std::string>{})
+      .append();
+    sql_cmd.add_argument("--load-extension")
+      .help("Query mode: load a native SQLite extension from this path (repeatable)")
+      .default_value(std::vector<std::string>{})
+      .append();
       sql_cmd.add_argument("--db")
         .help("Input SQLite database path")
         .default_value(std::string{});
@@ -1466,8 +1538,12 @@ Examples:
     Logger logger(sql_cmd.get<bool>("--verbose"), sql_cmd.get<bool>("--quiet"));
     const std::string mode = sql_cmd.get<std::string>("mode");
 
+    const bool add_table = sql_cmd.get<bool>("--add-table");
+    const bool replace_table = sql_cmd.get<bool>("--replace-table");
+    const auto load_extensions = sql_cmd.get<std::vector<std::string>>("--load-extension");
+
     if (mode == "query") {
-      const std::string csv_override = sql_cmd.get<std::string>("--csv");
+      const auto csv_arguments = sql_cmd.get<std::vector<std::string>>("--csv");
       const std::string db_override = sql_cmd.get<std::string>("--db");
       const std::string query_text = sql_cmd.get<std::string>("--sql");
       const std::string output_format = sql_cmd.get<std::string>("--format");
@@ -1476,13 +1552,68 @@ Examples:
         logger.Error("sql query: --format must be csv or markdown.");
         return 1;
       }
-      if (!csv_override.empty() && !db_override.empty()) {
+      if (add_table || replace_table) {
+        logger.Error("sql query: --add-table and --replace-table only apply to sql load.");
+        return 1;
+      }
+      if (!csv_arguments.empty() && !db_override.empty()) {
         logger.Error("sql query: pass only one of --csv or --db.");
         return 1;
       }
       if (query_text.empty()) {
         logger.Error("sql query: --sql is required.");
         return 1;
+      }
+
+      std::vector<csvzall::pipeline::SqlCsvTable> csv_tables;
+      bool any_named_table = false;
+      for (const auto& argument : csv_arguments) {
+        auto table = ParseSqlCsvArgument(argument);
+        any_named_table = any_named_table || !table.table_name.empty();
+        csv_tables.push_back(std::move(table));
+      }
+      const std::string csv_override = csv_tables.size() == 1 && !any_named_table
+                                           ? csv_tables.front().path
+                                           : std::string{};
+
+      auto warn_integer_division = [&]() {
+        if (!suppress_int_div_warning && csvzall::pipeline::ShouldWarnIntegerDivision(query_text)) {
+          logger.Info("sql query: possible integer division detected. "
+                      "SQLite/PostgreSQL may truncate integer division; use 30.0 or x * 1.0 / y "
+                      "for floating-point behavior. Pass --no-int-division-warning to suppress.");
+        }
+      };
+
+      if (any_named_table || csv_tables.size() > 1) {
+        const std::string default_table = sql_cmd.get<std::string>("--table");
+        bool saw_unnamed = false;
+        for (auto& table : csv_tables) {
+          if (!table.table_name.empty()) {
+            continue;
+          }
+          if (saw_unnamed) {
+            logger.Error("sql query: only one --csv may omit the table name; "
+                         "use name=path for the others.");
+            return 1;
+          }
+          saw_unnamed = true;
+          table.table_name = default_table;
+        }
+        warn_integer_division();
+
+        csvzall::pipeline::RunOptions options;
+        options.single_threaded = sql_cmd.get<bool>("--single-threaded");
+        options.delimiter = ParseDelimiter(sql_cmd.get<std::string>("--delimiter"));
+        options.zip_entry = sql_cmd.get<std::string>("--zip-entry");
+        options.sqlite_load_extensions = load_extensions;
+
+        csvzall::pipeline::RunStats ps;
+        const auto rc = csvzall::pipeline::RunSqlQueryCsvTables(
+            query_text, csv_tables, output_format, std::cin, std::cout, options,
+            BuildCallbacks(logger), ps);
+        stats = FinishStats(ps, start);
+        MaybePrintVerboseStats(stats, logger);
+        return rc;
       }
 
       std::string source_path;
@@ -1509,16 +1640,13 @@ Examples:
         return 1;
       }
 
-      if (!suppress_int_div_warning && csvzall::pipeline::ShouldWarnIntegerDivision(query_text)) {
-        logger.Info("sql query: possible integer division detected. "
-                    "SQLite/PostgreSQL may truncate integer division; use 30.0 or x * 1.0 / y "
-                    "for floating-point behavior. Pass --no-int-division-warning to suppress.");
-      }
+      warn_integer_division();
 
       if (input_kind == csvzall::pipeline::SqlQueryInputKind::kSqlite) {
         csvzall::pipeline::RunStats ps;
         const auto rc = csvzall::pipeline::RunSqlQueryDb(
-            query_text, source_path, output_format, std::cout, BuildCallbacks(logger), ps);
+            query_text, source_path, output_format, std::cout, BuildCallbacks(logger), ps,
+            load_extensions);
         stats = FinishStats(ps, start);
         MaybePrintVerboseStats(stats, logger);
         return rc;
@@ -1536,6 +1664,7 @@ Examples:
       options.delimiter = ParseDelimiter(sql_cmd.get<std::string>("--delimiter"));
       options.input_path = source_path;
       options.zip_entry = sql_cmd.get<std::string>("--zip-entry");
+      options.sqlite_load_extensions = load_extensions;
 
       csvzall::pipeline::RunStats ps;
       const auto rc = csvzall::pipeline::RunSqlQueryCsv(
@@ -1554,6 +1683,17 @@ Examples:
         // Backward-compatible shorthand: `csvzall sql <input.csv>`.
         input_name = mode;
       }
+      if (!load_extensions.empty()) {
+        logger.Error("sql load: --load-extension only applies to sql query.");
+        return 1;
+      }
+      if (add_table && replace_table) {
+        logger.Error("sql load: pass only one of --add-table or --replace-table.");
+        return 1;
+      }
+      const auto table_mode = replace_table ? csvzall::pipeline::SqlExportTableMode::ReplaceTable
+                              : add_table   ? csvzall::pipeline::SqlExportTableMode::AddTable
+                                            : csvzall::pipeline::SqlExportTableMode::CreateDatabase;
 
       auto* input = ResolveInput(input_name, input_file, logger);
       if (!input) {
@@ -1571,7 +1711,7 @@ Examples:
       csvzall::pipeline::RunStats ps;
       const auto rc = csvzall::pipeline::RunSqlExport(
           input_name, sql_cmd.get<std::string>("--dest"),
-          sql_cmd.get<std::string>("--table"),
+          sql_cmd.get<std::string>("--table"), table_mode,
           *input, options, BuildCallbacks(logger), ps);
       stats.rows_processed = ps.rows_processed;
       stats.elapsed = std::chrono::steady_clock::now() - start;

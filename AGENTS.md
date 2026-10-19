@@ -32,7 +32,7 @@ This file is the canonical AI reference for this repository.
 
 - **Streaming** (`head`): row-by-row, no buffering, no SQLite.
 - **SQLite-backed** (`filter`, `derive`, `summarize`, `timeseries`): load CSV into SQLite, execute SQL, stream output.
-- **Export** (`sql`): load CSV into a persistent SQLite database file; no transform output stream.
+- **Export** (`sql load`): load CSV into a persistent SQLite database file (a new file, or another table via `--add-table`/`--replace-table`); no transform output stream.
 - **File update** (`append`, `merge`): exact-header CSV file combination; `merge` is the keyed rerunnable import primitive.
 - **Rendering** (`calendar`, `heatmap`): convert fixed-shape tabular data to Markdown or SVG report artifacts.
 
@@ -46,6 +46,9 @@ This file is the canonical AI reference for this repository.
 - Default threshold: 256 MB (`RunOptions::sqlite_threshold_mb`). Not yet exposed as a CLI flag.
 - Stdin input always uses in-memory. Explicit file path can be set via `RunOptions::sqlite_db_path`. Not yet exposed as a CLI flag.
 - Temp-file databases use a unique name (`csvzall_<pid>_<random>.db`) and are deleted on exit via RAII.
+- Every csvzall connection gets `RegisterCsvzallSqliteFunctions()` (`src/sqlite/sql_functions.*`): compiled-in sqlean modules (crypto, fuzzy, regexp/PCRE2, stats, text, uuid), `sqlean_version()`, and `parse_date`/`date_precision`. SQLite math functions are enabled on the bundled `sqlite3` target.
+- Only compile in sqlean modules that are pure functions. Do not add modules that read or write files (`fileio`, `vsv`), define SQL functions (`define`), or replace SQLite built-ins (`unicode`). A new module or sqlean bump must keep `pragma_function_list` free of non-built-in functions that share a built-in's name; drop such aliases in `cmake/sqlean_patches.cmake`.
+- Native extensions load only from the local `sql query --load-extension` flag through the C API (`RunOptions::sqlite_load_extensions`). Never let `charts.json`, the viewer, or SQL text enable extension loading.
 
 ## Design rules
 
