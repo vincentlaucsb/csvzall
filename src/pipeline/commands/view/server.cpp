@@ -29,6 +29,7 @@ using view_internal::BuildRowsJson;
 using view_internal::BuildSchemaJson;
 using view_internal::BuildSqlQueryResultJson;
 using view_internal::GenerateCurrentCsvChart;
+using view_internal::PreviewCurrentCsvChart;
 using view_internal::GenerateSessionToken;
 using view_internal::JsonStringArrayField;
 using view_internal::JsonStringArrayFieldOr;
@@ -82,6 +83,7 @@ struct ViewServer::Impl {
   int port = -1;
   bool serve_once = false;
   bool editable = false;
+  bool obsidian = false;
   std::string token;
   std::filesystem::path viewer_asset_dir;
 
@@ -129,6 +131,7 @@ ViewServer::~ViewServer() {
 int ViewServer::Start(const ViewServerOptions& options) {
   impl_->serve_once = options.serve_once;
   impl_->editable = options.editable;
+  impl_->obsidian = options.obsidian;
   impl_->stop_requested = false;
   impl_->token = options.session_token.empty() ? GenerateSessionToken() : options.session_token;
   try {
@@ -429,6 +432,42 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        }
                      });
 
+  impl_->server.Post("/api/csv-options",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) return;
+                       try {
+                         impl_->data.set_csv_options(
+                             JsonStringField(request.body, "delimiter"),
+                             JsonStringField(request.body, "quote"),
+                             view_internal::JsonBoolField(request.body, "hasHeaders"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     });
+
+  impl_->server.Post("/api/read-csv-options",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) return;
+                       try {
+                         impl_->data.read_csv_options(
+                             JsonStringField(request.body, "delimiter"),
+                             JsonStringField(request.body, "quote"),
+                             view_internal::JsonBoolField(request.body, "hasHeaders"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     });
+
   impl_->server.Post("/api/reset",
                      [this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
@@ -463,8 +502,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                          std::size_t charts_generated = 0;
                          std::string chart_error;
                          try {
-                           charts_generated = RenderRunOnSaveChartsForCurrentCsv(
-                               impl_->data, impl_->logger);
+                           if (!impl_->obsidian) {
+                             charts_generated = RenderRunOnSaveChartsForCurrentCsv(
+                                 impl_->data, impl_->logger);
+                           }
                          } catch (const std::exception& ex) {
                            chart_error = ex.what();
                            if (impl_->logger.error) {
@@ -477,6 +518,20 @@ int ViewServer::Start(const ViewServerOptions& options) {
                          response.status = 409;
                          response.set_content(std::string(ex.what()) + "\n",
                                               "text/plain; charset=utf-8");
+                       }
+                     });
+
+  impl_->server.Post("/api/chart-config/preview",
+                     [this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       try {
+                         response.set_content(PreviewCurrentCsvChart(impl_->data, request.body, impl_->logger),
+                                              "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
                        }
                      });
 

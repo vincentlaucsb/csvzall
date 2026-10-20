@@ -157,3 +157,14 @@ for csv-parser follow-ups, not a committed roadmap.
   stream exceptions until the writer is destroyed and then checks stream state.
   Consider an explicit close/finish API that reports output failure, plus a
   destructor that cannot throw even when the caller enables stream exceptions.
+
+## Runtime writer dialects and quote inference
+
+- Viewer Options reuses CSVFormat's delimiter/quote/header configuration. The
+  public DelimWriter fixes delimiter and quote at compile time, so arbitrary
+  viewer-selected output characters currently need a small runtime row writer
+  in viewer_core. Consider a runtime-configured writer with the same escaping
+  guarantees, explicit finish/error handling, BOM, and record-ending options.
+- Quote inference is inherently ambiguous for literal apostrophes. A reusable
+  library inference result with confidence/evidence would help; retain explicit
+  input overrides rather than silently stripping ambiguous literal text.

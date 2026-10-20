@@ -1,6 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compactViewport, createCompactLayout } from '../src/viewer/modules/compact-layout.mjs';
+import { applyCsvOptionsHostUi } from '../src/viewer/modules/csv-options.mjs';
+
+test('mobile-hidden CSV options cannot appear or activate through More actions', () => {
+  const f = fixture();
+  // Reuse an overflowing ordinary action to exercise the exact hidden filter
+  // that applies to the Options button, including an already-captured menu.
+  const options = f.reset;
+  options.id = 'csv-options';
+  assert.ok(f.items().some(item => item.id === 'csv-options'));
+  applyCsvOptionsHostUi(options, { open: false }, true, { mobile: true });
+  assert.equal(f.items().some(item => item.id === 'csv-options'), false);
+  f.layout.refresh(); f.frames();
+  assert.equal(f.items().some(item => item.id === 'csv-options'), false);
+  assert.equal(options.clicks, 0);
+  applyCsvOptionsHostUi(options, { open: false }, true, { mobile: false });
+  f.layout.refresh(); f.frames();
+  assert.ok(f.items().some(item => item.id === 'csv-options'));
+  f.layout.destroy();
+});
 
 function fixture(width = 300, height = 800) {
   const frames = new Map(), timers = new Map(), listeners = new Map(), attributes = new Set();

@@ -117,6 +117,9 @@ This file is the canonical AI reference for this repository.
 
 ## Viewer theme design
 
+- `view --obsidian` is an explicit plugin-supplied mode: the host owns automatic chart regeneration after CSV saves. Keep standalone automation, manual chart actions, and CLI JSON storage unchanged. Do not discover Obsidian vaults/profiles or access plugin data/Sync settings upstream.
+- Native startup JSON `obsidianMode.version` is the host chart-automation protocol version (currently 1), independent of the three source release markers. Keep its host acknowledgment contract and tests synchronized with obsidian-csvzall.
+
 - Embedded Obsidian viewers intentionally follow the host's resolved colors, accent, interface font, and light/dark mode, including live changes. Keep this behavior shared between native and WASM viewers through `src/viewer/modules/host-theme.mjs`.
 - Host theming is optional. Standalone viewers must remain usable without Obsidian and retain their system-aware appearance when no host theme is supplied. Do not introduce an Obsidian runtime dependency, persisted theme file, or required handshake for startup.
 - Keep the versioned parent-window `postMessage` protocol and its allowlist validation. Theme updates must preserve active edits and focus without reloading CSV data or recreating the grid.

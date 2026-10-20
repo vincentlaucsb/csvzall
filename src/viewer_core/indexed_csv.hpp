@@ -41,6 +41,13 @@ class CsvIndexedFile {
   [[nodiscard]] const std::vector<std::string>& headers() const;
   [[nodiscard]] std::uint64_t row_count() const;
   [[nodiscard]] std::uint64_t file_size() const;
+  [[nodiscard]] std::string delimiter() const;
+  [[nodiscard]] std::string quote() const;
+  [[nodiscard]] bool has_headers() const;
+  [[nodiscard]] const std::string& headers_disabled_reason() const;
+  [[nodiscard]] bool has_bom() const;
+  void set_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);
+  void read_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);
 
   [[nodiscard]] std::vector<std::vector<std::string>> read_rows(
       std::uint64_t offset,
@@ -72,6 +79,7 @@ class CsvIndexedFile {
   [[nodiscard]] std::vector<CsvColumnDescriptor> ordered_columns(
       const std::vector<std::string>& columns) const;
   void reload();
+  void relabel_columns(const std::vector<std::string>& names);
 
   std::string input_path_;
   std::string file_name_;
@@ -82,6 +90,12 @@ class CsvIndexedFile {
   std::uint64_t file_size_ = 0;
   std::filesystem::file_time_type source_mtime_{};
   csv::CSVFormat format_;
+  csv::CSVFormat output_format_;
+  bool has_headers_ = true;
+  std::string headers_disabled_reason_;
+  bool has_bom_ = false;
+  bool modified_ = false;
+  std::string newline_ = "\n";
 };
 
 enum class CsvViewDataMode {
@@ -102,6 +116,13 @@ class CsvViewData {
   [[nodiscard]] const std::vector<std::string>& headers() const;
   [[nodiscard]] std::uint64_t row_count() const;
   [[nodiscard]] std::uint64_t file_size() const;
+  [[nodiscard]] std::string delimiter() const;
+  [[nodiscard]] std::string quote() const;
+  [[nodiscard]] bool has_headers() const;
+  [[nodiscard]] const std::string& headers_disabled_reason() const;
+  [[nodiscard]] bool has_bom() const;
+  void set_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);
+  void read_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);
 
   [[nodiscard]] std::vector<std::vector<std::string>> read_rows(
       std::uint64_t offset,

@@ -25,6 +25,7 @@ add_executable(csvzall_tests
   test_summarize.cpp
   test_timeseries.cpp
   test_view.cpp)
+target_sources(csvzall_tests PRIVATE test_view_dialect.cpp)
 
 if(CSVZALL_HAVE_SVGPLOT)
   target_sources(csvzall_tests PRIVATE

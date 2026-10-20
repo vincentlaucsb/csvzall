@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -301,7 +302,7 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   // Every transitive module and optional stylesheet must be reachable from a
   // production binary. Nested feature routes are covered as HTTP, not just
   // entries in the generated asset table.
-  for (const auto* route : {"shell.mjs", "shell-markup.mjs", "compact-layout.mjs", "host-grid.mjs", "save-state.mjs", "local-file.mjs",
+  for (const auto* route : {"shell.mjs", "shell-markup.mjs", "csv-options.mjs", "compact-layout.mjs", "host-grid.mjs", "save-state.mjs", "local-file.mjs",
        "adapters/native.mjs", "features/sql.mjs", "features/charts.mjs", "features/style.mjs", "chart-form.mjs"}) {
     const auto module = client.Get(std::string("/assets/modules/") + route);
     INFO(route);
@@ -374,7 +375,7 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_server.csv","columns":["name","value"],"readOnly":true,"editable":false,"mode":"paged","totalRows":3,"sqlTableName":"data"})");
+      R"({"file":"csvzall_view_server.csv","columns":["name","value"],"readOnly":true,"editable":false,"mode":"paged","totalRows":3,"sqlTableName":"data","csvOptions":{"delimiter":",","quote":"\"","hasHeaders":true,"bom":false}})");
 
   const auto rows = client.Get("/api/rows?offset=1&limit=1", headers);
   REQUIRE(rows);
@@ -572,6 +573,7 @@ TEST_CASE("view: Add chart endpoint creates markdown table config and output") {
 
 #ifdef CSVZALL_HAVE_SVGPLOT
 TEST_CASE("view edit: save regenerates runOnSave markdown table outputs") {
+  const bool obsidian = GENERATE(false, true);
   const auto dir = TempDir("csvzall_view_markdown_table_save");
   const auto path = dir / "events.csv";
   std::filesystem::create_directories(dir / ".csvzall");
@@ -599,7 +601,7 @@ TEST_CASE("view edit: save regenerates runOnSave markdown table outputs") {
       path.string(), options, tests::MakeNullLogger(), stats);
 
   pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
-  REQUIRE(server.Start({0, false, true, "test-token"}) == 0);
+  REQUIRE(server.Start({0, false, true, "test-token", {}, obsidian}) == 0);
   httplib::Client client("127.0.0.1", server.bound_port());
   client.set_connection_timeout(2, 0);
   client.set_read_timeout(2, 0);
@@ -614,7 +616,14 @@ TEST_CASE("view edit: save regenerates runOnSave markdown table outputs") {
   const auto save = client.Post("/api/save", headers, "{}", "application/json");
   REQUIRE(save);
   REQUIRE(save->status == 200);
-  CHECK(save->body.find("\"chartsGenerated\":1") != std::string::npos);
+  CHECK(save->body.find(obsidian ? "\"chartsGenerated\":0" : "\"chartsGenerated\":1") != std::string::npos);
+  if (obsidian) {
+    CHECK_FALSE(std::filesystem::exists(dir / "charts" / "events.md"));
+    const auto generate = client.Post("/api/chart-config/generate", headers,
+        R"({"id":"events-table"})", "application/json");
+    REQUIRE(generate);
+    CHECK(generate->status == 200);
+  }
   server.Stop();
 
   const auto markdown = ReadTextFile(dir / "charts" / "events.md");
@@ -1122,7 +1131,7 @@ TEST_CASE("view edit: save follows a source file renamed on disk") {
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"after.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data"})");
+      R"({"file":"after.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data","csvOptions":{"delimiter":",","quote":"\"","hasHeaders":true,"bom":false}})");
 
   const auto edit = client.Post(
       "/api/edit-cell", headers, R"({"row":1,"column":"value","value":"25"})",
@@ -1370,7 +1379,7 @@ TEST_CASE("view edit: save applies column order with pending edits atomically") 
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_edit_reorder_column.csv","columns":["value","name","note"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data"})");
+      R"({"file":"csvzall_view_edit_reorder_column.csv","columns":["value","name","note"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data","csvOptions":{"delimiter":",","quote":"\"","hasHeaders":true,"bom":false}})");
 
   const auto rows = client.Get("/api/rows?offset=0&limit=2", headers);
   REQUIRE(rows);
@@ -1423,7 +1432,7 @@ TEST_CASE("view edit: reset reloads source from disk and discards unsaved change
   REQUIRE(schema->status == 200);
   REQUIRE(
       schema->body ==
-      R"({"file":"csvzall_view_edit_reset.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data"})");
+      R"({"file":"csvzall_view_edit_reset.csv","columns":["name","value"],"readOnly":false,"editable":true,"mode":"paged","totalRows":2,"sqlTableName":"data","csvOptions":{"delimiter":",","quote":"\"","hasHeaders":true,"bom":false}})");
 
   const auto rows = client.Get("/api/rows?offset=0&limit=2", headers);
   REQUIRE(rows);
@@ -1496,7 +1505,45 @@ TEST_CASE("view: startup-json wraps the tokenized localhost URL") {
   const std::string url = "http://127.0.0.1:49152/?token=abc123";
 
   REQUIRE(pipeline::commands::FormatViewStartupOutput(url, false) == url);
+  REQUIRE(pipeline::commands::FormatViewStartupOutput(url, false, true) == url);
+  const auto hosted = pipeline::commands::FormatViewStartupOutput(url, true, true);
+  CHECK(hosted.find("\"version\":1") != std::string::npos);
+  CHECK(hosted.find("\"chartAutomation\":\"host\"") != std::string::npos);
   REQUIRE(
       pipeline::commands::FormatViewStartupOutput(url, true) ==
       R"({"url":"http://127.0.0.1:49152/?token=abc123"})");
 }
+
+
+#ifdef CSVZALL_HAVE_SVGPLOT
+TEST_CASE("view: chart previews render current options without saving or overwriting output") {
+  const auto dir = TempDir("csvzall_view_chart_preview");
+  const auto path = dir / "volume.csv";
+  { std::ofstream output(path); output << "week,volume\n1,100\n2,125\n"; }
+  { std::ofstream output(dir / "original.svg"); output << "original output"; }
+  pipeline::RunOptions options;
+  options.input_path = path.string();
+  options.view_mode = pipeline::ViewModeSelection::Paged;
+  pipeline::RunStats stats;
+  const auto data = pipeline::commands::CsvViewData::Open(path.string(), options, tests::MakeNullLogger(), stats);
+  pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
+  REQUIRE(server.Start({0, false, false, "test-token"}) == 0);
+  httplib::Client client("127.0.0.1", server.bound_port());
+  httplib::Headers headers{{"X-Session-Token", "test-token"}};
+  const std::string body = R"({"type":"bar","id":"preview","label":"week","value":"volume","title":"Unsaved title","output":"original.svg"})";
+  const auto denied = client.Post("/api/chart-config/preview", body, "application/json");
+  REQUIRE(denied); CHECK(denied->status == 403);
+  const auto response = client.Post("/api/chart-config/preview", headers, body, "application/json");
+  REQUIRE(response); REQUIRE(response->status == 200);
+  CHECK(response->body.find("<svg") != std::string::npos);
+  CHECK(response->body.find("Unsaved title") != std::string::npos);
+  CHECK_FALSE(std::filesystem::exists(dir / ".csvzall" / "charts.json"));
+  CHECK(ReadTextFile(dir / "original.svg") == "original output");
+  const auto invalid = client.Post("/api/chart-config/preview", headers,
+      R"({"type":"bar","id":"preview","label":"missing","value":"volume","output":"original.svg"})", "application/json");
+  REQUIRE(invalid); CHECK(invalid->status == 400);
+  CHECK(ReadTextFile(dir / "original.svg") == "original output");
+  server.Stop();
+  std::filesystem::remove_all(dir);
+}
+#endif

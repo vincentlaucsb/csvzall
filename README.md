@@ -224,6 +224,11 @@ csvzall min todoist_activities.csv --column completed_at
 
 ### `view <input.csv> [--no-open]`
 
+The Obsidian plugin passes `--obsidian` to own automatic chart regeneration after
+CSV saves. Explicit chart actions and `.csvzall` JSON configuration remain available.
+With `--startup-json`, this mode adds an `obsidianMode` acknowledgment to the startup
+metadata. Standalone launches without the flag retain native automatic generation.
+
 Start a local-only read-only HTTP viewer for one plain local CSV file. The
 server binds to `127.0.0.1`, prints the full viewer URL to stdout, and opens a
 browser by default unless `--no-open` is passed. API requests are gated by a

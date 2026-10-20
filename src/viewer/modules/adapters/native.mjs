@@ -23,7 +23,8 @@ export function createNativeAdapter({
   }
   const operations = {
     editCell: 'edit-cell', insertRow: 'insert-row', deleteRow: 'delete-row', swapRows: 'swap-rows',
-    insertColumn: 'insert-column', deleteColumn: 'delete-column', renameColumn: 'rename-column', reset: 'reset',
+    insertColumn: 'insert-column', deleteColumn: 'delete-column', renameColumn: 'rename-column', reset: 'reset', csvOptions: 'csv-options',
+    readCsvOptions: 'read-csv-options',
   };
   return {
     capabilities: { localFiles: false, columnOrder: true },

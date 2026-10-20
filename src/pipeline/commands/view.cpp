@@ -1,6 +1,7 @@
 #include "view.hpp"
 
 #include "view/json.hpp"
+#include <nlohmann/json.hpp>
 
 #include <cstdlib>
 #include <cstdint>
@@ -34,8 +35,14 @@ bool OpenBrowserUrl(const std::string& url) {
 
 }  // namespace
 
-std::string FormatViewStartupOutput(const std::string& url, const bool startup_json) {
+std::string FormatViewStartupOutput(const std::string& url, const bool startup_json, const bool obsidian) {
   if (startup_json) {
+    if (obsidian) {
+      nlohmann::ordered_json metadata;
+      metadata["url"] = url;
+      metadata["obsidianMode"] = {{"version", 1}, {"chartAutomation", "host"}};
+      return metadata.dump();
+    }
     return view_internal::BuildStartupJson(url);
   }
   return url;
@@ -62,13 +69,13 @@ int RunView(const std::string& input_path,
 
   ViewServer server(*data, logger);
   if (const auto rc = server.Start(
-          {requested_port, serve_once, options.view_edit, {}, options.view_asset_dir});
+          {requested_port, serve_once, options.view_edit, {}, options.view_asset_dir, options.view_obsidian});
       rc != 0) {
     return rc;
   }
 
   const auto url = server.viewer_url();
-  output << FormatViewStartupOutput(url, startup_json) << '\n';
+  output << FormatViewStartupOutput(url, startup_json, options.view_obsidian) << '\n';
   output.flush();
 
   if (logger.info) {

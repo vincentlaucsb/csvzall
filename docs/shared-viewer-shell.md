@@ -26,9 +26,15 @@ before opening against a dirty document.
 An adapter exposes `capabilities`, `request(type, payload, transfer?)`,
 `save({columns})`, `persist(result, context)`, and optional `destroy()`.
 Requests cover `init`, `open`, `readRows`, `editCell`, row/column mutations, and
-`reset`. Schemas contain `columns`, `rowCount`, optional `file`, and `editable`.
+`reset`, plus `csvOptions` for output/header choices and `readCsvOptions` for
+explicit input interpretation. Schemas include `csvOptions` with delimiter, quote,
+hasHeaders, and BOM values alongside `columns`, `rowCount`, optional `file`, and `editable`.
 Pages contain `offset`, `totalRows`, and arrays of cell values. The shell assigns
 absolute source row identities independently of displayed row positions.
+
+See [CSV options](csv-options.md) for dialect preservation, headerless editing,
+explicit conversion and input overrides. The source bridge advertises
+`csvzall-csv-options-v1` so downstream packaging can require these capabilities.
 
 The native adapter translates operations into same-origin requests with the
 session token. SQL/chart HTTP access belongs to its optional feature surface
@@ -88,6 +94,13 @@ it does not require a standalone csvzall release. Until the source changes are
 committed and pinned, test them through a custom path to the local executable.
 Lite receives the shared shell through the embedded viewer refresh.
 
+The WASM host may include `hostUi: { version: 1, mobile: true }` in its trusted
+`open-file` message. The `csvzall-host-mobile-ui-v1` receiver hides Options on
+mobile, including More actions, while keeping dialect preservation and automatic
+header safeguards active. Desktop hosts, legacy messages without this policy,
+and standalone viewers retain Options. The shared shell owns visibility; the
+host never rewrites the imported viewer JavaScript.
+
 ## Compact layout
 
 The shared shell uses compact mode at portrait widths up to 600 CSS pixels or
@@ -110,3 +123,22 @@ engine, portrait/landscape transitions, nested commands, 40-row saves and traili
 clearance. It accepts the same Playwright module and `--browser` option as the
 shared smoke test. Add `--viewer-path=/dist-embedded/index.html` after an embedded
 build to exercise the exact self-contained distribution.
+
+
+`node scripts/smoke_mobile_csv_options.cjs` checks mobile host policy independently
+of the broader editing/focus smoke flow. It accepts the same options, verifies
+that Options and its divider are hidden on mobile and absent from More actions,
+checks every uneven row, and retains desktop/standalone controls. It writes
+`mobile-hidden-options.png` in its output directory.
+
+## Chart previews
+
+The native chart form places Preview immediately after Cancel and renders current,
+unsaved options beside the form only on click. The authenticated
+`POST /api/chart-config/preview` endpoint returns either SVG text (`svg`) or
+Markdown (`markdown`). It shares chart specification construction with Save,
+renders into a unique temporary directory, and removes that directory on success
+or failure. It never writes charts.json or the configured output. Hosts can
+provide a `previewChart(payload)` callback to the shared form instead of using
+the HTTP endpoint. Edits invalidate visible and pending previews; closing the form
+ignores late responses.

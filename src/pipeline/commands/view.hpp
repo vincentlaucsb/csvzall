@@ -65,6 +65,13 @@ class CsvViewData {
   [[nodiscard]] const std::vector<std::string>& headers() const;
   [[nodiscard]] std::uint64_t row_count() const;
   [[nodiscard]] std::uint64_t file_size() const;
+  [[nodiscard]] std::string delimiter() const;
+  [[nodiscard]] std::string quote() const;
+  [[nodiscard]] bool has_headers() const;
+  [[nodiscard]] const std::string& headers_disabled_reason() const;
+  [[nodiscard]] bool has_bom() const;
+  void set_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);
+  void read_csv_options(const std::string& delimiter, const std::string& quote, bool has_headers);
 
   [[nodiscard]] std::vector<std::vector<std::string>> read_rows(
       std::uint64_t offset,
@@ -93,6 +100,7 @@ struct ViewServerOptions {
   bool editable = false;
   std::string session_token;
   std::string viewer_asset_dir;
+  bool obsidian = false;
 };
 
 class ViewServer {
@@ -116,7 +124,7 @@ class ViewServer {
   std::unique_ptr<Impl> impl_;
 };
 
-std::string FormatViewStartupOutput(const std::string& url, bool startup_json);
+std::string FormatViewStartupOutput(const std::string& url, bool startup_json, bool obsidian = false);
 
 int RunView(const std::string& input_path,
             std::ostream& output,

@@ -57,6 +57,8 @@ struct RunOptions {
   // Enable csvzall view's explicit editable mode. Editing uses a paged source
   // file plus an in-memory overlay until save rewrites the CSV deterministically.
   bool view_edit = false;
+  // Explicit host ownership of background charts; no vault/profile discovery.
+  bool view_obsidian = false;
   // Optional development override for first-party viewer assets. When set,
   // view serves index.html, viewer.css, viewer.js, and viewer modules from this
   // directory on each request instead of using embedded copies.
