@@ -82,6 +82,7 @@ struct ViewServer::Impl {
   int port = -1;
   bool serve_once = false;
   bool editable = false;
+  bool obsidian = false;
   std::string token;
   std::filesystem::path viewer_asset_dir;
 
@@ -129,6 +130,7 @@ ViewServer::~ViewServer() {
 int ViewServer::Start(const ViewServerOptions& options) {
   impl_->serve_once = options.serve_once;
   impl_->editable = options.editable;
+  impl_->obsidian = options.obsidian;
   impl_->stop_requested = false;
   impl_->token = options.session_token.empty() ? GenerateSessionToken() : options.session_token;
   try {
@@ -463,8 +465,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                          std::size_t charts_generated = 0;
                          std::string chart_error;
                          try {
-                           charts_generated = RenderRunOnSaveChartsForCurrentCsv(
-                               impl_->data, impl_->logger);
+                           if (!impl_->obsidian) {
+                             charts_generated = RenderRunOnSaveChartsForCurrentCsv(
+                                 impl_->data, impl_->logger);
+                           }
                          } catch (const std::exception& ex) {
                            chart_error = ex.what();
                            if (impl_->logger.error) {

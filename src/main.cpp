@@ -631,6 +631,8 @@ Output shape:
   Behavior:
   API requests require a random session token.
   --startup-json prints {"url":"http://127.0.0.1:..."} for host integrations.
+  --obsidian leaves automatic chart regeneration after CSV saves to the host.
+  Explicit chart actions still work; standard JSON config files are unchanged.
   The viewer is read-only unless --edit is provided.
   Pass --edit to enable explicit editable mode. Editable mode uses the same
   row-offset index as read-only viewing, keeps unsaved edits in an overlay,
@@ -698,6 +700,10 @@ Related:
       .implicit_value(true);
   view_cmd.add_argument("--startup-json")
       .help("Print startup metadata as JSON: {\"url\":\"http://127.0.0.1:...\"}")
+      .default_value(false)
+      .implicit_value(true);
+  view_cmd.add_argument("--obsidian")
+      .help("Obsidian host owns automatic charts after CSV saves; explicit chart actions and JSON configs stay unchanged")
       .default_value(false)
       .implicit_value(true);
   view_cmd.add_argument("--once")
@@ -1369,6 +1375,7 @@ Examples:
     options.view_mode = *view_mode;
     options.view_materialize_threshold_mb = static_cast<std::size_t>(materialize_threshold_mb);
     options.view_edit = view_cmd.get<bool>("--edit");
+    options.view_obsidian = view_cmd.get<bool>("--obsidian");
     options.view_asset_dir = view_cmd.get<std::string>("--viewer-assets");
     if (options.view_asset_dir.empty()) {
       options.view_asset_dir = GetEnvString("CSVZALL_VIEWER_ASSETS");

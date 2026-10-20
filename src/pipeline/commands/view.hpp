@@ -93,6 +93,7 @@ struct ViewServerOptions {
   bool editable = false;
   std::string session_token;
   std::string viewer_asset_dir;
+  bool obsidian = false;
 };
 
 class ViewServer {
@@ -116,7 +117,7 @@ class ViewServer {
   std::unique_ptr<Impl> impl_;
 };
 
-std::string FormatViewStartupOutput(const std::string& url, bool startup_json);
+std::string FormatViewStartupOutput(const std::string& url, bool startup_json, bool obsidian = false);
 
 int RunView(const std::string& input_path,
             std::ostream& output,

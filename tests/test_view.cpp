@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -572,6 +573,7 @@ TEST_CASE("view: Add chart endpoint creates markdown table config and output") {
 
 #ifdef CSVZALL_HAVE_SVGPLOT
 TEST_CASE("view edit: save regenerates runOnSave markdown table outputs") {
+  const bool obsidian = GENERATE(false, true);
   const auto dir = TempDir("csvzall_view_markdown_table_save");
   const auto path = dir / "events.csv";
   std::filesystem::create_directories(dir / ".csvzall");
@@ -599,7 +601,7 @@ TEST_CASE("view edit: save regenerates runOnSave markdown table outputs") {
       path.string(), options, tests::MakeNullLogger(), stats);
 
   pipeline::commands::ViewServer server(data, tests::MakeNullLogger());
-  REQUIRE(server.Start({0, false, true, "test-token"}) == 0);
+  REQUIRE(server.Start({0, false, true, "test-token", {}, obsidian}) == 0);
   httplib::Client client("127.0.0.1", server.bound_port());
   client.set_connection_timeout(2, 0);
   client.set_read_timeout(2, 0);
@@ -614,7 +616,14 @@ TEST_CASE("view edit: save regenerates runOnSave markdown table outputs") {
   const auto save = client.Post("/api/save", headers, "{}", "application/json");
   REQUIRE(save);
   REQUIRE(save->status == 200);
-  CHECK(save->body.find("\"chartsGenerated\":1") != std::string::npos);
+  CHECK(save->body.find(obsidian ? "\"chartsGenerated\":0" : "\"chartsGenerated\":1") != std::string::npos);
+  if (obsidian) {
+    CHECK_FALSE(std::filesystem::exists(dir / "charts" / "events.md"));
+    const auto generate = client.Post("/api/chart-config/generate", headers,
+        R"({"id":"events-table"})", "application/json");
+    REQUIRE(generate);
+    CHECK(generate->status == 200);
+  }
   server.Stop();
 
   const auto markdown = ReadTextFile(dir / "charts" / "events.md");
@@ -1496,6 +1505,10 @@ TEST_CASE("view: startup-json wraps the tokenized localhost URL") {
   const std::string url = "http://127.0.0.1:49152/?token=abc123";
 
   REQUIRE(pipeline::commands::FormatViewStartupOutput(url, false) == url);
+  REQUIRE(pipeline::commands::FormatViewStartupOutput(url, false, true) == url);
+  const auto hosted = pipeline::commands::FormatViewStartupOutput(url, true, true);
+  CHECK(hosted.find("\"version\":1") != std::string::npos);
+  CHECK(hosted.find("\"chartAutomation\":\"host\"") != std::string::npos);
   REQUIRE(
       pipeline::commands::FormatViewStartupOutput(url, true) ==
       R"({"url":"http://127.0.0.1:49152/?token=abc123"})");
