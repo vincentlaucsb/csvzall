@@ -54,6 +54,20 @@ std::string FileName(const CsvViewData& data) {
   return data.file_name();
 }
 
+std::string Delimiter(const CsvViewData& data) { return data.delimiter(); }
+std::string Quote(const CsvViewData& data) { return data.quote(); }
+bool HasHeaders(const CsvViewData& data) { return data.has_headers(); }
+std::string HeadersDisabledReason(const CsvViewData& data) { return data.headers_disabled_reason(); }
+bool HasBom(const CsvViewData& data) { return data.has_bom(); }
+void SetCsvOptions(CsvViewData& data, const std::string& delimiter,
+                   const std::string& quote, bool has_headers) {
+  data.set_csv_options(delimiter, quote, has_headers);
+}
+void ReadCsvOptions(CsvViewData& data, const std::string& delimiter,
+                    const std::string& quote, bool has_headers) {
+  data.read_csv_options(delimiter, quote, has_headers);
+}
+
 std::vector<std::string> Headers(const CsvViewData& data) {
   return data.headers();
 }
@@ -109,6 +123,13 @@ EMSCRIPTEN_BINDINGS(csvzall_viewer_wasm) {
       .function("inputPath", &InputPath)
       .function("fileName", &FileName)
       .function("headers", &Headers)
+      .function("delimiter", &Delimiter)
+      .function("quote", &Quote)
+      .function("hasHeaders", &HasHeaders)
+      .function("headersDisabledReason", &HeadersDisabledReason)
+      .function("hasBom", &HasBom)
+      .function("setCsvOptions", &SetCsvOptions)
+      .function("readCsvOptions", &ReadCsvOptions)
       .function("rowCount", &RowCount)
       .function("fileSize", &FileSize)
       .function("readRows", &ReadRows)

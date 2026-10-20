@@ -1,6 +1,21 @@
+import { applyCsvOptionsHostUi, updateHeaderToggle } from '../src/viewer/modules/csv-options.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installDialogDismiss, installDialogDismissals } from '../src/viewer/modules/dialog-dismiss.mjs';
+
+test('CSV options are hidden only for mobile hosts and close an already-open dialog', () => {
+  const button = { hidden: false };
+  const dialog = { open: true, close() { this.open = false; } };
+  applyCsvOptionsHostUi(button, dialog, true, { mobile: true });
+  assert.equal(button.hidden, true);
+  assert.equal(dialog.open, false);
+  applyCsvOptionsHostUi(button, dialog, true, { mobile: false });
+  assert.equal(button.hidden, false);
+  applyCsvOptionsHostUi(button, dialog, true);
+  assert.equal(button.hidden, false);
+  applyCsvOptionsHostUi(button, dialog, false, { mobile: true });
+  assert.equal(button.hidden, false);
+});
 
 function harness() {
   const dialog = new EventTarget();
@@ -67,4 +82,24 @@ test('only ordinary dialogs opt into backdrop dismissal', () => {
   cleanup();
   pointer('pointerdown', 50, 50); pointer('click', 50, 50);
   assert.equal(dialog.open, true);
+});
+
+
+test('variable-width files disable and uncheck headers with remediation; corrected files reset the control', () => {
+  const checkbox = { checked: true, disabled: false };
+  const message = { textContent: '' };
+  const banner = { hidden: true };
+  const reason = 'Headers are disabled. Add missing header names, then save and reopen.';
+  updateHeaderToggle(checkbox, message, { hasHeaders: true, headersDisabledReason: reason }, banner);
+  assert.equal(checkbox.checked, false);
+  assert.equal(checkbox.disabled, true);
+  assert.equal(banner.hidden, false);
+  assert.equal(message.textContent, reason);
+  updateHeaderToggle(checkbox, message, { hasHeaders: false }, banner);
+  assert.equal(checkbox.disabled, false);
+  assert.equal(checkbox.checked, false);
+  assert.equal(banner.hidden, true);
+  assert.equal(message.textContent, '');
+  updateHeaderToggle(checkbox, message, { hasHeaders: true }, banner);
+  assert.equal(checkbox.checked, true);
 });

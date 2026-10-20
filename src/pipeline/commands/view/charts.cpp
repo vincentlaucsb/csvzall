@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <random>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -470,9 +471,7 @@ void PreserveConfigOnlySql(common::ChartSpec& spec,
 
 }  // namespace
 
-std::string AppendHeatmapChartConfig(const CsvViewData& data,
-                                     std::string_view body,
-                                     const LoggerCallbacks& logger) {
+static common::ChartSpec ChartSpecForBody(const CsvViewData& data, std::string_view body) {
   const auto config_path = FindChartConfigPath(data.input_path());
   const auto root = ChartConfigRoot(config_path);
   const auto input_path = RelativePathForConfig(root, data.input_path());
@@ -572,6 +571,46 @@ std::string AppendHeatmapChartConfig(const CsvViewData& data,
     throw std::runtime_error("unknown chart type: " + type);
   }
   PreserveConfigOnlySql(spec, charts);
+  return spec;
+}
+
+std::string PreviewCurrentCsvChart(const CsvViewData& data,
+                                  std::string_view body,
+                                  const LoggerCallbacks& logger) {
+  auto spec = ChartSpecForBody(data, body);
+  struct TemporaryPreview {
+    std::filesystem::path directory;
+    ~TemporaryPreview() { std::error_code ec; std::filesystem::remove_all(directory, ec); }
+  };
+  std::random_device random;
+  std::filesystem::path directory;
+  for (int attempt = 0; attempt < 20; ++attempt) {
+    directory = std::filesystem::temp_directory_path() / ("csvzall-preview-" + std::to_string(random()));
+    if (std::filesystem::create_directory(directory)) break;
+    directory.clear();
+  }
+  if (directory.empty()) throw std::runtime_error("Could not create chart preview directory.");
+  const TemporaryPreview cleanup{directory};
+  spec.output = directory / (spec.type == "markdown-table" ? "preview.md" : "preview.svg");
+  ValidateChartBeforeSave(spec, logger);
+  RenderSavedChart(spec, logger);
+  std::ifstream input(*spec.output, std::ios::binary);
+  if (!input) throw std::runtime_error("Could not read chart preview.");
+  const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  Json result;
+  result[spec.type == "markdown-table" ? "markdown" : "svg"] = text;
+  return result.dump();
+}
+
+std::string AppendHeatmapChartConfig(const CsvViewData& data,
+                                     std::string_view body,
+                                     const LoggerCallbacks& logger) {
+  const auto config_path = FindChartConfigPath(data.input_path());
+  const auto root = ChartConfigRoot(config_path);
+  auto charts = LoadChartConfigIfExists(config_path);
+  const auto spec = ChartSpecForBody(data, body);
+  const auto& id = spec.id;
+  const auto output = JsonStringFieldOr(body, "output", "");
   ValidateChartBeforeSave(spec, logger);
 
   bool updated_existing = false;

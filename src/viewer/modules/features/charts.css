@@ -56,7 +56,15 @@
   outline: none;
 }
 .chart-dialog{
-  width: min(48rem, calc(100vw - 2rem));
+  width: min(80rem, calc(100vw - 2rem));
+}
+.chart-dialog-layout.chart-has-preview {
+  grid-template-columns: minmax(8rem, 12rem) minmax(16rem, 1fr) minmax(18rem, 1fr);
+}
+.chart-preview:not([hidden]) { min-width: 0; overflow: auto; }
+.chart-preview img { max-width: 100%; height: auto; }
+@media (max-width: 900px) {
+  .chart-dialog-layout.chart-has-preview { grid-template-columns: minmax(0, 1fr); }
 }
 .chart-dialog-layout{
   display: grid;

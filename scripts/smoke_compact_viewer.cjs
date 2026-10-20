@@ -47,21 +47,20 @@ const csv = 'name,count\n' + Array.from({ length: 40 }, (_, index) => `Row ${ind
     await frame.locator('#more-actions').tap();
     const rootMenu = frame.locator('[data-popright-menu]:not([data-popright-submenu])');
     assert.equal(await rootMenu.getByRole('menuitem', { name: 'Reset', exact: true }).getAttribute('aria-disabled'), 'true');
-    await rootMenu.locator('[data-popright-submenu-trigger]').tap();
+    await rootMenu.getByRole('menuitem', { name: 'Delete', exact: true }).tap();
     await frame.locator('[data-popright-submenu]').waitFor();
-    await frame.locator('[data-popright-submenu] [data-popright-item]').first().tap();
+    await frame.locator('[data-popright-submenu]').getByRole('menuitem', { name: 'Row', exact: true }).tap();
     await frame.locator('#record-count').filter({ hasText: '39 rows' }).waitFor();
     await page.setViewportSize({ width: 200, height: 740 });
     await frame.locator('#insert-menu').waitFor({ state: 'hidden' });
     await frame.locator('#more-actions').tap();
-    await rootMenu.locator('[data-popright-submenu-trigger]').first().tap();
+    await rootMenu.getByRole('menuitem', { name: 'Insert', exact: true }).tap();
     await frame.locator('[data-popright-submenu]').waitFor();
-    await frame.locator('[data-popright-submenu] [data-popright-item]').nth(1).tap();
+    await frame.locator('[data-popright-submenu]').getByRole('menuitem', { name: 'Row After', exact: true }).tap();
     await frame.locator('#record-count').filter({ hasText: '40 rows' }).waitFor();
     await page.setViewportSize({ width: 320, height: 740 });
-    await frame.locator('#insert-menu').waitFor({ state: 'visible' });
     await frame.locator('#more-actions').click();
-    const branch = await rootMenu.locator('[data-popright-submenu-trigger]').boundingBox();
+    const branch = await rootMenu.getByRole('menuitem', { name: 'Delete', exact: true }).boundingBox();
     await page.mouse.click(branch.x + branch.width / 2, branch.y + branch.height / 2);
     await frame.locator('[data-popright-submenu]').waitFor();
     assert.match(await frame.locator('#record-count').textContent(), /^40 rows,/, 'opening Delete must not activate a child row action');
@@ -88,14 +87,27 @@ const csv = 'name,count\n' + Array.from({ length: 40 }, (_, index) => `Row ${ind
     await frame.locator('body[data-compact]').waitFor();
     assert.equal(await frame.locator('.file-meta').isVisible(), false);
     await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await frame.locator('#csv-options').evaluate(button => button.hidden), false);
+    await page.evaluate(csv => {
+      const buffer = new TextEncoder().encode(csv).buffer;
+      document.getElementById('viewer').contentWindow.postMessage({ source: 'obsidian-csvzall', type: 'open-file',
+        name: 'mobile.csv', buffer, hostUi: { version: 1, mobile: true } }, '*', [buffer]);
+    }, csv);
+    await frame.locator('#csv-options[hidden]').waitFor({ state: 'attached' });
+    await frame.locator('#csv-options').evaluate(button => button.click());
+    assert.equal(await frame.locator('#csv-options-dialog').evaluate(dialog => dialog.open), false);
+    await frame.locator('#more-actions').click();
+    assert.equal(await rootMenu.getByRole('menuitem', { name: 'Options', exact: true }).count(), 0);
+    await frame.locator('#record-count').click();
     await page.screenshot({ path: path.join(output, 'compact-hosted-viewer.png') });
     await page.goto(base + (options['viewer-path'] || '/index.html'));
     await page.locator('#file-input:not(:disabled)').waitFor();
     await page.locator('#file-input').setInputFiles({ name: 'standalone.csv', mimeType: 'text/csv', buffer: Buffer.from(csv) });
     await page.getByRole('gridcell', { name: 'Row 1', exact: true }).waitFor();
+    assert.equal(await page.locator('#csv-options').evaluate(button => button.hidden), false);
     assert.equal(await page.locator('.file-meta').isVisible(), true);
     assert.match(await page.locator('#file-name').textContent(), /standalone.csv/);
     assert.deepEqual(errors, []);
-    console.log('Compact viewer: portrait/landscape, preserved edit focus, nested actions, disabled states, real scroll clearance, 40-row save, and standalone filename passed.');
+    console.log('Compact viewer: portrait/landscape, preserved edit focus, nested actions, disabled states, real scroll clearance, 40-row save, mobile Options hidden, and standalone controls passed.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
