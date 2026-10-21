@@ -910,7 +910,6 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     connectHost(host) { hostBridge = host; setHostMode(host.isHostMode()); },
     setHostMode, onViewportResize: hostGrid.onViewportResize,
     async start() {
-      showLoading('Loading CSV engine', 'Starting the CSV engine.');
       try {
         const initial = await backend.request('init');
         engineReady = true;
@@ -924,7 +923,6 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
         }
         if (!viewOpen) { document.getElementById('file-name').textContent = 'csvzall'; setStatus('Open a local CSV file to begin.'); }
       } catch (error) { setStatus(error.message); throw error; }
-      finally { hideLoading(); }
     },
     destroy() {
       for (const dispose of featureDisposers.reverse()) dispose();
