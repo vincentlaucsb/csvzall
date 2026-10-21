@@ -42,6 +42,17 @@ function fixture(options = {}) {
 }
 const settle = async () => { for (let i = 0; i < 8; ++i) await Promise.resolve(); };
 
+test('syntax choice is opt-in, value exports force comment syntax, and paused exports retain their query', () => {
+  const f = fixture({ showFormat: true, showSyntax: true, value: { syntax: 'code', sql: 'SELECT 1', autoUpdate: false } });
+  assert.equal(f.form.getValue().syntax, 'code');
+  assert.equal(f.form.getValue().autoUpdate, false);
+  f.field('Insert as').value = 'value'; f.fire(f.field('Insert as'));
+  assert.equal(f.form.getValue().syntax, 'comment');
+  assert.equal(f.field('Note syntax').disabled, true);
+  assert.equal(f.form.getValue().sql, 'SELECT 1');
+  f.form.dispose();
+});
+
 test('SQL column buttons start an empty query and quote spaces, reserved words, quotes and Unicode', () => {
   for (const [name, quoted] of [['Customer name', '"Customer name"'], ['select', '"select"'], ['a"b', '"a""b"'], ['日本語 😀', '"日本語 😀"']]) {
     let previews = 0, changes = 0;

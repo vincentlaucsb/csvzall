@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createNoteExport } from '../src/viewer/modules/note-export.mjs';
+
+test('note insertion requires an explicit parent capability and matching responses', () => {
+  const listeners = new Map(), sent = [], statuses = [];
+  let query = null, dirty = false;
+  const parent = { postMessage: data => sent.push(data) };
+  const windowRef = { parent, addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener: type => listeners.delete(type) };
+  let click;
+  const button = { addEventListener: (_type, fn) => { click = fn; }, removeEventListener() {} };
+  const api = createNoteExport({ button, windowRef, getQuery: () => query, getDirty: () => dirty, setStatus: text => statuses.push(text) });
+  assert.equal(button.hidden, true);
+  assert.equal(sent[0].type, 'note-export-ready');
+  const receive = (data, source = parent) => listeners.get('message')({ data, source });
+  const capabilities = { source: 'obsidian-csvzall', type: 'note-export-capabilities', version: 1, enabled: true };
+  receive(capabilities, {}); assert.equal(button.hidden, true);
+  receive(capabilities); assert.equal(button.hidden, false); assert.equal(button.disabled, true);
+  query = 'SELECT * FROM data LIMIT 3'; dirty = true; api.refresh();
+  assert.equal(button.textContent, 'Save and insert into note');
+  click(); click();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].sql, query); assert.equal(sent[1].save, true);
+  assert.equal(button.disabled, true);
+  receive({ source: 'obsidian-csvzall', type: 'insert-query-response', version: 1, requestId: 99, success: true });
+  assert.equal(button.disabled, true);
+  receive({ source: 'obsidian-csvzall', type: 'insert-query-response', version: 1, requestId: sent[1].requestId, success: false, error: 'Save failed' });
+  assert.equal(button.disabled, false); assert.deepEqual(statuses, ['Save failed']);
+  api.destroy(); assert.equal(listeners.size, 0);
+});
