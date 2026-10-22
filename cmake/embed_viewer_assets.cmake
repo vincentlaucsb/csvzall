@@ -35,6 +35,7 @@ set(_assets
   "/assets/modules/chart-form.mjs|${VIEWER_SOURCE_DIR}/modules/chart-form.mjs|application/javascript|viewer_module_chart_form_mjs"
   "/assets/modules/save.mjs|${VIEWER_SOURCE_DIR}/modules/save.mjs|application/javascript|viewer_module_save_mjs"
   "/assets/modules/sql.mjs|${VIEWER_SOURCE_DIR}/modules/sql.mjs|application/javascript|viewer_module_sql_mjs"
+  "/assets/modules/note-export.mjs|${VIEWER_SOURCE_DIR}/modules/note-export.mjs|application/javascript|viewer_module_note_export_mjs"
   "/assets/modules/state.mjs|${VIEWER_SOURCE_DIR}/modules/state.mjs|application/javascript|viewer_module_state_mjs"
   "/assets/ag-grid-community.min.js|${AG_GRID_SOURCE_DIR}/ag-grid-community.min.js|application/javascript|ag_grid_js"
   "/assets/ag-grid.css|${AG_GRID_SOURCE_DIR}/ag-grid.css|text/css|ag_grid_css"

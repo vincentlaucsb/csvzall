@@ -105,11 +105,13 @@ function sqlViewerHarness(overrides = {}) {
     attributes: {}, listeners: {}, classList: { toggle() {} },
     setAttribute(key, value) { this.attributes[key] = value; },
     addEventListener(type, listener) { this.listeners[type] = listener; },
+    removeEventListener(type) { delete this.listeners[type]; },
     focus() { this.focused = true; },
     setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
     fire(type, event = {}) { return this.listeners[type](event); },
   }]));
   const requests = [], grids = [], copied = [];
+  if (overrides.noteExport) elements.insertButton = overrides.noteExport.button;
   let restored = 0;
   const viewer = installSqlViewer({
     elements, editable: true,
@@ -130,6 +132,27 @@ function sqlViewerHarness(overrides = {}) {
 }
 
 const settleSql = () => new Promise((resolve) => setImmediate(resolve));
+
+test('note insertion is disabled for edited or failed query drafts and ignores late result input changes', async () => {
+  const listeners = new Map();
+  const parent = { postMessage() {} };
+  const button = { addEventListener() {}, removeEventListener() {} };
+  let finish;
+  const f = sqlViewerHarness({ noteExport: { button }, windowRef: { parent, addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener() {} },
+    postJson: () => new Promise(resolve => { finish = resolve; }) });
+  listeners.get('message')({ source: parent, data: { source: 'obsidian-csvzall', type: 'note-export-capabilities', version: 1, enabled: true } });
+  f.elements.openButton.fire('click');
+  f.elements.runButton.fire('click'); await settleSql();
+  finish({ columns: ['name'], rows: [['Ada']] }); await settleSql();
+  assert.equal(button.disabled, false);
+  f.elements.input.value = 'SELECT changed FROM data'; f.elements.input.fire('input');
+  assert.equal(button.disabled, true);
+  f.elements.runButton.fire('click'); await settleSql();
+  f.elements.input.value = 'SELECT newer FROM data'; f.elements.input.fire('input');
+  finish({ columns: ['name'], rows: [['Old']] }); await settleSql();
+  assert.equal(button.disabled, true);
+  f.viewer.destroy();
+});
 
 test('SQLite reference uses normal links standalone and a fixed request in hosted viewers', () => {
   const standalone = {};

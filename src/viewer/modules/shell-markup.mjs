@@ -107,8 +107,8 @@ export const shellMarkup = `
     <div class="loading-panel">
       <div class="spinner" aria-hidden="true"></div>
       <div>
-        <h2 id="loading-title">Loading CSV Engine</h2>
-        <p id="loading-detail">The parser is starting in a background worker.</p>
+        <h2 id="loading-title">Working</h2>
+        <p id="loading-detail"></p>
       </div>
     </div>
   </dialog>

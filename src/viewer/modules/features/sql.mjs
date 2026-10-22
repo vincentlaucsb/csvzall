@@ -18,6 +18,7 @@ export const sqlFeature = {
         <div class="sql-toolbar">
           <button id="run-sql" type="button">Run query</button>
           <button id="copy-markdown" type="button" disabled>Copy Markdown</button>
+          <button id="insert-into-note" type="button" hidden disabled>Insert into note</button>
           <button id="exit-sql-query" type="button">Exit query</button>
         </div>
         <p class="sql-help">Use SQLite syntax with table <code>data</code>, including unsaved edits. Ctrl/Cmd+Enter to run. Queries load the CSV into memory. <a id="sqlite-documentation" href="https://vincentlaucsb.github.io/csvzall/sqlite_capabilities.html" target="_blank" rel="noopener noreferrer">SQLite reference</a></p>
@@ -31,12 +32,13 @@ export const sqlFeature = {
     for (const [id, icon, label] of [['open-sql-query','code','SQLite query'],['run-sql','player-play','Run query'],['exit-sql-query','x','Exit query'],['copy-markdown','copy','Copy Markdown']]) decorateButton(node(id),icon,label);
     decorateIconButton(node('clear-query'),'x','Clear query');
     const viewer = installSqlViewer({
-      elements: { panel: node('sqlite-query-toolbar'), documentationLink: node('sqlite-documentation'), openButton: node('open-sql-query'), exitButton: node('exit-sql-query'), input: node('sql-query'), clearButton: node('clear-query'), error: node('sql-error'), runButton: node('run-sql'), copyButton: node('copy-markdown'), tableGrid: shell.gridElement, resultGrid: node('sql-grid'), editToolbar: node('edit-toolbar'), status: node('status'), recordCount: node('record-count') },
+      elements: { panel: node('sqlite-query-toolbar'), insertButton: node('insert-into-note'), documentationLink: node('sqlite-documentation'), openButton: node('open-sql-query'), exitButton: node('exit-sql-query'), input: node('sql-query'), clearButton: node('clear-query'), error: node('sql-error'), runButton: node('run-sql'), copyButton: node('copy-markdown'), tableGrid: shell.gridElement, resultGrid: node('sql-grid'), editToolbar: node('edit-toolbar'), status: node('status'), recordCount: node('record-count') },
       tableName: 'data', editable: shell.schema.editable,
       postJson: (path, body) => shell.backend.postJson(path, body),
       beforeQuery: () => shell.finishEditing(), finishEditing: () => { shell.gridApi.stopEditing(); shell.setResultMode(true); },
       restoreTable: () => shell.restoreTable(), createGrid: shell.createGrid,
       writeClipboard: text => navigator.clipboard.writeText(text),
+      getDirty: () => shell.dirty,
     });
     shell.addColumnAction({ id: 'query-column', label: 'Query column', icon: 'player-play', run: column => viewer.queryColumn(column) });
     return { destroy() {

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(csvzall VERSION 0.8.0 LANGUAGES CXX)
+project(csvzall VERSION 0.9.0 LANGUAGES CXX)
 
 set(CSVZALL_CXX_STANDARD 23 CACHE STRING "C++ standard used by csvzall and in-tree dependencies")
 

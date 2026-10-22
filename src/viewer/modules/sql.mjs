@@ -1,4 +1,5 @@
 import { rowsToMarkdownTable } from './markdown.mjs';
+import { createNoteExport } from './note-export.mjs';
 
 export const VIEWER_SQL_TABLE_NAME = 'data';
 
@@ -22,7 +23,7 @@ export async function waitForViewerEdits(api, pendingEdits) {
 export function installSqlViewer({
   elements, tableName = VIEWER_SQL_TABLE_NAME, editable, createGrid,
   postJson, beforeQuery, restoreTable, writeClipboard, finishEditing = () => {},
-  windowRef = globalThis.window,
+  windowRef = globalThis.window, getDirty = () => false,
 }) {
   const {
     panel, openButton, exitButton, input, clearButton, error, documentationLink,
@@ -33,6 +34,10 @@ export function installSqlViewer({
   let resultApi;
   let result;
   let running = false;
+  let resultQuery = '';
+  const noteExport = elements.insertButton ? createNoteExport({ button: elements.insertButton, getDirty, windowRef,
+    getQuery: () => active && !running && result && input.value === resultQuery ? resultQuery : null,
+    setStatus: text => { status.textContent = text; } }) : null;
   const suggestedQuery = defaultSqlQuery(tableName);
   input.value = suggestedQuery;
   input.placeholder = suggestedQuery;
@@ -63,6 +68,7 @@ export function installSqlViewer({
     running = true;
     runButton.disabled = true;
     copyButton.disabled = true;
+    noteExport?.refresh();
     clearError();
     status.textContent = 'Running SQLite query…';
     recordCount.textContent = result
@@ -72,7 +78,8 @@ export function installSqlViewer({
       await beforeQuery();
       // Returning to the table while an edit settles must not launch a query.
       if (current !== generation) return;
-      const next = await postJson('/api/sql-query', { sql: input.value });
+      const executedSql = input.value;
+      const next = await postJson('/api/sql-query', { sql: executedSql });
       if (current !== generation) return;
       const options = {
         columnDefs: next.columns.map((column, index) => ({
@@ -98,6 +105,7 @@ export function installSqlViewer({
         resultApi.setGridOption('rowData', options.rowData);
       }
       result = next;
+      resultQuery = executedSql;
       recordCount.textContent = `${next.rows.length.toLocaleString()} SQLite result row${next.rows.length === 1 ? '' : 's'}, ${next.columns.length.toLocaleString()} column${next.columns.length === 1 ? '' : 's'}`;
       status.textContent = 'SQLite results are read-only. Exit query to edit or save the CSV.';
     } catch (cause) {
@@ -105,11 +113,13 @@ export function installSqlViewer({
       error.textContent = cause instanceof Error ? cause.message : 'SQLite query failed';
       error.hidden = false;
       status.textContent = 'SQLite query failed.';
+      resultQuery = '';
     } finally {
       if (current === generation) {
         running = false;
         runButton.disabled = false;
         copyButton.disabled = !result?.columns.length;
+        noteExport?.refresh();
       }
     }
   }
@@ -139,6 +149,7 @@ export function installSqlViewer({
     } else {
       restoreTable();
     }
+    noteExport?.refresh();
   }
 
   exitButton.addEventListener('click', () => {
@@ -152,7 +163,7 @@ export function installSqlViewer({
     else input.focus();
   });
   runButton.addEventListener('click', () => { void run(); });
-  input.addEventListener('input', () => { clearError(); resizeInput(); });
+  input.addEventListener('input', () => { clearError(); resizeInput(); noteExport?.refresh(); });
   input.addEventListener('keydown', (event) => {
     if (event.key === 'ArrowRight' && input.value === '' &&
         !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing) {
@@ -173,6 +184,7 @@ export function installSqlViewer({
     clearError();
     resizeInput();
     input.focus();
+    noteExport?.refresh();
   });
   copyButton.addEventListener('click', async () => {
     if (!result || !active || running) return;
@@ -186,7 +198,7 @@ export function installSqlViewer({
   });
   setMode(false);
   return {
-    destroy() { ++generation; resultApi?.destroy?.(); },
+    destroy() { ++generation; noteExport?.destroy(); resultApi?.destroy?.(); },
     get active() { return active; },
     queryColumn(column) {
       input.value = columnSqlQuery(column, tableName);

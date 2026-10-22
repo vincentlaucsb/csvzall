@@ -140,7 +140,7 @@ if(CSVZALL_NODE_EXE)
       "${CSVZALL_NODE_EXE}" --test "${CMAKE_CURRENT_SOURCE_DIR}/viewer_assets_build.test.mjs")
   add_test(
     NAME csvzall_viewer_state_tests
-    COMMAND ${CSVZALL_NODE_EXE} --test ${CMAKE_CURRENT_SOURCE_DIR}/viewer_state.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/viewer_adapters.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/table_form.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/chart_form.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/viewer_theme.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/viewer_dialog.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/viewer_menu.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/compact_layout.test.mjs)
+    COMMAND ${CSVZALL_NODE_EXE} --test ${CMAKE_CURRENT_SOURCE_DIR}/viewer_state.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/viewer_adapters.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/table_form.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/chart_form.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/viewer_theme.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/viewer_dialog.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/viewer_menu.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/compact_layout.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/note_export.test.mjs)
 endif()
 
 add_test(
