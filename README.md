@@ -558,7 +558,7 @@ release runner.
 
 | Library | Author / maintainer | Role | How it's sourced |
 |---|---|---|---|
-| [csv-parser](https://github.com/vincentlaucsb/csv-parser) | [Vincent La](https://github.com/vincentlaucsb) | CSV parsing, writing, and scalar type classification | Local checkout preferred; in-repo submodule for CI/release builds; pinned FetchContent fallback |
+| [csv-parser 5.7.0](https://github.com/vincentlaucsb/csv-parser/releases/tag/v5.7.0) | [Vincent La](https://github.com/vincentlaucsb) | CSV parsing, writing, and scalar type classification | Local checkout preferred; in-repo submodule for CI/release builds; pinned FetchContent fallback |
 | [simdjson](https://github.com/simdjson/simdjson) v3.13.0 | [Daniel Lemire](https://github.com/lemire), [Geoff Langdale](https://github.com/geofflangdale), and contributors | Chart configuration parsing and mapping-driven `json extract` | System package if `CSVZALL_PREFER_SYSTEM_SIMDJSON=ON`; FetchContent fallback; release workflows force FetchContent/static linkage |
 | [JSON for Modern C++](https://github.com/nlohmann/json) v3.12.0 | [Niels Lohmann](https://github.com/nlohmann) and contributors | JSON serialization and configuration helpers | System package if `CSVZALL_PREFER_SYSTEM_NLOHMANN_JSON=ON`; FetchContent fallback; release workflows force FetchContent |
 | [argparse](https://github.com/p-ranav/argparse) v3.1 | [Pranav](https://github.com/p-ranav) | CLI argument parsing | FetchContent |

@@ -105,7 +105,7 @@ endfunction()
 # 3) In-repo submodule at external/csv-parser
 # 4) FetchContent fallback for source archives or checkouts without submodules
 set(CSV_PARSER_ROOT "" CACHE PATH "Path to csv-parser checkout (must contain include/ and single_include/)")
-set(CSVZALL_CSV_PARSER_GIT_TAG "f5d24ab4a38ba0b74cbc7057f21543014d2ec472"
+set(CSVZALL_CSV_PARSER_GIT_TAG "efd727406c504366305b8d8140e50f017d545b2f"
     CACHE STRING "csv-parser revision used by FetchContent fallback")
 
 set(CSVZALL_IN_REPO_CSV_PARSER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/csv-parser")

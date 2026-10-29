@@ -110,6 +110,23 @@ TEST_CASE("SqlQueryCsv: preserves big integer identifiers as text") {
   REQUIRE(rows[1] == std::vector<std::string>{id, "2026-05-19", "completed task"});
 }
 
+TEST_CASE("SqlQueryCsv: parser upgrade preserves quoted text and scalar inference") {
+  const std::string id = "2131482199146031144677029033454318611";
+  const std::string text = "caf\xc3\xa9, \"quoted\"\nsecond line";
+  std::istringstream input(tests::MakeTestCsv(
+      {"id", "body", "amount"}, {{id, text, "42.5"}, {"2", "other", "7"}}));
+  std::ostringstream output;
+  pipeline::RunStats stats;
+
+  REQUIRE(pipeline::RunSqlQueryCsv(
+      "SELECT id, body, amount, typeof(id) AS id_type FROM data WHERE amount > 40",
+      "data", "csv", input, output, tests::MakeTestOptions(),
+      tests::MakeNullLogger(), stats) == 0);
+  REQUIRE(stats.rows_processed == 1);
+  REQUIRE(tests::ParseCsv(output.str()) == std::vector<std::vector<std::string>>{
+      {"id", "body", "amount", "id_type"}, {id, text, "42.5", "text"}});
+}
+
 TEST_CASE("SqlQueryCsv: empty SQL returns error") {
   auto csv = tests::MakeTestCsv({"x"}, {{"1"}});
 
