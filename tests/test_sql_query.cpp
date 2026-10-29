@@ -13,6 +13,19 @@
 
 using namespace csvzall;
 
+TEST_CASE("SqlQueryCsvTables: named stdin works in the slim helper") {
+  std::istringstream input(tests::MakeTestCsv({"name", "value"}, {{"example", "42"}}));
+  std::ostringstream output;
+  pipeline::RunStats stats;
+  const int rc = pipeline::RunSqlQueryCsvTables(
+      "SELECT name, value FROM events WHERE value > 40", {{"events", "-"}}, "csv",
+      input, output, tests::MakeTestOptions(), tests::MakeNullLogger(), stats);
+  REQUIRE(rc == 0);
+  REQUIRE(stats.rows_processed == 1);
+  REQUIRE(tests::ParseCsv(output.str()) ==
+          std::vector<std::vector<std::string>>{{"name", "value"}, {"example", "42"}});
+}
+
 TEST_CASE("Markdown cells preserve literal CSV text without HTML or formatting") {
   CHECK(pipeline::common::EscapeMarkdownTableCell("<!-- hidden --> & *bold* `code` [x] \\ |\nnext") ==
         "&lt;!-- hidden --&gt; &amp; \\*bold\\* \\`code\\` \\[x\\] \\\\ \\|<br>next");

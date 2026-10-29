@@ -82,7 +82,7 @@ test("CMake excludes twelve unused objects and indicators only for the Obsidian 
     assert.ok(!helper.includes(path), path);
     assert.ok(standalone.includes(path), path);
   }
-  for (const path of ["commands/view.cpp", "commands/sql_query.cpp", "commands/chart.cpp", "commands/heatmap.cpp", "commands/bar.cpp", "commands/line.cpp", "commands/CsvTransformCommand.cpp", "charts/chart_spec.cpp", "sqlite/sql_functions.cpp"]) assert.ok(helper.includes(path), path);
+  for (const path of ["commands/view.cpp", "commands/sql_query.cpp", "commands/sql_table_load.cpp", "commands/chart.cpp", "commands/heatmap.cpp", "commands/bar.cpp", "commands/line.cpp", "commands/CsvTransformCommand.cpp", "charts/chart_spec.cpp", "sqlite/sql_functions.cpp"]) assert.ok(helper.includes(path), path);
   assert.ok(!helper.includes("indicators"));
   assert.ok(standalone.includes("indicators"));
   const cmakeSource = readFileSync(join(root, "CMakeLists.txt"), "utf8");

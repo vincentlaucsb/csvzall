@@ -19,6 +19,11 @@ execute_process(COMMAND "${CSVZALL_EXE}" sql query --csv "${_csv}" --sql "SELECT
 if(NOT _result EQUAL 0 OR NOT _out MATCHES "42")
   message(FATAL_ERROR "Obsidian SQL query failed: ${_out}${_error}")
 endif()
+execute_process(COMMAND "${CSVZALL_EXE}" sql query --csv "events=${_csv}" --sql "SELECT SUM(value) FROM events"
+  RESULT_VARIABLE _result OUTPUT_VARIABLE _out ERROR_VARIABLE _error)
+if(NOT _result EQUAL 0 OR NOT _out MATCHES "42")
+  message(FATAL_ERROR "Obsidian named-table SQL query failed: ${_out}${_error}")
+endif()
 execute_process(COMMAND "${CSVZALL_EXE}" sql load "${_csv}" --dest "${CLI_TEST_DIR}/unexpected.db"
   RESULT_VARIABLE _result OUTPUT_VARIABLE _out ERROR_VARIABLE _error)
 if(_result EQUAL 0 OR EXISTS "${CLI_TEST_DIR}/unexpected.db")

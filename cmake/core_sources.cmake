@@ -26,6 +26,7 @@ set(CSVZALL_CORE_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/json_extract.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/max.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/sql_query.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/sql_table_load.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/sql_export.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/summarize.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/pipeline/commands/timeseries.cpp
