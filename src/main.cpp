@@ -1,13 +1,15 @@
 #include <argparse/argparse.hpp>
+#ifndef CSVZALL_OBSIDIAN_BUILD
 #include <indicators/progress_bar.hpp>
 #include <indicators/progress_spinner.hpp>
 #include "credentials.hpp"
+#include "util.hpp"
 #include "head.hpp"
+#include "pipeline/common/markdown_calendar.hpp"
+#endif
 #include "charts/chart_schema.hpp"
 #include "pipeline/common/chart_spec.hpp"
-#include "pipeline/common/markdown_calendar.hpp"
 #include "transform_pipeline.hpp"
-#include "util.hpp"
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
 #include "postgres/postgres_connection.hpp"
@@ -54,6 +56,7 @@ class Logger {
     }
   }
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
   void StartProgress(const std::string& label, std::uint64_t total) const {
     if (quiet_) {
       return;
@@ -121,14 +124,18 @@ class Logger {
     }
   }
 
+#endif
+
   [[nodiscard]] bool is_verbose() const { return verbose_; }
 
  private:
   bool verbose_ = false;
   bool quiet_ = false;
+#ifndef CSVZALL_OBSIDIAN_BUILD
   mutable std::unique_ptr<indicators::ProgressBar> progress_bar_;
   mutable std::unique_ptr<indicators::ProgressSpinner> progress_spinner_;
   mutable std::uint64_t progress_total_ = 0;
+#endif
 };
 
 struct ThroughputStats {
@@ -137,6 +144,7 @@ struct ThroughputStats {
   std::chrono::steady_clock::duration elapsed{};
 };
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
 csvzall::CredentialTarget BuildCredentialTarget(
     const std::string& host,
     const int port,
@@ -237,6 +245,8 @@ bool ApplyPasswordSources(argparse::ArgumentParser& cmd,
 }
 #endif
 
+#endif
+
 std::istream* ResolveInput(const std::string& input_path, std::unique_ptr<std::ifstream>& file_holder,
                            Logger& logger) {
   if (input_path.empty() || input_path == "-") {
@@ -285,6 +295,7 @@ std::optional<csvzall::pipeline::ViewModeSelection> ParseViewMode(const std::str
   return std::nullopt;
 }
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
 csvzall::pipeline::common::ChartValueSpec ParseChartValueArg(const std::string& raw) {
   const auto pos = raw.find('=');
   if (pos == std::string::npos) {
@@ -297,6 +308,8 @@ csvzall::pipeline::common::ChartValueSpec ParseChartValueArg(const std::string& 
   }
   return {std::move(column), std::move(label), ""};
 }
+
+#endif
 
 std::string GetEnvString(const char* name) {
 #ifdef _WIN32
@@ -314,6 +327,7 @@ std::string GetEnvString(const char* name) {
 #endif
 }
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
 std::string CalendarMonthName(unsigned month) {
   static constexpr std::array<std::string_view, 12> names{
       "January", "February", "March", "April", "May", "June",
@@ -338,6 +352,8 @@ std::string FormatCalendarMonthHeader(std::string pattern, int year, unsigned mo
   ReplaceAll(pattern, "{year}", std::to_string(year));
   return pattern;
 }
+
+#endif
 
 // Register arguments shared by all CSV-consuming subcommands:
 // positional input, --single-threaded, --verbose, -d/--delimiter.
@@ -366,6 +382,7 @@ void AddCsvInputArguments(argparse::ArgumentParser& cmd) {
       .default_value(std::string{""});
 }
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
 // Register --exact for commands that perform column name lookups.
 void AddExactArgument(argparse::ArgumentParser& cmd) {
   cmd.add_argument("--exact")
@@ -374,16 +391,24 @@ void AddExactArgument(argparse::ArgumentParser& cmd) {
       .implicit_value(true);
 }
 
+#endif
+
 csvzall::pipeline::LoggerCallbacks BuildCallbacks(const Logger& logger) {
   return {
     [&logger](const std::string& msg) { logger.Error(msg); },
     [&logger](const std::string& msg) { logger.Verbose(msg); },
     [&logger](const std::string& msg) { logger.Info(msg); },
+#ifndef CSVZALL_OBSIDIAN_BUILD
     [&logger](const std::string& label, std::uint64_t total) { logger.StartProgress(label, total); },
     [&logger](std::uint64_t current) { logger.UpdateProgress(current); },
-    [&logger]() { logger.FinishProgress(); }};
+    [&logger]() { logger.FinishProgress(); }
+#else
+    {}, {}, {}
+#endif
+  };
 }
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
 csvzall::pipeline::RunOptions BuildTransformOptions(
     const argparse::ArgumentParser& cmd, std::istream* input, const std::string& input_path) {
   csvzall::pipeline::RunOptions options;
@@ -395,6 +420,8 @@ csvzall::pipeline::RunOptions BuildTransformOptions(
   options.zip_entry = cmd.get<std::string>("--zip-entry");
   return options;
 }
+
+#endif
 
 bool IsSqlTableNameText(std::string_view text) {
   if (text.empty() ||
@@ -428,7 +455,8 @@ ThroughputStats FinishStats(const csvzall::pipeline::RunStats& ps,
 }  // namespace
 
 int main(int argc, char** argv) {
-  argparse::ArgumentParser program("csvzall", "0.9.0");
+  argparse::ArgumentParser program("csvzall", "0.10.0");
+#ifndef CSVZALL_OBSIDIAN_BUILD
   program.add_description("csvzall: high-performance CSV ETL and reporting CLI");
   program.add_epilog(R"(Intent groups:
   ETL/data: head, filter, derive, summarize, timeseries, sql, json, append, merge
@@ -617,9 +645,14 @@ Rerunnable import (first run creates the store, later runs merge into it):
       .default_value(false)
       .implicit_value(true);
 
+#else
+  program.add_description("csvzall: Obsidian helper for CSV viewing, charts, and SQL queries");
+#endif
+
   argparse::ArgumentParser view_cmd("view");
   view_cmd.add_description(
       "Start a local browser table viewer for one plain CSV file.");
+#ifndef CSVZALL_OBSIDIAN_BUILD
   view_cmd.add_epilog(R"(Input shape:
   A plain local CSV file path is required. stdin, gzip (.gz), and zip (.zip)
   inputs are intentionally not supported by the viewer in this pass.
@@ -659,6 +692,14 @@ Examples:
 Related:
   Use head for terminal previews and sql query --format markdown for note-ready summaries.
 )");
+#else
+  view_cmd.add_epilog(R"(Input: one plain local CSV file. Output: a token-protected HTTP viewer on
+127.0.0.1; --startup-json emits its URL for the host.
+Use --edit for editing and --obsidian for host-owned automatic charts.
+Explicit chart actions remain available. Theme changes arrive from the host.
+Example: csvzall view data.csv --edit --no-open --startup-json --obsidian
+Related: sql query --format markdown produces note-ready summaries.)");
+#endif
   view_cmd.add_argument("input")
       .help("Input CSV file path")
       .required();
@@ -711,6 +752,7 @@ Related:
       .default_value(false)
       .implicit_value(true);
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
   argparse::ArgumentParser calendar_cmd("calendar");
   calendar_cmd.add_description(
       "Render fixed-shape date,content CSV as deterministic Markdown calendars. "
@@ -746,7 +788,10 @@ Examples:
       .help("Month heading template; supports {year}, {month}, and {month-name}")
       .default_value(std::string{});
 
+#endif
+
 #ifdef CSVZALL_HAVE_SVGPLOT
+#ifndef CSVZALL_OBSIDIAN_BUILD
   argparse::ArgumentParser heatmap_cmd("heatmap");
   heatmap_cmd.add_description(
       "Render date/value CSV as a self-contained SVG calendar heatmap. "
@@ -804,9 +849,12 @@ Examples:
       .help("Optional SVG output file path. If omitted, SVG is written to stdout.")
       .default_value(std::string{});
 
+#endif
+
   argparse::ArgumentParser charts_cmd("charts");
   charts_cmd.add_description(
       "Run configured CSV-to-chart rendering from .csvzall/charts.json.");
+#ifndef CSVZALL_OBSIDIAN_BUILD
   charts_cmd.add_epilog(R"(charts quick start:
   Runs chart artifacts configured in .csvzall/charts.json by default.
   Use --config <path> to choose another config file.
@@ -841,6 +889,15 @@ Examples:
 Related:
   Use heatmap for direct one-off SVG rendering to stdout or --output.
 )");
+#else
+  charts_cmd.add_epilog(R"(Input: .csvzall/charts.json, or --config <path>. Output: configured SVG or
+Markdown files. Supported types: heatmap, bar, line, markdown-table.
+Run one chart by ID or all charts; --validate checks without writing.
+SQL-backed charts query their CSV as table data. Invalid or failing selected
+charts exit non-zero. Use charts schema for the full configuration reference.
+Example: csvzall charts run monthly --config .csvzall/charts.json
+Related: sql query previews the SQL used in chart definitions.)");
+#endif
   charts_cmd.add_argument("mode")
       .help("Charts mode: run or schema")
       .metavar("[run|schema]")
@@ -868,6 +925,7 @@ Related:
       .implicit_value(true);
 #endif
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
   argparse::ArgumentParser json_cmd("json");
   json_cmd.add_description(
       "JSON workflows. Use `csvzall json extract <input.json> --map <mapping.json>` "
@@ -929,6 +987,9 @@ Pipeline example:
       .help("Mapping JSON file with required rows and columns fields")
       .default_value(std::string{});
 
+#endif
+
+#ifndef CSVZALL_OBSIDIAN_BUILD
   program.add_subparser(derive_cmd);
   program.add_subparser(filter_cmd);
     program.add_subparser(head_cmd);
@@ -938,18 +999,28 @@ Pipeline example:
   program.add_subparser(min_cmd);
   program.add_subparser(append_cmd);
   program.add_subparser(merge_cmd);
+#endif
+
   program.add_subparser(view_cmd);
+#ifndef CSVZALL_OBSIDIAN_BUILD
   program.add_subparser(calendar_cmd);
+#endif
+
 #ifdef CSVZALL_HAVE_SVGPLOT
+#ifndef CSVZALL_OBSIDIAN_BUILD
   program.add_subparser(heatmap_cmd);
+#endif
   program.add_subparser(charts_cmd);
 #endif
+#ifndef CSVZALL_OBSIDIAN_BUILD
   program.add_subparser(json_cmd);
+#endif
 
   argparse::ArgumentParser sql_cmd("sql");
     sql_cmd.add_description(
         "SQLite-backed workflows. Use `csvzall sql query --csv <path> --sql <query>` "
         "to query CSV directly with SQL aggregation.");
+#ifndef CSVZALL_OBSIDIAN_BUILD
     sql_cmd.add_epilog(R"SQL(sql query contract:
   --csv <path> reads CSV directly.
   --csv - reads CSV from stdin.
@@ -1006,17 +1077,38 @@ Examples:
   csvzall sql load log.csv --dest work.db --table log --add-table
 )SQL");
 
+#else
+    sql_cmd.add_epilog(R"(Input: --csv <path> (repeat name=path for joins), --db <path>, or stdin.
+Output: --format csv (default) or markdown; --sql supplies the query.
+CSV columns retain inferred numeric affinity and exact text identifiers.
+SQLite, regexp, date helpers, math, and sqlean functions remain available.
+--load-extension is an explicit local CLI option; charts and the viewer cannot
+load native extensions. This helper supports query mode only.
+Example: csvzall sql query --csv data.csv --format markdown --sql "SELECT * FROM data"
+Related: view opens the CSV editor; charts run generates configured artifacts.
+)");
+#endif
+
     sql_cmd.add_argument("mode")
+#ifdef CSVZALL_OBSIDIAN_BUILD
+      .help("SQL mode: query")
+      .default_value(std::string{"query"})
+#else
       .help("SQL mode: load|query")
       .default_value(std::string{"load"})
+#endif
       .nargs(argparse::nargs_pattern::optional);
     AddCsvInputArguments(sql_cmd);
+#ifndef CSVZALL_OBSIDIAN_BUILD
     sql_cmd.add_argument("--dest")
       .help("Destination .db file path (default: input filename with .db extension)")
       .default_value(std::string{});
+#endif
+
     sql_cmd.add_argument("--table")
       .help("Table name to create inside the database")
       .default_value(std::string{"data"});
+#ifndef CSVZALL_OBSIDIAN_BUILD
     sql_cmd.add_argument("--add-table")
       .help("Load mode: add --table to an existing --dest database (fails if the table exists)")
       .default_value(false)
@@ -1025,6 +1117,8 @@ Examples:
       .help("Load mode: add --table to --dest, replacing an existing table of that name")
       .default_value(false)
       .implicit_value(true);
+#endif
+
     sql_cmd.add_argument("--csv")
       .help("Query input CSV path or '-' for stdin; name=path loads a named table (repeatable)")
       .default_value(std::vector<std::string>{})
@@ -1049,6 +1143,7 @@ Examples:
 
   program.add_subparser(sql_cmd);
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
   argparse::ArgumentParser forget_cmd("forget");
   forget_cmd.add_description("Forget stored csvzall credentials");
   forget_cmd.add_argument("connection")
@@ -1068,6 +1163,8 @@ Examples:
       .default_value(std::string{""});
 
   program.add_subparser(forget_cmd);
+
+#endif
 
 #ifdef CSVZALL_HAVE_POSTGRESQL
   argparse::ArgumentParser infer_cmd("infer");
@@ -1134,6 +1231,10 @@ Examples:
     return 1;
   }
 
+#ifdef CSVZALL_OBSIDIAN_BUILD
+  if (!program.is_subcommand_used("view") && !program.is_subcommand_used("charts") &&
+      !program.is_subcommand_used("sql")) {
+#else
   if (!program.is_subcommand_used("derive") && !program.is_subcommand_used("filter") &&
       !program.is_subcommand_used("head") && !program.is_subcommand_used("summarize") &&
       !program.is_subcommand_used("timeseries") && !program.is_subcommand_used("max") &&
@@ -1152,6 +1253,7 @@ Examples:
       && !program.is_subcommand_used("postgres")
 #endif
   ) {
+#endif
     std::cerr << program;
     return 1;
   }
@@ -1160,6 +1262,7 @@ Examples:
   ThroughputStats stats;
   const auto start = std::chrono::steady_clock::now();
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
   if (program.is_subcommand_used("forget")) {
     Logger logger(false, false);
     const auto connection = forget_cmd.get<std::string>("connection");
@@ -1349,6 +1452,8 @@ Examples:
     return rc;
   }
 
+#endif
+
   if (program.is_subcommand_used("view")) {
     Logger logger(view_cmd.get<bool>("--verbose"), view_cmd.get<bool>("--quiet"));
     const std::string input_name = view_cmd.get<std::string>("input");
@@ -1397,6 +1502,7 @@ Examples:
     return rc;
   }
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
   if (program.is_subcommand_used("calendar")) {
     Logger logger(calendar_cmd.get<bool>("--verbose"), calendar_cmd.get<bool>("--quiet"));
     const std::string input_name = calendar_cmd.get<std::string>("input");
@@ -1426,7 +1532,10 @@ Examples:
     return rc;
   }
 
+#endif
+
 #ifdef CSVZALL_HAVE_SVGPLOT
+#ifndef CSVZALL_OBSIDIAN_BUILD
   if (program.is_subcommand_used("heatmap")) {
     Logger logger(heatmap_cmd.get<bool>("--verbose"), heatmap_cmd.get<bool>("--quiet"));
     const std::string input_name = heatmap_cmd.get<std::string>("input");
@@ -1496,6 +1605,8 @@ Examples:
     return rc;
   }
 
+#endif
+
   if (program.is_subcommand_used("charts")) {
     Logger logger(charts_cmd.get<bool>("--verbose"), charts_cmd.get<bool>("--quiet"));
     const auto mode = charts_cmd.get<std::string>("mode");
@@ -1528,6 +1639,7 @@ Examples:
   }
 #endif
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
   if (program.is_subcommand_used("json")) {
     Logger logger(false, false);
     const auto mode = json_cmd.get<std::string>("mode");
@@ -1545,12 +1657,17 @@ Examples:
     return rc;
   }
 
+#endif
+
   if (program.is_subcommand_used("sql")) {
     Logger logger(sql_cmd.get<bool>("--verbose"), sql_cmd.get<bool>("--quiet"));
     const std::string mode = sql_cmd.get<std::string>("mode");
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
     const bool add_table = sql_cmd.get<bool>("--add-table");
     const bool replace_table = sql_cmd.get<bool>("--replace-table");
+#endif
+
     const auto load_extensions = sql_cmd.get<std::vector<std::string>>("--load-extension");
 
     if (mode == "query") {
@@ -1563,10 +1680,13 @@ Examples:
         logger.Error("sql query: --format must be csv or markdown.");
         return 1;
       }
+#ifndef CSVZALL_OBSIDIAN_BUILD
       if (add_table || replace_table) {
         logger.Error("sql query: --add-table and --replace-table only apply to sql load.");
         return 1;
       }
+#endif
+
       if (!csv_arguments.empty() && !db_override.empty()) {
         logger.Error("sql query: pass only one of --csv or --db.");
         return 1;
@@ -1693,6 +1813,7 @@ Examples:
       return rc;
     }
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
     if (mode == "load" || (mode != "query" && mode != "load")) {
       std::string input_name = sql_cmd.get<std::string>("input");
       if (mode != "load") {
@@ -1735,7 +1856,13 @@ Examples:
       return rc;
     }
 
+#endif
+
+#ifdef CSVZALL_OBSIDIAN_BUILD
+    logger.Error("sql: this Obsidian helper supports query mode only.");
+#else
     logger.Error("sql: mode must be 'load' or 'query'.");
+#endif
     return 1;
   }
 
@@ -1878,6 +2005,7 @@ Examples:
   }
 #endif
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
   Logger logger(head_cmd.get<bool>("--verbose"), head_cmd.get<bool>("--quiet"));
   const int requested_rows = head_cmd.get<int>("--rows");
   if (requested_rows < 0) {
@@ -1904,4 +2032,7 @@ Examples:
   stats.elapsed = std::chrono::steady_clock::now() - start;
   MaybePrintVerboseStats(stats, logger);
   return rc;
+#else
+  return 1;
+#endif
 }

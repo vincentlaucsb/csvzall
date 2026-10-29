@@ -48,6 +48,18 @@ The fixture separates simulated content edits from the preceding compilation by
 a timestamp tick because older Make versions compare whole seconds. Keep this
 separation when adding mutations; input mtimes must still be reset to old values.
 
+## Obsidian helper profile checks
+
+`node --test tests/obsidian_profile.test.mjs` checks the slim helper without
+compiling or linking. It invokes the C++ preprocessor with dependency includes
+removed and evaluates the production source/dependency lists with `cmake -P`.
+Use `CSVZALL_TEST_PREPROCESSOR` to select `cl`, `c++`, or `clang++`, and
+`CSVZALL_TEST_CMAKE` to select CMake. On Windows, run from a developer shell or
+provide the absolute `cl.exe` path. These checks verify profile wiring; they do
+not substitute for a native build or runtime tests of the newly built helper.
+When building with `CSVZALL_OBSIDIAN_BUILD=ON`, CTest selects retained SQL/viewer/
+chart tests and `obsidian_cli_smoke.cmake`, rather than full-CLI command tests.
+
 ## Sync requirement
 
 `tests/AGENTS.md` is canonical. `tests/CLAUDE.md` is the mirror.

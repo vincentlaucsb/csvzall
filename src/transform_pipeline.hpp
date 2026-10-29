@@ -14,6 +14,7 @@
 
 namespace csvzall::pipeline {
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
 int RunDerive(const std::string& assignment, std::istream& input, std::ostream& output,
               const RunOptions& options, const LoggerCallbacks& logger, RunStats& stats);
 
@@ -78,6 +79,8 @@ int RunMerge(const std::string& existing_path,
              const LoggerCallbacks& logger,
              RunStats& stats);
 
+#endif
+
 int RunView(const std::string& input_path,
             std::ostream& output,
             const RunOptions& options,
@@ -114,6 +117,7 @@ int RunCharts(const std::string& config_path,
               RunStats& stats);
 #endif
 
+#ifndef CSVZALL_OBSIDIAN_BUILD
 int RunSqlExport(const std::string& input_path,
                  const std::string& dest_path,
                  const std::string& table_name,
@@ -131,6 +135,8 @@ int RunSqlExport(const std::string& input_path,
                  const RunOptions& options,
                  const LoggerCallbacks& logger,
                  RunStats& stats);
+
+#endif
 
 int RunSqlQueryCsv(const std::string& sql_query,
                    const std::string& table_name,

@@ -1,0 +1,47 @@
+file(MAKE_DIRECTORY "${CLI_TEST_DIR}")
+file(REMOVE "${CLI_TEST_DIR}/table.md" "${CLI_TEST_DIR}/unexpected.db")
+set(_csv "${CLI_TEST_DIR}/data.csv")
+file(WRITE "${_csv}" "name,value\nexample,42\n")
+execute_process(COMMAND "${CSVZALL_EXE}" --help
+  RESULT_VARIABLE _result OUTPUT_VARIABLE _help ERROR_VARIABLE _error)
+if(NOT _result EQUAL 0 OR NOT _help MATCHES "view" OR NOT _help MATCHES "charts" OR NOT _help MATCHES "sql")
+  message(FATAL_ERROR "Obsidian helper help failed: ${_help}${_error}")
+endif()
+foreach(_command head derive filter summarize timeseries max min append merge calendar heatmap json forget)
+  execute_process(COMMAND "${CSVZALL_EXE}" "${_command}" --help
+    RESULT_VARIABLE _result OUTPUT_VARIABLE _out ERROR_VARIABLE _error)
+  if(_result EQUAL 0)
+    message(FATAL_ERROR "Obsidian helper unexpectedly exposes ${_command}")
+  endif()
+endforeach()
+execute_process(COMMAND "${CSVZALL_EXE}" sql query --csv "${_csv}" --sql "SELECT SUM(value) FROM data"
+  RESULT_VARIABLE _result OUTPUT_VARIABLE _out ERROR_VARIABLE _error)
+if(NOT _result EQUAL 0 OR NOT _out MATCHES "42")
+  message(FATAL_ERROR "Obsidian SQL query failed: ${_out}${_error}")
+endif()
+execute_process(COMMAND "${CSVZALL_EXE}" sql query --csv "events=${_csv}" --sql "SELECT SUM(value) FROM events"
+  RESULT_VARIABLE _result OUTPUT_VARIABLE _out ERROR_VARIABLE _error)
+if(NOT _result EQUAL 0 OR NOT _out MATCHES "42")
+  message(FATAL_ERROR "Obsidian named-table SQL query failed: ${_out}${_error}")
+endif()
+execute_process(COMMAND "${CSVZALL_EXE}" sql load "${_csv}" --dest "${CLI_TEST_DIR}/unexpected.db"
+  RESULT_VARIABLE _result OUTPUT_VARIABLE _out ERROR_VARIABLE _error)
+if(_result EQUAL 0 OR EXISTS "${CLI_TEST_DIR}/unexpected.db")
+  message(FATAL_ERROR "Obsidian helper must not expose sql load")
+endif()
+file(WRITE "${CLI_TEST_DIR}/charts.json" "{\"charts\":[{\"id\":\"table\",\"type\":\"markdown-table\",\"input\":\"data.csv\",\"output\":\"table.md\",\"options\":{\"columns\":[\"name\",\"value\"]}}]}")
+execute_process(COMMAND "${CSVZALL_EXE}" charts run table --validate --config "${CLI_TEST_DIR}/charts.json"
+  RESULT_VARIABLE _result OUTPUT_VARIABLE _out ERROR_VARIABLE _error)
+if(NOT _result EQUAL 0 OR EXISTS "${CLI_TEST_DIR}/table.md")
+  message(FATAL_ERROR "Obsidian chart validation must not write output: ${_out}${_error}")
+endif()
+execute_process(COMMAND "${CSVZALL_EXE}" charts run table --config "${CLI_TEST_DIR}/charts.json"
+  RESULT_VARIABLE _result OUTPUT_VARIABLE _out ERROR_VARIABLE _error)
+if(NOT _result EQUAL 0 OR NOT EXISTS "${CLI_TEST_DIR}/table.md")
+  message(FATAL_ERROR "Obsidian chart generation failed: ${_out}${_error}")
+endif()
+execute_process(COMMAND "${CSVZALL_EXE}" view --help
+  RESULT_VARIABLE _result OUTPUT_VARIABLE _help ERROR_VARIABLE _error)
+if(NOT _result EQUAL 0 OR NOT _help MATCHES "--obsidian" OR NOT _help MATCHES "--edit")
+  message(FATAL_ERROR "Obsidian viewer flags missing: ${_help}${_error}")
+endif()

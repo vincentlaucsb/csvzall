@@ -9,22 +9,28 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(Catch2)
 
 add_executable(csvzall_tests
-  test_filter.cpp
-  test_derive.cpp
-  test_head.cpp
   test_sql_query.cpp
-  test_sql_export.cpp
-  test_sql_edges.cpp
   test_sql_functions.cpp
-  test_sql_tables.cpp
   test_sqlite_db.cpp
-  test_postgres_schema.cpp
-  test_json_extract.cpp
-  test_csv_utilities.cpp
-  test_markdown_calendar.cpp
-  test_summarize.cpp
-  test_timeseries.cpp
-  test_view.cpp)
+  test_view.cpp
+)
+
+if(NOT CSVZALL_OBSIDIAN_BUILD)
+  target_sources(csvzall_tests PRIVATE
+    test_filter.cpp
+    test_derive.cpp
+    test_head.cpp
+    test_sql_export.cpp
+    test_sql_edges.cpp
+    test_sql_tables.cpp
+    test_postgres_schema.cpp
+    test_json_extract.cpp
+    test_csv_utilities.cpp
+    test_markdown_calendar.cpp
+    test_summarize.cpp
+    test_timeseries.cpp
+  )
+endif()
 target_sources(csvzall_tests PRIVATE test_view_dialect.cpp)
 
 if(CSVZALL_HAVE_SVGPLOT)
@@ -131,6 +137,8 @@ add_test(NAME csvzall_tests COMMAND csvzall_tests)
 
 find_program(CSVZALL_NODE_EXE NAMES node nodejs)
 if(CSVZALL_NODE_EXE)
+  add_test(NAME csvzall_obsidian_profile_tests
+    COMMAND ${CSVZALL_NODE_EXE} --test "${CMAKE_CURRENT_SOURCE_DIR}/obsidian_profile.test.mjs")
   add_test(
     NAME csvzall_viewer_asset_build_test
     COMMAND "${CMAKE_COMMAND}" -E env
@@ -143,6 +151,12 @@ if(CSVZALL_NODE_EXE)
     COMMAND ${CSVZALL_NODE_EXE} --test ${CMAKE_CURRENT_SOURCE_DIR}/viewer_state.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/viewer_adapters.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/table_form.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/chart_form.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/viewer_theme.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/viewer_dialog.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/viewer_menu.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/compact_layout.test.mjs ${CMAKE_CURRENT_SOURCE_DIR}/note_export.test.mjs)
 endif()
 
+if(CSVZALL_OBSIDIAN_BUILD)
+  set(CSVZALL_CLI_SMOKE_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/obsidian_cli_smoke.cmake")
+else()
+  set(CSVZALL_CLI_SMOKE_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cli_smoke.cmake")
+endif()
+
 add_test(
   NAME csvzall_cli_smoke
   COMMAND
@@ -152,4 +166,4 @@ add_test(
     -DCSVZALL_HAVE_COMPRESSED_INPUT=$<BOOL:${CSVZALL_ENABLE_COMPRESSED_INPUT}>
     ${CSVZALL_TEST_EXTENSION_ARGS}
     -DCLI_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/cli-smoke
-    -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_smoke.cmake)
+    -P ${CSVZALL_CLI_SMOKE_SCRIPT})
