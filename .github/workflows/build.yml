@@ -20,8 +20,11 @@ jobs:
       - name: Check version markers agree
         run: node scripts/version.mjs check
 
+      - name: Check Obsidian profile without compiling
+        run: node --test tests/obsidian_profile.test.mjs
+
   build:
-    name: ${{ matrix.compressed == 'ON' && format('build ({0})', matrix.os) || format('build ({0}, compressed OFF)', matrix.os) }}
+    name: ${{ matrix.obsidian == 'ON' && format('build ({0}, Obsidian helper)', matrix.os) || (matrix.compressed == 'ON' && format('build ({0})', matrix.os) || format('build ({0}, compressed OFF)', matrix.os)) }}
     runs-on: ${{ matrix.os }}
     env:
       CMAKE_GENERATOR: ${{ matrix.os == 'windows-latest' && 'Ninja' || 'Unix Makefiles' }}
@@ -32,6 +35,18 @@ jobs:
         include:
           - os: ubuntu-latest
             compressed: "OFF"
+          - os: ubuntu-latest
+            compressed: "OFF"
+            obsidian: "ON"
+            cmake_options: >-
+              -DCSVZALL_OBSIDIAN_BUILD=ON
+              -DCSVZALL_ENABLE_POSTGRESQL=OFF
+              -DCSVZALL_ENABLE_KEYCHAIN=OFF
+              -DCSVZALL_ENABLE_SVGPLOT=ON
+              -DCSVZALL_PREFER_SYSTEM_SIMDJSON=OFF
+              -DCSVZALL_PREFER_SYSTEM_NLOHMANN_JSON=OFF
+              -DCSVZALL_PREFER_SYSTEM_SVGPLOT=OFF
+              -DCSVZALL_PREFER_SIBLING_CSV_PARSER=OFF
 
     steps:
       - uses: actions/checkout@v6.0.2
@@ -97,6 +112,7 @@ jobs:
           -DCMAKE_C_COMPILER_LAUNCHER=${{ steps.compiler-cache.outputs.launcher }}
           -DCMAKE_CXX_COMPILER_LAUNCHER=${{ steps.compiler-cache.outputs.launcher }}
           -DCSVZALL_ENABLE_COMPRESSED_INPUT=${{ matrix.compressed }}
+          ${{ matrix.cmake_options }}
 
       - name: Build
         # Bound Make concurrency on the macOS ARM runner's 7 GB RAM.
