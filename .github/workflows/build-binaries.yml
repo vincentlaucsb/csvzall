@@ -38,6 +38,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name }}
+      CMAKE_GENERATOR: ${{ matrix.os == 'windows-latest' && 'Ninja' || 'Unix Makefiles' }}
 
     steps:
       - uses: actions/checkout@v6.0.2
@@ -46,6 +47,10 @@ jobs:
 
       - name: Install CMake
         uses: lukka/get-cmake@v4.3.3
+
+      - name: Set up MSVC for Ninja
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
       - name: Install PostgreSQL client libraries (macOS)
         if: runner.os == 'macOS'
@@ -69,6 +74,7 @@ jobs:
           $defaultGenerator = (cmake --help | Where-Object { $_ -match '^\* ' } | Select-Object -First 1)
           $defaultGenerator = $defaultGenerator -replace '^\*\s*', ''
           $defaultGenerator = ($defaultGenerator -split '\s+=\s+', 2)[0].Trim()
+          if ($env:CMAKE_GENERATOR) { $defaultGenerator = $env:CMAKE_GENERATOR }
 
           if ($env:RUNNER_OS -eq 'Windows') {
             $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -94,16 +100,45 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-cmake-fetchcontent-${{ steps.cmake-cache-key.outputs.id }}-
 
+      # Restore compiler results only; build/ stays fresh on each hosted runner.
+      - name: Set up compiler cache
+        id: compiler-cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          toolchain: ${{ steps.cmake-cache-key.outputs.id }}
+          configuration: native-release-compressed-ON
+
       - name: Configure CMake (macOS)
         if: runner.os == 'macOS'
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCSVZALL_CXX_STANDARD=23 -DCSVZALL_REQUIRE_POSTGRESQL=ON -DCSVZALL_PREFER_SYSTEM_SIMDJSON=OFF -DCSVZALL_PREFER_SYSTEM_NLOHMANN_JSON=OFF -DCSVZALL_PREFER_SYSTEM_SVGPLOT=OFF -DPostgreSQL_ROOT="$PostgreSQL_ROOT"
+        run: >
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCSVZALL_CXX_STANDARD=23
+          -DCMAKE_C_COMPILER_LAUNCHER=${{ steps.compiler-cache.outputs.launcher }}
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ steps.compiler-cache.outputs.launcher }}
+          -DCSVZALL_REQUIRE_POSTGRESQL=ON -DCSVZALL_PREFER_SYSTEM_SIMDJSON=OFF
+          -DCSVZALL_PREFER_SYSTEM_NLOHMANN_JSON=OFF -DCSVZALL_PREFER_SYSTEM_SVGPLOT=OFF
+          -DPostgreSQL_ROOT="$PostgreSQL_ROOT"
 
       - name: Configure CMake
         if: runner.os != 'macOS'
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCSVZALL_CXX_STANDARD=23 -DCSVZALL_REQUIRE_POSTGRESQL=ON -DCSVZALL_PREFER_SYSTEM_SIMDJSON=OFF -DCSVZALL_PREFER_SYSTEM_NLOHMANN_JSON=OFF -DCSVZALL_PREFER_SYSTEM_SVGPLOT=OFF
+        run: >
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DCSVZALL_CXX_STANDARD=23
+          -DCMAKE_C_COMPILER_LAUNCHER=${{ steps.compiler-cache.outputs.launcher }}
+          -DCMAKE_CXX_COMPILER_LAUNCHER=${{ steps.compiler-cache.outputs.launcher }}
+          -DCSVZALL_REQUIRE_POSTGRESQL=ON -DCSVZALL_PREFER_SYSTEM_SIMDJSON=OFF
+          -DCSVZALL_PREFER_SYSTEM_NLOHMANN_JSON=OFF -DCSVZALL_PREFER_SYSTEM_SVGPLOT=OFF
 
       - name: Build
         run: cmake --build build --config Release --parallel --target csvzall
+
+      - name: Report compiler cache statistics
+        if: always() && steps.compiler-cache.outcome == 'success'
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_OS -eq 'Windows') {
+            sccache --show-stats
+          } else {
+            ccache --show-stats
+          }
 
       - name: Package release binary (Windows)
         if: runner.os == 'Windows'
