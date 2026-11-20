@@ -76,6 +76,8 @@ class CsvViewData {
   [[nodiscard]] std::vector<std::vector<std::string>> read_rows(
       std::uint64_t offset,
       std::uint64_t limit) const;
+  [[nodiscard]] ::csvzall::viewer::CsvSortedPage read_sorted_rows(
+      std::uint64_t offset, std::uint64_t limit, const std::string& column, bool descending) const;
 
   void edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
   void delete_row(std::uint64_t row);

@@ -168,6 +168,11 @@ std::vector<std::vector<std::string>> CsvViewData::read_rows(
   return data_.read_rows(offset, limit);
 }
 
+::csvzall::viewer::CsvSortedPage CsvViewData::read_sorted_rows(
+    std::uint64_t offset, std::uint64_t limit, const std::string& column, bool descending) const {
+  return data_.read_sorted_rows(offset, limit, column, descending);
+}
+
 void CsvViewData::edit_cell(const std::uint64_t row,
                             const std::string& column,
                             const std::string& value) {

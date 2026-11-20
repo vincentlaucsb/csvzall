@@ -102,6 +102,21 @@ test('embedded build contains its worker and engine while the standalone release
         const saved = await check('save');
         return new TextDecoder('utf-8', { ignoreBOM: true }).decode(new Uint8Array(saved.buffer, saved.byteOffset, saved.byteLength));
       };
+      const sortableCsv = 'id,score\nalpha,10\nbeta,2\ngamma,2\n';
+      await check('open', { name: 'sorting.csv', buffer: new TextEncoder().encode(sortableCsv).buffer });
+      const readSorted = (offset, limit, sortDirection = 'asc') =>
+        check('readRows', { offset, limit, sortColumn: 'score', sortDirection });
+      const firstPage = await readSorted(0, 2);
+      const lastPage = await readSorted(2, 2);
+      assert.deepEqual(Array.from(firstPage.rowIds), [1, 2]);
+      assert.deepEqual(Array.from(lastPage.rowIds), [0]);
+      assert.equal(firstPage.rows[0][0], 'beta');
+      assert.equal(await savedText(), sortableCsv);
+      await check('editCell', { rowIndex: firstPage.rowIds[0], column: 'score', value: '25' });
+      assert.deepEqual(Array.from((await readSorted(0, 3)).rowIds), [2, 0, 1]);
+      assert.deepEqual(Array.from((await readSorted(0, 3, 'desc')).rowIds), [1, 0, 2]);
+      await check('editCell', { rowIndex: (await readSorted(1, 1)).rowIds[0], column: 'id', value: 'renamed' });
+      assert.equal(await savedText(), 'id,score\nrenamed,10\nbeta,25\ngamma,2\n');
       for (const value of ["'hello'", "'semi;colon'", "'pipe|value'", "'it''s'", "O'Brien"]) {
         const csv = `name,note\na,${value}\n`;
         const opened = await check('open', { name: 'literal.csv', buffer: new TextEncoder().encode(csv).buffer });

@@ -36,6 +36,45 @@ async function edit(page,value) {
   await page.keyboard.press('Enter');
   await page.waitForFunction(()=>!document.getElementById('save').disabled);
 }
+async function editWhileSorted(page, value) {
+  const titleHeader = page.locator('#grid .ag-header-cell[col-id="title"]');
+  const firstTitle = page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]');
+  assert.equal(await titleHeader.locator('.ag-sort-none-icon').isVisible(), true);
+  await titleHeader.click();
+  await titleHeader.click();
+  await firstTitle.filter({ hasText: 'world' }).waitFor();
+  assert.match(await page.locator('#sort-description').innerText(), /Sorted by title.*Clear the sort to insert rows/);
+  assert.equal(await page.locator('#save').isDisabled(), true);
+
+  await page.locator('#insert-menu').click();
+  assert.equal(await page.getByRole('menuitem', { name: 'Row Before', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('menuitem', { name: 'Row After', exact: true }).isDisabled(), true);
+  await page.keyboard.press('Escape');
+  await firstTitle.click({ button: 'right' });
+  assert.equal(await page.getByRole('menuitem', { name: 'Insert Row Before', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('menuitem', { name: 'Insert Row After', exact: true }).isDisabled(), true);
+  await page.keyboard.press('Escape');
+
+  await firstTitle.dblclick();
+  await page.locator('#grid .ag-cell-inline-editing input').fill('aardvark');
+  await page.keyboard.press('Shift+Tab');
+  await page.locator('#status').filter({ hasText: 'Unsaved changes' }).waitFor();
+  await page.locator('#grid .ag-cell-inline-editing[col-id="id"] input').fill('22');
+  await page.keyboard.press('Enter');
+  await firstTitle.filter({ hasText: 'hello' }).waitFor();
+  await edit(page, value);
+}
+
+async function clearSortAndInsert(page, firstValue) {
+  await page.getByRole('button', { name: 'Clear sort' }).click();
+  await page.locator('#sort-notice').waitFor({ state: 'hidden' });
+  await page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]').filter({ hasText: firstValue }).waitFor();
+  await page.locator('#insert-menu').click();
+  await page.getByText('Row After', { exact: true }).click();
+  await page.locator('#record-count').filter({ hasText: '3 rows' }).waitFor();
+  await page.locator('#reset').click();
+  await page.locator('#record-count').filter({ hasText: '2 rows' }).waitFor();
+}
 async function commonActions(page) {
   await page.locator('#insert-menu').click();
   await page.getByText('Row After',{exact:true}).click();
@@ -64,11 +103,12 @@ async function commonActions(page) {
   await page.locator('#grid .ag-cell').filter({hasText:'hello'}).waitFor();
   assert.equal(await page.locator('#open-sql-query,#add-chart').count(),0);
   await commonActions(page);
-  await edit(page,'WASM updated');
+  await editWhileSorted(page, 'WASM updated');
   const downloaded=page.waitForEvent('download');await page.locator('#save').click();
   const stream=await (await downloaded).createReadStream();let text='';for await(const chunk of stream)text+=chunk;
-  assert.match(text,/WASM updated/);
+  assert.equal(text, 'id,title\n1,WASM updated\n22,aardvark\n');
   await page.waitForFunction(()=>document.getElementById('save').disabled);
+  await clearSortAndInsert(page, 'WASM updated');
   await page.screenshot({path:path.join(output,'wasm-shell.png')});
   const wasmSelected = await page.locator('#grid').evaluate(el=>getComputedStyle(el).getPropertyValue('--ag-selected-row-background-color'));
   console.log('WASM: real engine open, insert/reset, rename/reset, edit/download, clean state passed');
@@ -106,7 +146,7 @@ async function commonActions(page) {
   await page.locator('#grid .ag-cell').filter({hasText:'hello'}).waitFor();
   await page.locator('#open-sql-query').waitFor();await page.locator('#add-chart').waitFor();
   await commonActions(page);
-  await edit(page,'native updated');
+  await editWhileSorted(page, 'native updated');
   await page.locator('#open-sql-query').click();
   await page.locator('#sql-query').fill('SELECT title FROM data WHERE id = 1');
   await page.locator('#run-sql').click();
@@ -120,7 +160,8 @@ async function commonActions(page) {
   await page.locator('#exit-sql-query').click();
   await page.locator('#save').click();
   await page.waitForFunction(()=>document.getElementById('save').disabled);
-  assert.match(fs.readFileSync(fixture,'utf8'),/native updated/);
+  assert.equal(fs.readFileSync(fixture,'utf8'), 'id,title\n1,native updated\n22,aardvark\n');
+  await clearSortAndInsert(page, 'native updated');
   await page.locator('#add-chart').click();
   await page.locator('#heatmap-chart-dialog[open] #chart-id').waitFor();
   await page.locator('#cancel-chart').click();

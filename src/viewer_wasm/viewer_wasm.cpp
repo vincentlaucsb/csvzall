@@ -8,6 +8,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -76,6 +77,17 @@ CsvRows ReadRows(const CsvViewData& data, const double offset, const double limi
   return data.read_rows(ToRowIndex(offset), ToRowIndex(limit));
 }
 
+struct SortedRows {
+  std::vector<double> row_ids;
+  CsvRows rows;
+};
+
+SortedRows ReadSortedRows(const CsvViewData& data, const double offset, const double limit,
+                          const std::string& column, bool descending) {
+  auto page = data.read_sorted_rows(ToRowIndex(offset), ToRowIndex(limit), column, descending);
+  return {{page.row_ids.begin(), page.row_ids.end()}, std::move(page.rows)};
+}
+
 void EditCell(CsvViewData& data,
               const double row,
               const std::string& column,
@@ -116,6 +128,10 @@ EMSCRIPTEN_BINDINGS(csvzall_viewer_wasm) {
   emscripten::register_vector<std::string>("StringList");
   emscripten::register_vector<CsvRow>("CsvRow");
   emscripten::register_vector<CsvRows>("CsvRows");
+  emscripten::register_vector<double>("RowIds");
+  emscripten::value_object<SortedRows>("SortedRows")
+      .field("rowIds", &SortedRows::row_ids)
+      .field("rows", &SortedRows::rows);
 
   emscripten::class_<CsvViewData>("CsvViewData")
       .class_function("open", &OpenCsvViewData)
@@ -133,6 +149,7 @@ EMSCRIPTEN_BINDINGS(csvzall_viewer_wasm) {
       .function("rowCount", &RowCount)
       .function("fileSize", &FileSize)
       .function("readRows", &ReadRows)
+      .function("readSortedRows", &ReadSortedRows)
       .function("editCell", &EditCell)
       .function("deleteRow", &DeleteRow)
       .function("insertRow", &InsertRow)

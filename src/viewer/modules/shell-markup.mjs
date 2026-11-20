@@ -25,6 +25,10 @@ export const shellMarkup = `
       </div>
     </header>
     <div id="feature-panels" style="display: contents"></div>
+    <div id="sort-notice" class="sort-notice" hidden>
+      <span id="sort-description" role="status"></span>
+      <button id="clear-sort" type="button">Clear sort</button>
+    </div>
     <main class="grid-wrap">
       <div id="grid" class="ag-theme-alpine-auto-dark"></div>
     </main>

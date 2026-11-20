@@ -14,7 +14,8 @@ std::string BuildSchemaJson(const CsvViewData& data, bool editable);
 std::string BuildRowsJson(const CsvViewData& data,
                           std::uint64_t offset,
                           std::uint64_t limit,
-                          const std::vector<std::vector<std::string>>& rows);
+                          const std::vector<std::vector<std::string>>& rows,
+                          const std::vector<std::uint64_t>* row_ids = nullptr);
 std::string BuildHealthJson();
 std::string BuildStartupJson(const std::string& url);
 std::string SaveResultJson(std::size_t charts_generated, std::string_view chart_error = {});

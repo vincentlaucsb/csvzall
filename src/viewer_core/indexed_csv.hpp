@@ -29,6 +29,12 @@ struct CsvLogicalRow {
   std::unordered_map<std::string, std::string> cells;
 };
 
+struct CsvSortedPage {
+  // Logical row positions used by edit operations, independent of page order.
+  std::vector<std::uint64_t> row_ids;
+  std::vector<std::vector<std::string>> rows;
+};
+
 class CsvIndexedFile {
  public:
   static CsvIndexedFile Open(
@@ -52,6 +58,8 @@ class CsvIndexedFile {
   [[nodiscard]] std::vector<std::vector<std::string>> read_rows(
       std::uint64_t offset,
       std::uint64_t limit) const;
+  [[nodiscard]] CsvSortedPage read_sorted_rows(std::uint64_t offset, std::uint64_t limit,
+                                              const std::string& column, bool descending) const;
 
   void edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
   void delete_row(std::uint64_t row);
@@ -65,6 +73,14 @@ class CsvIndexedFile {
   void save(const std::vector<std::string>& columns = {});
 
  private:
+  struct SortIndex {
+    std::string column;
+    bool descending;
+    std::vector<std::uint64_t> row_ids;
+  };
+
+  [[nodiscard]] SortIndex build_sort_index(const std::string& column, bool descending) const;
+  void mark_modified();
   [[nodiscard]] std::vector<std::vector<std::string>> read_source_rows(
       std::uint64_t offset,
       std::uint64_t limit) const;
@@ -72,6 +88,9 @@ class CsvIndexedFile {
   [[nodiscard]] std::vector<std::string> row_values_for_columns(
       const CsvLogicalRow& row,
       const std::vector<CsvColumnDescriptor>& columns) const;
+  [[nodiscard]] static std::vector<std::string> logical_row_values(
+      const CsvLogicalRow& row, const std::vector<CsvColumnDescriptor>& columns,
+      const std::vector<std::string>& source_values);
   [[nodiscard]] std::size_t column_index(const std::string& column) const;
   [[nodiscard]] bool has_column(const std::string& column) const;
   void refresh_headers();
@@ -87,6 +106,7 @@ class CsvIndexedFile {
   std::vector<CsvColumnDescriptor> columns_;
   std::vector<CsvRowIndexEntry> index_;
   std::vector<CsvLogicalRow> rows_;
+  mutable std::optional<SortIndex> sort_index_;
   std::uint64_t file_size_ = 0;
   std::filesystem::file_time_type source_mtime_{};
   csv::CSVFormat format_;
@@ -127,6 +147,8 @@ class CsvViewData {
   [[nodiscard]] std::vector<std::vector<std::string>> read_rows(
       std::uint64_t offset,
       std::uint64_t limit) const;
+  [[nodiscard]] CsvSortedPage read_sorted_rows(std::uint64_t offset, std::uint64_t limit,
+                                              const std::string& column, bool descending) const;
 
   void edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
   void delete_row(std::uint64_t row);
