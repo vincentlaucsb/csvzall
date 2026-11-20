@@ -55,7 +55,12 @@ async function editWhileSorted(page, value) {
   assert.equal(await page.getByRole('menuitem', { name: 'Insert Row After', exact: true }).isDisabled(), true);
   await page.keyboard.press('Escape');
 
-  await edit(page, 'aardvark');
+  await firstTitle.dblclick();
+  await page.locator('#grid .ag-cell-inline-editing input').fill('aardvark');
+  await page.keyboard.press('Shift+Tab');
+  await page.locator('#status').filter({ hasText: 'Unsaved changes' }).waitFor();
+  await page.locator('#grid .ag-cell-inline-editing[col-id="id"] input').fill('22');
+  await page.keyboard.press('Enter');
   await firstTitle.filter({ hasText: 'hello' }).waitFor();
   await edit(page, value);
 }
@@ -101,7 +106,7 @@ async function commonActions(page) {
   await editWhileSorted(page, 'WASM updated');
   const downloaded=page.waitForEvent('download');await page.locator('#save').click();
   const stream=await (await downloaded).createReadStream();let text='';for await(const chunk of stream)text+=chunk;
-  assert.equal(text, 'id,title\n1,WASM updated\n2,aardvark\n');
+  assert.equal(text, 'id,title\n1,WASM updated\n22,aardvark\n');
   await page.waitForFunction(()=>document.getElementById('save').disabled);
   await clearSortAndInsert(page, 'WASM updated');
   await page.screenshot({path:path.join(output,'wasm-shell.png')});
@@ -155,7 +160,7 @@ async function commonActions(page) {
   await page.locator('#exit-sql-query').click();
   await page.locator('#save').click();
   await page.waitForFunction(()=>document.getElementById('save').disabled);
-  assert.equal(fs.readFileSync(fixture,'utf8'), 'id,title\n1,native updated\n2,aardvark\n');
+  assert.equal(fs.readFileSync(fixture,'utf8'), 'id,title\n1,native updated\n22,aardvark\n');
   await clearSortAndInsert(page, 'native updated');
   await page.locator('#add-chart').click();
   await page.locator('#heatmap-chart-dialog[open] #chart-id').waitFor();

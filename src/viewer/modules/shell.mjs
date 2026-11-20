@@ -65,6 +65,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   let viewOpen = false;
   let editable = true;
   let restoringCell = false;
+  let sortRefreshPending = false;
+  let sortRefreshTimer = 0;
   let resultMode = false;
   let activeName = '';
   let activeColumns = [];
@@ -237,7 +239,11 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       }
     },
     onCellEditingStarted(event) { compactLayout?.onCellEditingStarted(); hostGrid.onCellEditingStarted(event); },
-    onCellEditingStopped(event) { compactLayout?.onCellEditingStopped(); hostGrid.onCellEditingStopped(event); },
+    onCellEditingStopped(event) {
+      compactLayout?.onCellEditingStopped();
+      hostGrid.onCellEditingStopped(event);
+      scheduleSortRefresh();
+    },
     onSortChanged() { renderSortNotice(); },
     onCellValueChanged(event) {
       if (restoringCell || !editable || !viewOpen || typeof event.colDef.field !== 'string' ||
@@ -277,11 +283,23 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   function refreshRows() {
+    sortRefreshPending = false;
     if (typeof gridApi.purgeInfiniteCache === 'function') {
       gridApi.purgeInfiniteCache();
     } else if (typeof gridApi.refreshInfiniteCache === 'function') {
       gridApi.refreshInfiniteCache();
     }
+  }
+
+  function scheduleSortRefresh() {
+    if (!sortRefreshPending || sortRefreshTimer) return;
+    // Tab can start a new editor as the previous cell's write completes.
+    sortRefreshTimer = window.setTimeout(() => {
+      sortRefreshTimer = 0;
+      if (!sortRefreshPending || gridApi.getEditingCells().length) return;
+      sortRefreshPending = false;
+      if (viewOpen && activeSort()) refreshRows();
+    }, 0);
   }
 
   function selectedSourceRow() {
@@ -340,7 +358,10 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
         value: event.newValue ?? '',
       });
       markDataDirty();
-      if (activeSort()?.colId === event.colDef.field) refreshRows();
+      if (activeSort()?.colId === event.colDef.field) {
+        sortRefreshPending = true;
+        scheduleSortRefresh();
+      }
     } catch (error) {
       restoringCell = true;
       try { event.node.setDataValue(event.colDef.field, event.oldValue ?? ''); }
@@ -350,6 +371,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   function loadView(schema, name) {
+    sortRefreshPending = false;
     viewOpen = true;
     activeName = name;
     document.getElementById('file-name').textContent = name;
@@ -967,6 +989,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       } catch (error) { setStatus(error.message); throw error; }
     },
     destroy() {
+      window.clearTimeout(sortRefreshTimer);
       for (const dispose of featureDisposers.reverse()) dispose();
       for (const menu of [...menus, rowMenu, columnMenu]) menu?.destroy?.();
       compactLayout.destroy(); removeBeforeUnload?.(); hostGrid.destroy(); gridApi.destroy(); backend.destroy?.();
