@@ -110,10 +110,18 @@ const handlers = {
     return schema();
   },
 
-  readRows({ offset, limit }) {
+  readRows({ offset, limit, sortColumn, sortDirection }) {
     ensureView();
     const start = Number.isFinite(offset) ? Math.max(0, Math.trunc(offset)) : 0;
     const count = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 1;
+    if (sortColumn !== undefined || sortDirection !== undefined) {
+      if (typeof sortColumn !== 'string' || !['asc', 'desc'].includes(sortDirection)) {
+        throw new Error('Invalid row sort.');
+      }
+      const page = view.readSortedRows(start, count, sortColumn, sortDirection === 'desc');
+      return { offset: start, rowIds: vectorToArray(page.rowIds),
+        rows: rowsVectorToArrays(page.rows), totalRows: view.rowCount() };
+    }
     return {
       offset: start,
       rows: rowsVectorToArrays(view.readRows(start, count)),

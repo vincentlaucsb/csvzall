@@ -68,7 +68,8 @@ std::string BuildSchemaJson(const CsvViewData& data, bool editable) {
 std::string BuildRowsJson(const CsvViewData& data,
                           std::uint64_t offset,
                           std::uint64_t limit,
-                          const std::vector<std::vector<std::string>>& rows) {
+                          const std::vector<std::vector<std::string>>& rows,
+                          const std::vector<std::uint64_t>* row_ids) {
   Json row_values = Json::array();
   for (const auto& row : rows) {
     Json cells = Json::array();
@@ -83,6 +84,7 @@ std::string BuildRowsJson(const CsvViewData& data,
   json["limit"] = limit;
   json["totalRows"] = data.row_count();
   json["rows"] = std::move(row_values);
+  if (row_ids) json["rowIds"] = *row_ids;
   return json.dump();
 }
 

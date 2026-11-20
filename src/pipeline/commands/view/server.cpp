@@ -12,9 +12,11 @@
 #include <cctype>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "../../../../vendor/httplib/httplib.h"
 
@@ -75,6 +77,7 @@ struct ViewServer::Impl {
       : data(source_data), logger(source_logger) {}
 
   CsvViewData data;
+  std::mutex data_mutex;
   LoggerCallbacks logger;
   httplib::Server server;
   std::thread thread;
@@ -118,6 +121,13 @@ struct ViewServer::Impl {
     response.status = 405;
     response.set_content("viewer is read-only\n", "text/plain; charset=utf-8");
     return false;
+  }
+
+  httplib::Server::Handler WithDataLock(httplib::Server::Handler handler) {
+    return [this, handler = std::move(handler)](const httplib::Request& request, httplib::Response& response) {
+      const std::scoped_lock lock(data_mutex);
+      handler(request, response);
+    };
   }
 };
 
@@ -231,7 +241,7 @@ int ViewServer::Start(const ViewServerOptions& options) {
                     });
 
   impl_->server.Get("/api/schema",
-                    [this](const httplib::Request& request, httplib::Response& response) {
+                    impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                       if (!impl_->HasValidToken(request)) {
                         impl_->RejectUnauthorized(response);
                         return;
@@ -246,10 +256,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                                              "text/plain; charset=utf-8");
                       }
                       impl_->MaybeStopAfterRequest();
-                    });
+                    }));
 
   impl_->server.Get("/api/rows",
-                    [this](const httplib::Request& request, httplib::Response& response) {
+                    impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                       if (!impl_->HasValidToken(request)) {
                         impl_->RejectUnauthorized(response);
                         return;
@@ -270,10 +280,23 @@ int ViewServer::Start(const ViewServerOptions& options) {
                         limit = std::min<std::uint64_t>(limit, impl_->data.row_count() - offset);
                       }
 
+                      const auto direction = request.get_param_value("sortDirection");
+                      const auto column = request.get_param_value("sortColumn");
+                      if ((request.has_param("sortColumn") || request.has_param("sortDirection")) &&
+                          ((direction != "asc" && direction != "desc") ||
+                           std::ranges::find(impl_->data.headers(), column) == impl_->data.headers().end())) {
+                        BadRequest(response, "invalid row sort");
+                        return;
+                      }
                       try {
-                        const auto rows = impl_->data.read_rows(offset, limit);
-                        response.set_content(BuildRowsJson(impl_->data, offset, limit, rows),
-                                             "application/json; charset=utf-8");
+                        std::string page_json;
+                        if (direction.empty()) {
+                          page_json = BuildRowsJson(impl_->data, offset, limit, impl_->data.read_rows(offset, limit));
+                        } else {
+                          const auto page = impl_->data.read_sorted_rows(offset, limit, column, direction == "desc");
+                          page_json = BuildRowsJson(impl_->data, offset, limit, page.rows, &page.row_ids);
+                        }
+                        response.set_content(std::move(page_json), "application/json; charset=utf-8");
                       } catch (const std::exception& ex) {
                         if (impl_->logger.error) {
                           impl_->logger.error(std::string("view: ") + ex.what());
@@ -282,10 +305,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                         response.set_content("failed to read rows\n", "text/plain; charset=utf-8");
                       }
                       impl_->MaybeStopAfterRequest();
-                    });
+                    }));
 
   impl_->server.Post("/api/sql-query",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -299,10 +322,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/edit-cell",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -319,10 +342,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/delete-row",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -336,10 +359,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/insert-row",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -355,10 +378,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/swap-rows",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -374,10 +397,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/insert-column",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -394,10 +417,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/delete-column",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -411,10 +434,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/rename-column",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -430,10 +453,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/csv-options",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -448,10 +471,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/read-csv-options",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -466,10 +489,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/reset",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -485,10 +508,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                          response.set_content(std::string(ex.what()) + "\n",
                                               "text/plain; charset=utf-8");
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/save",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -519,10 +542,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                          response.set_content(std::string(ex.what()) + "\n",
                                               "text/plain; charset=utf-8");
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/chart-config/preview",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -533,10 +556,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Post("/api/chart-config/heatmap",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -548,10 +571,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Get("/api/chart-config",
-                    [this](const httplib::Request& request, httplib::Response& response) {
+                    impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                       if (!impl_->HasValidToken(request)) {
                         impl_->RejectUnauthorized(response);
                         return;
@@ -562,10 +585,10 @@ int ViewServer::Start(const ViewServerOptions& options) {
                       } catch (const std::exception& ex) {
                         BadRequest(response, ex.what());
                       }
-                    });
+                    }));
 
   impl_->server.Post("/api/chart-config/generate",
-                     [this](const httplib::Request& request, httplib::Response& response) {
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
                        if (!impl_->HasValidToken(request)) {
                          impl_->RejectUnauthorized(response);
                          return;
@@ -577,7 +600,7 @@ int ViewServer::Start(const ViewServerOptions& options) {
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
-                     });
+                     }));
 
   impl_->server.Get("/api/health",
                     [this](const httplib::Request& request, httplib::Response& response) {

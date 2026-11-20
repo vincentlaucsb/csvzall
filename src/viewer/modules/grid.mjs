@@ -9,12 +9,12 @@ export function currentGridColumns(api, columns) {
   return columnIds.filter((column) => knownColumns.has(column));
 }
 
-export function rowsToObjects(columns, rows, offset = 0) {
+export const sourceRowId = Symbol('_csvzallRowId');
+
+export function rowsToObjects(columns, rows, offset = 0, rowIds) {
   return rows.map((values, index) => {
-    const row = { _csvzallRowId: offset + index };
-    columns.forEach((column, columnIndex) => {
-      row[column] = values[columnIndex] ?? '';
-    });
+    const row = Object.fromEntries(columns.map((column, columnIndex) => [column, values[columnIndex] ?? '']));
+    row[sourceRowId] = rowIds ? rowIds[index] : offset + index;
     return row;
   });
 }

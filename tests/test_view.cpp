@@ -319,7 +319,7 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   }
   const auto shell = client.Get("/assets/modules/shell.mjs");
   REQUIRE(shell->body.find("createViewerShell") != std::string::npos);
-  REQUIRE(shell->body.find("_csvzallRowId") != std::string::npos);
+  REQUIRE(shell->body.find("sourceRowId") != std::string::npos);
   REQUIRE(shell->body.find("/api/sql-query") == std::string::npos);
   REQUIRE(shell->body.find("mountChartForm") == std::string::npos);
   const auto viewer_js = client.Get("/assets/viewer.js");
@@ -394,6 +394,16 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   const auto invalid_rows = client.Get("/api/rows?offset=-1&limit=1", headers);
   REQUIRE(invalid_rows);
   REQUIRE(invalid_rows->status == 400);
+
+  const auto sorted = client.Get("/api/rows?offset=1&limit=2&sortColumn=value&sortDirection=desc", headers);
+  REQUIRE(sorted);
+  REQUIRE(sorted->status == 200);
+  CHECK(sorted->body.find("\"rows\":[[\"bob\",\"20\"],[\"alice\",\"10\"]]") != std::string::npos);
+  CHECK(sorted->body.find("\"rowIds\":[1,0]") != std::string::npos);
+
+  const auto invalid_sort = client.Get("/api/rows?sortColumn=missing&sortDirection=asc", headers);
+  REQUIRE(invalid_sort);
+  CHECK(invalid_sort->status == 400);
 
   const auto sql = client.Post(
       "/api/sql-query",
