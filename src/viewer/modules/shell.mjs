@@ -5,7 +5,7 @@ import { mountViewerShell } from './shell-markup.mjs';
 import { createHostGridAdapter } from './host-grid.mjs';
 import { createSaveState } from './save-state.mjs';
 import { createMutationTracker } from './save.mjs';
-import { currentGridColumns, rowsToObjects, rowInsertionIndex, sourceRowId } from './grid.mjs';
+import { createPagedDatasource, currentGridColumns, rowsToObjects, rowInsertionIndex, sourceRowId } from './grid.mjs';
 import { createTablerIcon as createIcon, decorateButton, decorateIconButton, decorateMenuButton } from './icons.mjs';
 import { readLocalFile } from './local-file.mjs';
 import { installUnsavedChangesBeforeUnload } from './dirty-state.mjs';
@@ -74,6 +74,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   let readingCsv = false;
   let rowCount = 0;
   let viewGeneration = 0;
+  let datasource;
   let dirty = false;
   let dataDirty = false;
   let pendingInsertColumn = 0;
@@ -228,7 +229,9 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     },
     cacheBlockSize: 500,
     maxBlocksInCache: 8,
-    blockLoadDebounceMillis: 40,
+    onBodyScroll(event) {
+      if (event.direction === 'vertical') datasource?.onVerticalScroll();
+    },
     animateRows: false,
     suppressColumnVirtualisation: false,
     suppressMovableColumns: !backend.capabilities.columnOrder,
@@ -278,7 +281,9 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     renderSortNotice();
   }
 
-  function setDatasource(datasource) {
+  function setDatasource({ getRows }) {
+    datasource = createPagedDatasource(getRows, startRow =>
+      Boolean(gridApi.getCacheBlockState()[startRow / gridOptions.cacheBlockSize]));
     gridApi.setGridOption('datasource', datasource);
   }
 

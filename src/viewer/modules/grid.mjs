@@ -11,6 +11,47 @@ export function currentGridColumns(api, columns) {
 
 export const sourceRowId = Symbol('_csvzallRowId');
 
+// AG Grid's built-in block debounce also delays the initial viewport. Schedule
+// at the datasource instead so only the first request for a new file bypasses it.
+export function createPagedDatasource(readRows, isBlockCached) {
+  let firstRequest = true;
+  let closed = false;
+  let pending = [];
+  let timer;
+
+  function debounce() {
+    if (!pending.length) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const batch = pending;
+      pending = [];
+      for (const params of batch) {
+        if (isBlockCached(params.startRow)) readRows(params);
+        else params.failCallback();
+      }
+    }, 40);
+  }
+
+  return {
+    getRows(params) {
+      if (closed) return params.failCallback();
+      const immediate = firstRequest && params.startRow === 0;
+      firstRequest = false;
+      if (immediate) return readRows(params);
+      pending.push(params);
+      debounce();
+    },
+    onVerticalScroll: debounce,
+    destroy() {
+      closed = true;
+      clearTimeout(timer);
+      const batch = pending;
+      pending = [];
+      for (const params of batch) params.failCallback();
+    },
+  };
+}
+
 export function rowsToObjects(columns, rows, offset = 0, rowIds) {
   return rows.map((values, index) => {
     const row = Object.fromEntries(columns.map((column, columnIndex) => [column, values[columnIndex] ?? '']));
