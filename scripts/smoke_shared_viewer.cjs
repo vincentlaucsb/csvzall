@@ -43,7 +43,7 @@ async function editWhileSorted(page, value) {
   await titleHeader.click();
   await titleHeader.click();
   await firstTitle.filter({ hasText: 'world' }).waitFor();
-  assert.match(await page.locator('#sort-description').innerText(), /Sorted by title.*Clear the sort to insert rows/);
+  assert.match(await page.locator('#sort-description').innerText(), /Sorted by title.*Clear the sort to insert or move rows/);
   assert.equal(await page.locator('#save').isDisabled(), true);
 
   await page.locator('#insert-menu').click();
@@ -51,6 +51,8 @@ async function editWhileSorted(page, value) {
   assert.equal(await page.getByRole('menuitem', { name: 'Row After', exact: true }).isDisabled(), true);
   await page.keyboard.press('Escape');
   await firstTitle.click({ button: 'right' });
+  assert.equal(await page.getByRole('menuitem', { name: 'Move Up', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('menuitem', { name: 'Move Down', exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('menuitem', { name: 'Insert Row Before', exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('menuitem', { name: 'Insert Row After', exact: true }).isDisabled(), true);
   await page.keyboard.press('Escape');

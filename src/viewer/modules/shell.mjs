@@ -11,7 +11,7 @@ import { readLocalFile } from './local-file.mjs';
 import { installUnsavedChangesBeforeUnload } from './dirty-state.mjs';
 import { createCompactLayout } from './compact-layout.mjs';
 
-const sortedInsertMessage = 'Clear the sort to insert rows.';
+const sortedRowMessage = 'Clear the sort to insert or move rows.';
 
 /** Backend: capabilities, request, save, persist, destroy. Features: {id, mount(shell)}. */
 export function createViewerShell({ backend, createGrid, createContextMenu, createDropdownMenu, features = [] }) {
@@ -130,7 +130,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
 
   function request(type, payload = {}, transfer = []) {
     if ((mutationTypes.has(type) || type === 'readCsvOptions') && (!editable || !viewOpen)) return Promise.reject(new Error('This CSV is read-only.'));
-    if (type === 'insertRow' && activeSort()) return Promise.reject(new Error(sortedInsertMessage));
+    if ((type === 'insertRow' || type === 'swapRows') && activeSort()) return Promise.reject(new Error(sortedRowMessage));
     return mutationTypes.has(type) ? csvMutations.run(() => sendRequest(type, payload, transfer)) : sendRequest(type, payload, transfer);
   }
 
@@ -180,7 +180,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     sortNotice.hidden = !viewOpen || resultMode || !sort;
     const direction = sort?.sort === 'asc' ? 'ascending' : 'descending';
     sortDescription.textContent = sortNotice.hidden ? '' :
-      `Sorted by ${sort.colId} (${direction}).${editable ? ` ${sortedInsertMessage}` : ''}`;
+      `Sorted by ${sort.colId} (${direction}).${editable ? ` ${sortedRowMessage}` : ''}`;
   }
 
   function markDataDirty(message = `Unsaved changes in ${activeName}.`) {
@@ -636,8 +636,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       const row = data?.row;
       const sorted = Boolean(activeSort());
       return [
-        { id: 'move-up', label: 'Move Up', icon: () => createIcon('arrow-up'), disabled: !Number.isInteger(row) || row <= 0 },
-        { id: 'move-down', label: 'Move Down', icon: () => createIcon('arrow-down'), disabled: !Number.isInteger(row) || row >= rowCount - 1 },
+        { id: 'move-up', label: 'Move Up', icon: () => createIcon('arrow-up'), disabled: sorted || !Number.isInteger(row) || row <= 0 },
+        { id: 'move-down', label: 'Move Down', icon: () => createIcon('arrow-down'), disabled: sorted || !Number.isInteger(row) || row >= rowCount - 1 },
         { type: 'separator' },
         { id: 'insert-row-before', label: 'Insert Row Before', icon: () => createIcon('row-insert-bottom'), disabled: sorted },
         { id: 'insert-row-after', label: 'Insert Row After', icon: () => createIcon('row-insert-bottom'), disabled: sorted },
