@@ -254,8 +254,21 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
 
   const canEditCell = ({ data, colDef }) =>
     editable && Boolean(data) && !refreshingExternal && !externalConflict && !changingStructure && !pendingCellFields.get(data)?.has(colDef.field);
+  // The infinite row model needs a numeric height to reposition cached rows.
+  const rowMeasure = document.createElement('span');
+  rowMeasure.className = 'csvzall-row-measure';
+  gridElement.append(rowMeasure);
+  function syncRowHeight() {
+    const height = rowMeasure.offsetHeight;
+    if (datasource && height > 0 && gridApi.getGridOption('rowHeight') !== height) {
+      gridApi.setGridOption('rowHeight', height);
+    }
+  }
   const gridOptions = {
     loading: false,
+    onGridStylesChanged(event) {
+      if (event.rowHeightChanged) syncRowHeight();
+    },
     columnDefs: [],
     readOnlyEdit: true,
     defaultColDef: {
@@ -358,6 +371,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     datasource = createPagedDatasource(getRows, startRow =>
       Boolean(gridApi.getCacheBlockState()[startRow / gridOptions.cacheBlockSize]));
     gridApi.setGridOption('datasource', datasource);
+    syncRowHeight();
   }
 
   function refreshRows() {

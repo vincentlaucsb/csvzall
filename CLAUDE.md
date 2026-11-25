@@ -118,6 +118,8 @@ This file is the canonical AI reference for this repository.
 
 ## Viewer theme design
 
+- Define shared typography, spacing and palette defaults in `src/viewer/modules/viewer-theme.css`. Use the same content size for CSV grid cells and JSON code, including standalone mode. Use the host text, interface and monospace font roles for their respective content. Check computed text sizes in real AG Grid and CodeMirror views after a live host font-size change.
+
 - `view --obsidian` is an explicit plugin-supplied mode: the host owns automatic chart regeneration after CSV saves. Keep standalone automation, manual chart actions, and CLI JSON storage unchanged. Do not discover Obsidian vaults/profiles or access plugin data/Sync settings upstream.
 - Native startup JSON `obsidianMode.version` is the host chart-automation protocol version (currently 1), independent of the three source release markers. Keep its host acknowledgment contract and tests synchronized with obsidian-csvzall.
 

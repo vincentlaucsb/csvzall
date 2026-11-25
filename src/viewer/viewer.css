@@ -40,38 +40,6 @@ button:disabled {
   display: none !important;
 }
 
-:root {
-  color-scheme: light;
-  --csvzall-font-family: var(--font-interface, ui-sans-serif), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --csvzall-background-primary: var(--background-primary, #ffffff);
-  --csvzall-background-secondary: var(--background-secondary, #f6f7f8);
-  --csvzall-background-hover: var(--background-modifier-hover, #f2f3f5);
-  --csvzall-border: var(--background-modifier-border, #d6d6d6);
-  --csvzall-text-normal: var(--text-normal, #2e3338);
-  --csvzall-text-muted: var(--text-muted, #6f7680);
-  --csvzall-accent: var(--interactive-accent, #7c3aed);
-  --popright-bg: var(--csvzall-background-primary);
-  --popright-color: var(--csvzall-text-normal);
-  --popright-border: var(--csvzall-border);
-  --popright-active-bg: var(--csvzall-background-hover);
-  --popright-danger-color: var(--text-error, #dc2626);
-  --popright-shadow: 0 10px 28px color-mix(in srgb, #000 24%, transparent);
-  --popright-z-index: 20;
-}
-
-@media (prefers-color-scheme: dark) {
-:root {
-    color-scheme: dark;
-    --csvzall-background-primary: var(--background-primary, #111317);
-    --csvzall-background-secondary: var(--background-secondary, #191c22);
-    --csvzall-background-hover: var(--background-modifier-hover, #252a33);
-    --csvzall-border: var(--background-modifier-border, #343a46);
-    --csvzall-text-normal: var(--text-normal, #e6e9ef);
-    --csvzall-text-muted: var(--text-muted, #a6adbb);
-    --csvzall-accent: var(--interactive-accent, #9b8cff);
-  }
-
-}
 .app-shell {
   --csvzall-shared-shell-v1: 1;
   height: 100%;
@@ -84,13 +52,14 @@ button:disabled {
 
 .topbar {
   grid-area: main-toolbar;
+  font-size: var(--csvzall-ui-size);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: var(--csvzall-space-3);
   min-height: 48px;
-  padding: 0.5rem 0.75rem;
+  padding: var(--csvzall-space-2) var(--csvzall-space-3);
   border-bottom: 1px solid var(--csvzall-border);
   background: var(--csvzall-background-primary);
 }
@@ -100,14 +69,14 @@ button:disabled {
   min-width: 0;
   display: flex;
   align-items: baseline;
-  gap: 0.75rem;
+  gap: var(--csvzall-space-3);
 }
 
 .topbar h1 {
   margin: 0;
   overflow: hidden;
   color: var(--csvzall-text-normal);
-  font-size: 0.95rem;
+  font-size: var(--csvzall-ui-size);
   font-weight: 600;
   line-height: 1.4;
   text-overflow: ellipsis;
@@ -116,7 +85,7 @@ button:disabled {
 
 .summary, .footer {
   color: var(--csvzall-text-muted);
-  font-size: 0.78rem;
+  font-size: var(--csvzall-caption-size);
 }
 
 .summary:empty {
@@ -128,7 +97,7 @@ button:disabled {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem 1rem;
+  gap: var(--csvzall-space-2) var(--csvzall-space-4);
 }
 
 .query-input-shell {
@@ -142,13 +111,13 @@ button:disabled {
   min-height: 4.5rem;
   max-height: 9rem;
   overflow-y: auto;
-  padding: 0.5rem 2.1rem 0.5rem 0.55rem;
+  padding: var(--csvzall-space-2) 2.1rem var(--csvzall-space-2) 0.55rem;
   border: 1px solid var(--csvzall-border);
   border-radius: var(--radius-s, 4px);
   background: var(--csvzall-background-primary);
   color: var(--csvzall-text-normal);
   font: inherit;
-  font-family: var(--font-monospace, ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace);
+  font-family: var(--csvzall-code-font);
   line-height: 1.35;
   resize: none;
 }
@@ -182,7 +151,7 @@ button:disabled {
 .overflow-toolbar {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: var(--csvzall-space-1);
 }
 
 .feature-toolbar {
@@ -206,7 +175,7 @@ button:disabled {
 .toolbar-divider {
   height: 1.25rem;
   border-inline-start: 1px solid var(--csvzall-border);
-  margin-inline: 0.25rem;
+  margin-inline: var(--csvzall-space-1);
 }
 
 .toolbar-divider:where([hidden]),
@@ -217,7 +186,7 @@ button:disabled {
 
 #csv-options-dialog fieldset {
   display: grid;
-  gap: 0.75rem;
+  gap: var(--csvzall-space-3);
   min-width: 0;
 }
 
@@ -232,11 +201,11 @@ button:disabled {
 #csv-options-form .csv-options-header-toggle {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--csvzall-space-2);
 }
 
 .csv-header-warning {
-  padding: 0.75rem;
+  padding: var(--csvzall-space-3);
   border: 1px solid var(--csvzall-border);
   border-inline-start: 3px solid var(--csvzall-accent);
   border-radius: var(--radius-s, 4px);
@@ -246,7 +215,7 @@ button:disabled {
 .csv-header-warning-title {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--csvzall-space-2);
   margin-block-end: 0.5rem;
 }
 
@@ -272,7 +241,7 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 28px;
+  min-height: var(--input-height, 28px);
   padding: 0 0.6rem;
   border: 1px solid var(--csvzall-border);
   border-radius: var(--radius-s, 4px);
@@ -292,7 +261,7 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
+  gap: var(--csvzall-space-1);
   min-width: 0;
 }
 
@@ -327,7 +296,7 @@ button:disabled {
   display: grid;
   gap: 0.85rem;
   margin: 0;
-  padding: 1rem;
+  padding: var(--csvzall-space-4);
 }
 
 .dialog-form h2 {
@@ -339,9 +308,9 @@ button:disabled {
 
 .dialog-form label {
   display: grid;
-  gap: 0.35rem;
+  gap: var(--csvzall-space-1);
   color: var(--csvzall-text-muted);
-  font-size: 0.78rem;
+  font-size: var(--csvzall-caption-size);
 }
 
 .dialog-form input,
@@ -394,7 +363,7 @@ button:disabled {
 .dialog-error {
   margin: 0;
   color: var(--text-error, #d14);
-  font-size: 0.78rem;
+  font-size: var(--csvzall-caption-size);
 }
 
 .dialog-form input[aria-invalid="true"],
@@ -407,7 +376,7 @@ button:disabled {
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
+  gap: var(--csvzall-space-2);
 }
 
 .dialog-actions button {
@@ -522,7 +491,9 @@ button:disabled {
 .app-shell .ag-theme-alpine,
 .app-shell .ag-theme-alpine-auto-dark {
   --ag-font-family: var(--csvzall-font-family);
-  --ag-font-size: 13px;
+  --ag-font-size: var(--csvzall-content-size);
+  --ag-row-height: max(calc(7 * var(--ag-grid-size)), calc(1.5 * var(--csvzall-content-size) + var(--csvzall-space-2)));
+  --ag-header-height: max(calc(8 * var(--ag-grid-size)), var(--ag-row-height));
   --ag-background-color: var(--csvzall-background-primary);
   --ag-foreground-color: var(--csvzall-text-normal);
   --ag-data-color: var(--csvzall-text-normal);
@@ -540,6 +511,22 @@ button:disabled {
   --ag-control-panel-background-color: var(--csvzall-background-secondary);
   --ag-menu-background-color: var(--csvzall-background-primary);
   --ag-modal-overlay-background-color: color-mix(in srgb, var(--csvzall-background-primary) 70%, transparent);
+}
+
+.csvzall-row-measure {
+  position: absolute;
+  visibility: hidden;
+  width: 0;
+  height: var(--ag-row-height);
+}
+
+/* Alpine adds a pixel to row text. Use the same content size as CodeMirror. */
+.app-shell .ag-row {
+  font-size: var(--csvzall-content-size);
+}
+
+.app-shell .ag-cell {
+  font-family: var(--csvzall-content-font);
 }
 
 .ag-theme-alpine .ag-root-wrapper,
@@ -581,9 +568,9 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: var(--csvzall-space-4);
   min-height: 30px;
-  padding: 0.4rem 0.75rem;
+  padding: 0.4rem var(--csvzall-space-3);
   border-top: 1px solid var(--csvzall-border);
   background: var(--csvzall-background-secondary);
 }
@@ -655,8 +642,8 @@ body[data-host-mode] .drop-overlay {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
-  gap: 1rem;
-  padding: 1rem;
+  gap: var(--csvzall-space-4);
+  padding: var(--csvzall-space-4);
 }
 
 .loading-panel h2 {
@@ -680,9 +667,9 @@ body[data-host-mode] .drop-overlay {
 .topbar { display: flex; flex-direction: row; flex-wrap: wrap; min-width: 0; }
 .file-meta { flex: 1; min-width: 0; }
 .feature-toolbar:empty { display: none; }
-.file-tools { display: flex; gap: .35rem; align-items: center; }
+.file-tools { display: flex; gap: var(--csvzall-space-1); align-items: center; }
 .edit-toolbar { margin-left: auto; min-width: 0; }
-.toolbar-actions { display: flex; align-items: center; gap: .35rem; min-width: 0; }
+.toolbar-actions { display: flex; align-items: center; gap: var(--csvzall-space-1); min-width: 0; }
 .toolbar-actions > .feature-toolbar, .toolbar-actions > .edit-toolbar, .overflow-toolbar { flex: 0 0 auto; }
 .overflow-toolbar:has(> button[hidden]) { display: none; }
 [data-overflowed] { display: none !important; }
@@ -690,8 +677,8 @@ body[data-host-mode] .drop-overlay {
 .file-picker input { max-width: 12rem; }
 html.csvzall-obsidian-host, html.csvzall-obsidian-host body, body[data-host-mode] { height: 100%; min-height: 100%; overflow: hidden; }
 /* csvzall-shared-shell-v1: keyboard hooks never resize the layout. */
-body[data-host-mode] .topbar { gap: .35rem; padding: .35rem .5rem; }
-body[data-host-mode] .footer { padding: .2rem .5rem; }
+body[data-host-mode] .topbar { gap: var(--csvzall-space-1); padding: var(--csvzall-space-1) var(--csvzall-space-2); }
+body[data-host-mode] .footer { padding: .2rem var(--csvzall-space-2); }
 @keyframes csvzall-spin { to { transform: rotate(360deg); } }
 body[data-compact] .topbar { align-items: center; }
 body[data-compact] .file-meta { flex-basis: 100%; }
@@ -713,7 +700,7 @@ body[data-compact] #sql-grid .ag-body-vertical-scroll-container {
 .autosave-control:not([hidden]) {
   display: inline-flex;
   align-items: center;
-  gap: .35rem;
+  gap: var(--csvzall-space-1);
   white-space: nowrap;
   cursor: pointer;
 }

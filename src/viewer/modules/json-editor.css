@@ -2,7 +2,11 @@ body { display: flex; flex-direction: column; }
 #status { white-space: normal; overflow-wrap: anywhere; }
 #editor { flex: 1; min-height: 0; }
 .cm-editor { height: 100%; }
-.cm-scroller { overflow: auto; font-family: var(--font-monospace, monospace); }
+#editor .cm-scroller {
+  overflow: auto;
+  font-family: var(--csvzall-code-font);
+  font-size: var(--csvzall-content-size);
+}
 .cm-editor .cm-gutters { color: var(--text-muted, GrayText); background: var(--background-secondary, Canvas); }
 .cm-editor .cm-content { caret-color: var(--text-normal, CanvasText); }
 .cm-editor .cm-cursor { border-color: var(--text-normal, CanvasText); }
