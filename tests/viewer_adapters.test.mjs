@@ -113,12 +113,37 @@ test('WASM adapter matches concurrent replies by id, transfers bytes and waits f
   f.reply({ id: 1, ok: true, result: { columns: ['a'], rowCount: 0 } });
   assert.equal((await rows).offset, 500); assert.equal((await open).rowCount, 0);
   assert.equal(f.posts[0].transfer[0], buffer);
+  const preparing = adapter.save();
+  assert.deepEqual(f.posts[2].message, { id: 3, type: 'prepareSave', payload: {} });
+  f.reply({ id: 3, ok: true, result: { buffer, saveId: 17 } });
+  const prepared = await preparing;
   let acknowledge, downloaded = false, settled = false;
-  const persistence = adapter.persist({ buffer }, { name: 'x.csv', hostBridge: { saveFile: () => new Promise(resolve => { acknowledge = resolve; }) }, downloadBytes: () => { downloaded = true; } });
-  persistence.then(() => { settled = true; }); await Promise.resolve();
-  assert.equal(settled, false); acknowledge(true); await persistence;
+  const persistence = adapter.persist(prepared, { name: 'x.csv', hostBridge: { saveFile: () => new Promise(resolve => { acknowledge = resolve; }) }, downloadBytes: () => { downloaded = true; } });
+  void persistence.then(() => { settled = true; });
+  assert.equal(f.posts.length, 3);
+  acknowledge(true);
+  await Promise.resolve();
+  assert.deepEqual(f.posts[3].message, { id: 4, type: 'finishSave', payload: { saveId: 17, commit: true } });
+  assert.equal(settled, false);
+  f.reply({ id: 4, ok: true, result: { columns: ['a'], rowCount: 0 } });
+  assert.equal(await persistence, true);
+  assert.deepEqual(prepared.schema, { columns: ['a'], rowCount: 0 });
   assert.equal(downloaded, false);
   adapter.destroy(); assert.equal(f.worker.terminated, true);
+});
+
+test('WASM adapter discards a rejected host save and preserves the host error', async () => {
+  const f = workerFixture(), adapter = createWasmAdapter(f.worker);
+  const persistence = adapter.persist({ buffer: new ArrayBuffer(2), saveId: 42 }, {
+    name: 'x.csv',
+    hostBridge: { saveFile: () => Promise.reject(new Error('Host rejected write')) },
+    downloadBytes: () => assert.fail('A rejected host save must not download'),
+  });
+  await Promise.resolve();
+  assert.deepEqual(f.posts[0].message, { id: 1, type: 'finishSave', payload: { saveId: 42, commit: false } });
+  f.reply({ id: 1, ok: true, result: null });
+  await assert.rejects(persistence, /Host rejected write/);
+  adapter.destroy();
 });
 
 test('WASM adapter rejects pending and future work after worker failure or disposal', async () => {
