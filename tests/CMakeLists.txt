@@ -137,6 +137,8 @@ add_test(NAME csvzall_tests COMMAND csvzall_tests)
 
 find_program(CSVZALL_NODE_EXE NAMES node nodejs)
 if(CSVZALL_NODE_EXE)
+  add_test(NAME csvzall_json_view_cli COMMAND ${CMAKE_COMMAND} -E env
+    "CSVZALL_TEST_BINARY=$<TARGET_FILE:csvzall>" "${CSVZALL_NODE_EXE}" --test "${CMAKE_CURRENT_SOURCE_DIR}/json_view_cli.test.mjs")
   add_test(NAME csvzall_obsidian_profile_tests
     COMMAND ${CSVZALL_NODE_EXE} --test "${CMAKE_CURRENT_SOURCE_DIR}/obsidian_profile.test.mjs")
   add_test(

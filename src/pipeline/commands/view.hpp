@@ -108,6 +108,7 @@ struct ViewServerOptions {
 class ViewServer {
  public:
   ViewServer(const CsvViewData& data, const LoggerCallbacks& logger);
+  ViewServer(const std::string& json_path, const LoggerCallbacks& logger);
   ~ViewServer();
 
   ViewServer(const ViewServer&) = delete;
@@ -122,11 +123,13 @@ class ViewServer {
   [[nodiscard]] std::string viewer_url() const;
 
  private:
+  void RegisterCsvRoutes();
+  void RegisterJsonRoutes();
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
 
-std::string FormatViewStartupOutput(const std::string& url, bool startup_json, bool obsidian = false);
+std::string FormatViewStartupOutput(const std::string& url, bool startup_json, bool obsidian = false, bool json_editor = false);
 
 int RunView(const std::string& input_path,
             std::ostream& output,

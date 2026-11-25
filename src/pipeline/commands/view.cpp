@@ -7,6 +7,9 @@
 #include <cstdint>
 #include <exception>
 #include <memory>
+#include <filesystem>
+#include <algorithm>
+#include <cctype>
 #include <ostream>
 #include <string>
 
@@ -35,12 +38,13 @@ bool OpenBrowserUrl(const std::string& url) {
 
 }  // namespace
 
-std::string FormatViewStartupOutput(const std::string& url, const bool startup_json, const bool obsidian) {
+std::string FormatViewStartupOutput(const std::string& url, const bool startup_json, const bool obsidian, const bool json_editor) {
   if (startup_json) {
-    if (obsidian) {
+    if (obsidian || json_editor) {
       nlohmann::ordered_json metadata;
       metadata["url"] = url;
-      metadata["obsidianMode"] = {{"version", 1}, {"chartAutomation", "host"}};
+      if (json_editor) metadata["viewer"] = "json";
+      if (obsidian) metadata["obsidianMode"] = {{"version", 1}, {"chartAutomation", "host"}};
       return metadata.dump();
     }
     return view_internal::BuildStartupJson(url);
@@ -57,9 +61,18 @@ int RunView(const std::string& input_path,
             bool open_browser,
             bool serve_once,
             bool startup_json) {
-  std::unique_ptr<CsvViewData> data;
+  auto extension = std::filesystem::u8path(input_path).extension().string();
+  std::ranges::transform(extension, extension.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  const bool json_editor = extension == ".json";
+  std::unique_ptr<ViewServer> server;
   try {
-    data = std::make_unique<CsvViewData>(CsvViewData::Open(input_path, options, logger, stats));
+    if (json_editor) server = std::make_unique<ViewServer>(input_path, logger);
+    else {
+      auto data = CsvViewData::Open(input_path, options, logger, stats);
+      server = std::make_unique<ViewServer>(data, logger);
+      if (logger.info) logger.info("view: " + std::to_string(data.row_count()) + " row(s) loaded in " +
+                                   std::string(data.mode_name()) + " mode from " + input_path);
+    }
   } catch (const std::exception& ex) {
     if (logger.error) {
       logger.error(std::string("view: ") + ex.what());
@@ -67,30 +80,28 @@ int RunView(const std::string& input_path,
     return 1;
   }
 
-  ViewServer server(*data, logger);
-  if (const auto rc = server.Start(
-          {requested_port, serve_once, options.view_edit, {}, options.view_asset_dir, options.view_obsidian});
+  const bool editable = json_editor || options.view_edit;
+  if (const auto rc = server->Start(
+          {requested_port, serve_once, editable, {}, options.view_asset_dir, options.view_obsidian});
       rc != 0) {
     return rc;
   }
 
-  const auto url = server.viewer_url();
-  output << FormatViewStartupOutput(url, startup_json, options.view_obsidian) << '\n';
+  const auto url = server->viewer_url();
+  output << FormatViewStartupOutput(url, startup_json, options.view_obsidian, json_editor) << '\n';
   output.flush();
 
   if (logger.info) {
-    logger.info(options.view_edit
+    logger.info(editable
                     ? "view: local-only editable viewer on 127.0.0.1"
                     : "view: local-only read-only viewer on 127.0.0.1");
-    logger.info("view: " + std::to_string(data->row_count()) + " row(s) loaded in " +
-                std::string(data->mode_name()) + " mode from " + input_path);
   }
 
   if (open_browser && !OpenBrowserUrl(url) && logger.info) {
     logger.info("view: could not open a browser automatically; open the printed URL manually");
   }
 
-  return server.Wait();
+  return server->Wait();
 }
 
 }  // namespace csvzall::pipeline::commands

@@ -1,0 +1,89 @@
+import './host-theme.mjs';
+import { createJsonEditor } from './codemirror-json.mjs';
+import { JsonDocument } from './json-document.mjs';
+import { postDirtyState, installUnsavedChangesBeforeUnload } from './dirty-state.mjs';
+import { installHostSaveRequests } from './save.mjs';
+
+const status = document.querySelector('#status');
+const button = document.querySelector('#save');
+const token = new URLSearchParams(location.search).get('token');
+
+async function request(options = {}) {
+  const response = await fetch('/api/document', {
+    ...options, headers: { 'X-Session-Token': token, ...options.headers }, cache: 'no-store',
+  });
+  if (!response.ok) throw new Error(await response.text() || response.statusText);
+  return response.json();
+}
+
+async function open() {
+  const source = await request();
+  let format = new JsonDocument(source.text);
+  let revision = source.revision;
+  let saved, editor, saving = false;
+  let refreshPending = false;
+  let queue = Promise.resolve();
+  const enqueue = action => {
+    const operation = queue.then(action);
+    queue = operation.catch(() => {});
+    return operation;
+  };
+  const reportError = error => { status.textContent = error.message; };
+  const state = { dirty: false };
+  const update = doc => {
+    const dirty = !doc.eq(saved);
+    if (state.dirty !== dirty) postDirtyState(dirty);
+    state.dirty = dirty;
+    status.textContent = dirty ? 'Unsaved changes' : '';
+    button.disabled = !dirty || Boolean(saving) || !source.editable;
+    if (!dirty && refreshPending) scheduleRefresh();
+  };
+  const save = () => enqueue(async () => {
+    const doc = editor.state.doc;
+    if (doc.eq(saved)) return true;
+    button.disabled = true;
+    saving = true;
+    try {
+      const result = await request({ method: 'POST', headers: { 'If-Match': revision, 'Content-Type': 'text/plain;charset=utf-8' },
+        body: format.serialize(doc.toString()) });
+      revision = result.revision;
+      saved = doc;
+    } finally { saving = false; update(editor.state.doc); }
+    return true;
+  });
+  const saveClick = () => { void save().catch(reportError); };
+  const mount = () => createJsonEditor(document.querySelector('#editor'), format, source.editable, update, saveClick);
+  function scheduleRefresh() {
+    refreshPending = true;
+    if (state.dirty) return;
+    void enqueue(async () => {
+      if (state.dirty || !refreshPending) return;
+      refreshPending = false;
+      const latest = await request();
+      if (state.dirty) { refreshPending = true; return; }
+      if (latest.revision === revision) return;
+      const focused = editor.hasFocus;
+      editor.destroy();
+      format = new JsonDocument(latest.text);
+      revision = latest.revision;
+      editor = mount();
+      saved = editor.state.doc;
+      update(saved);
+      if (focused) editor.focus();
+    }).catch(reportError);
+  }
+  editor = mount();
+  saved = editor.state.doc;
+  update(saved);
+  document.title = source.name;
+  document.querySelector('#filename').textContent = source.name;
+  button.addEventListener('click', saveClick);
+  window.addEventListener('focus', scheduleRefresh);
+  window.addEventListener('message', event => {
+    if (window.parent !== window && event.source === window.parent && event.data?.source === 'obsidian-csvzall' &&
+        event.data.type === 'json-file-modified' && event.data.version === 1) scheduleRefresh();
+  });
+  installHostSaveRequests({ save, getDirty: () => state.dirty });
+  installUnsavedChangesBeforeUnload(state);
+}
+open().catch(error => { status.textContent = error.message; });
