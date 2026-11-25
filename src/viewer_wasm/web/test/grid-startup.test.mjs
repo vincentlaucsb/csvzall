@@ -10,8 +10,8 @@ function mount(t, initialSchema, request, backendOverrides = {}) {
   const nodes = new Map();
   function element() {
     return Object.assign(new EventTarget(), {
-      ownerDocument: document, textContent: '', dataset: {}, content: { cloneNode() {} },
-      classList: { add() {} }, append() {}, replaceChildren() {}, setAttribute() {},
+      ownerDocument: document, textContent: '', dataset: {}, content: { querySelector: selector => document.querySelector(selector) },
+      classList: { add() {} }, append() {}, prepend() {}, before() {}, replaceWith() {}, replaceChildren() {}, setAttribute() {},
       toggleAttribute() {}, querySelectorAll: () => [],
       showModal() { this.open = true; }, close() { this.open = false; },
     });

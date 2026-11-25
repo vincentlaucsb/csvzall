@@ -40,6 +40,48 @@ test('a host change during the initial JSON read refreshes the mounted document'
   assert.equal(reads, 2);
 });
 
+test('Reset restores the last successful save, then follows an external edit without writing', async () => {
+  let disk = '1', writes = 0;
+  const nodes = new Map();
+  const document = { querySelector(selector) {
+    if (!nodes.has(selector)) nodes.set(selector, new EventTarget());
+    return nodes.get(selector);
+  } };
+  const win = Object.assign(new EventTarget(), {
+    document, parent: {}, location: { search: '' },
+    fetch: async (_url, options) => {
+      if (options.method === 'POST') { disk = options.body; writes++; }
+      return { ok: true, json: () => ({ text: disk, revision: disk, name: 'example.json', editable: true }) };
+    },
+  });
+  const text = value => ({ eq: other => other.toString() === value, toString: () => value, length: value.length });
+  let editor;
+  await openJsonEditor(win, (_parent, format, _editable, update) => {
+    editor = { state: { doc: text(format.display) }, destroy() {}, focus() {},
+      dispatch({ changes }) { this.state.doc = changes.insert; update(this.state.doc); } };
+    return editor;
+  });
+  const reset = nodes.get('#reset'), save = nodes.get('#save');
+  const edit = value => editor.dispatch({ changes: { insert: text(value) } });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  assert.ok(reset.disabled && save.disabled);
+  edit('2');
+  assert.ok(!reset.disabled && !save.disabled);
+  save.dispatchEvent(new Event('click'));
+  await settle();
+  edit('3');
+  reset.dispatchEvent(new Event('click'));
+  await settle();
+  assert.equal(editor.state.doc.toString(), '2');
+  edit('4');
+  disk = '5';
+  reset.dispatchEvent(new Event('click'));
+  await settle();
+  assert.equal(editor.state.doc.toString(), '5');
+  assert.equal(writes, 1);
+  assert.ok(reset.disabled && save.disabled);
+});
+
 test('view opens JSON without CSV indexing and preserves the disk format', { timeout: 20000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'csvzall JSON '));
   const path = join(directory, 'settings.JSON');

@@ -1303,9 +1303,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
   decorateMenuButton(insertMenuButton, 'plus', 'Insert');
   decorateMenuButton(deleteMenuButton, 'trash', 'Delete');
-  decorateButton(resetButton, 'restore', 'Reset');
   decorateButton(csvOptionsButton, 'settings', 'Options');
-  decorateButton(saveButton, 'device-floppy', 'Save');
   decorateIconButton(document.getElementById('more-actions'), 'dots', 'More actions');
   compactLayout = createCompactLayout({ toolbar: document.querySelector('.toolbar-actions'),
     moreButton: document.getElementById('more-actions'), createMenu: createToolbarDropdown, dropdowns, onChange: renderStatus });

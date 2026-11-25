@@ -1,25 +1,23 @@
+import { createViewerToolbar } from './viewer-toolbar.mjs';
+
 // Shared by native and WASM. Feature controls are mounted by their modules.
 export const shellMarkup = `
   <div class="app-shell">
-    <header class="topbar">
-      <div class="file-meta">
-        <h1 id="file-name">Loading…</h1>
-        <span id="summary" class="summary" aria-hidden="true"></span>
-      </div>
+    <header>
+      <span id="summary" class="summary" aria-hidden="true"></span>
       <div id="file-tools" class="file-tools" hidden>
         <button id="install-app" type="button" hidden>Install app</button>
         <label class="file-picker"><span>Open CSV/TSV</span><input id="file-input" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values"></label>
       </div>
-      <div class="toolbar-actions">
       <div id="viewer-tools" class="feature-toolbar" role="group" aria-label="CSV tools">
       </div>
-      <div id="edit-toolbar" class="edit-toolbar">
+      <template id="csv-edit-actions">
         <button id="csv-options" type="button" disabled>Options</button>
         <span class="toolbar-divider" aria-hidden="true"></span>
         <button id="insert-menu" type="button">Insert</button>
         <button id="delete-menu" type="button">Delete</button>
-        <button id="reset" type="button" disabled>Reset</button>
-        <button id="save" type="button" disabled>Save</button>
+      </template>
+      <template id="csv-save-actions">
         <label id="autosave-control" class="autosave-control" hidden>
           <span>AutoSave</span>
           <span class="autosave-switch">
@@ -29,9 +27,8 @@ export const shellMarkup = `
         </label>
         <button id="reload-external" type="button" hidden>Reload CSV</button>
         <button id="download-recovery" type="button" hidden>Save edits copy</button>
-      </div>
+      </template>
       <div class="overflow-toolbar"><button id="more-actions" type="button" aria-label="More actions" aria-haspopup="menu" hidden>…</button></div>
-      </div>
     </header>
     <div id="feature-panels" style="display: contents"></div>
     <main class="grid-wrap">
@@ -126,5 +123,14 @@ export const shellMarkup = `
 export function mountViewerShell(root = document.body) {
   const template = root.ownerDocument.createElement('template');
   template.innerHTML = shellMarkup;
-  root.append(template.content.cloneNode(true));
+  const content = template.content;
+  const bar = createViewerToolbar(root.ownerDocument);
+  bar.meta.append(content.querySelector('#summary'));
+  bar.actions.before(content.querySelector('#file-tools'));
+  bar.actions.prepend(content.querySelector('#viewer-tools'));
+  bar.reset.before(content.querySelector('#csv-edit-actions').content);
+  bar.edits.append(content.querySelector('#csv-save-actions').content);
+  bar.actions.append(content.querySelector('.overflow-toolbar'));
+  content.querySelector('header').replaceWith(bar.header);
+  root.append(content);
 }

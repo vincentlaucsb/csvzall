@@ -3,11 +3,13 @@ import { createJsonEditor } from './codemirror-json.mjs';
 import { JsonDocument } from './json-document.mjs';
 import { postDirtyState, installUnsavedChangesBeforeUnload } from './dirty-state.mjs';
 import { installHostSaveRequests } from './save.mjs';
+import { createViewerToolbar } from './viewer-toolbar.mjs';
 
 export async function openJsonEditor(win, createEditor = createJsonEditor) {
   const document = win.document;
   const status = document.querySelector('#status');
   const button = document.querySelector('#save');
+  const reset = document.querySelector('#reset');
   const token = new URLSearchParams(win.location.search).get('token');
   async function request(options = {}) {
     const response = await win.fetch('/api/document', {
@@ -40,12 +42,14 @@ export async function openJsonEditor(win, createEditor = createJsonEditor) {
     state.dirty = dirty;
     status.textContent = dirty ? 'Unsaved changes' : '';
     button.disabled = !dirty || Boolean(saving) || !source.editable;
+    reset.disabled = button.disabled;
     if (!dirty && refreshPending) scheduleRefresh();
   };
   const save = () => enqueue(async () => {
     const doc = editor.state.doc;
     if (doc.eq(saved)) return true;
     button.disabled = true;
+    reset.disabled = true;
     saving = true;
     try {
       const result = await request({ method: 'POST', headers: { 'If-Match': revision, 'Content-Type': 'text/plain;charset=utf-8' },
@@ -80,11 +84,19 @@ export async function openJsonEditor(win, createEditor = createJsonEditor) {
   saved = editor.state.doc;
   update(saved);
   document.title = source.name;
-  document.querySelector('#filename').textContent = source.name;
+  document.querySelector('#file-name').textContent = source.name;
   button.addEventListener('click', saveClick);
+  reset.addEventListener('click', () => {
+    if (reset.disabled) return;
+    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: saved } });
+    scheduleRefresh();
+    editor.focus();
+  });
   installHostSaveRequests({ win, save, getDirty: () => state.dirty });
   installUnsavedChangesBeforeUnload(state, win);
 }
 if (typeof window !== 'undefined') {
+  document.querySelector('header').replaceWith(createViewerToolbar(document).header);
+  if (window.parent !== window) document.body.dataset.hostMode = '';
   openJsonEditor(window).catch(error => { document.querySelector('#status').textContent = error.message; });
 }
