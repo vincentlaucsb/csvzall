@@ -40,14 +40,14 @@ export const shellMarkup = `
       <span id="record-count"></span>
     </footer>
   </div>
-  <dialog id="external-reload-dialog" class="csvzall-dialog"
-      aria-labelledby="external-reload-title" aria-describedby="external-reload-description">
+  <dialog id="discard-edits-dialog" class="csvzall-dialog"
+      aria-labelledby="discard-edits-title" aria-describedby="discard-edits-description">
     <div class="dialog-form">
-      <h2 id="external-reload-title">Discard edits and reload CSV?</h2>
-      <p id="external-reload-description">Reloading opens the latest file from disk and discards your unsaved edits.</p>
+      <h2 id="discard-edits-title"></h2>
+      <p id="discard-edits-description"></p>
       <div class="dialog-actions">
-        <button id="external-reload-cancel" type="button" autofocus>Cancel</button>
-        <button id="external-reload-confirm" type="button">Discard edits and reload</button>
+        <button id="discard-edits-cancel" type="button" autofocus>Cancel</button>
+        <button id="discard-edits-confirm" type="button"></button>
       </div>
     </div>
   </dialog>
@@ -87,9 +87,9 @@ export const shellMarkup = `
       </div>
     </form>
   </dialog>
-  <dialog id="insert-column-dialog" class="csvzall-dialog">
+  <dialog id="insert-column-dialog" class="csvzall-dialog" aria-labelledby="insert-column-title">
     <form id="insert-column-form" class="dialog-form">
-      <h2>Insert column</h2>
+      <h2 id="insert-column-title">Insert column</h2>
       <label>
         <span>Column name</span>
         <input id="insert-column-name" type="text" autocomplete="off" required>
@@ -101,9 +101,9 @@ export const shellMarkup = `
       </div>
     </form>
   </dialog>
-  <dialog id="rename-column-dialog" class="csvzall-dialog">
+  <dialog id="rename-column-dialog" class="csvzall-dialog" aria-labelledby="rename-column-title">
     <form id="rename-column-form" class="dialog-form">
-      <h2>Rename column</h2>
+      <h2 id="rename-column-title">Rename column</h2>
       <label>
         <span>Column name</span>
         <input id="rename-column-name" type="text" autocomplete="off" required>

@@ -34,10 +34,8 @@ a separate module script until they are refreshed from a new WASM release.
 
 ## Dialog dismissal
 
-Both viewers also import `modules/dialog-dismiss.mjs`. A primary pointer press
-and click on the backdrop of a `dialog.csvzall-dialog` dispatches a cancelable
-`cancel` event, then closes with return value `cancel`. Existing close handlers
-still run, including the unsaved-changes prompt's resolution. Clicks within the
-dialog bounds, drags starting inside, canceled pointers, and secondary clicks
-do not dismiss. Loading/progress dialogs are excluded. This behavior also works
-when the viewer runs standalone.
+The native and WASM viewers use `modules/dialog.mjs` for both the shared shell
+and dialogs created by individual features. Escape and a primary click that
+starts and finishes on the backdrop close an ordinary dialog as Cancel.
+Backdrop clicks respect cancel handlers. Loading and save progress stay open
+until their operation finishes.

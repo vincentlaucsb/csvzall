@@ -13,7 +13,9 @@ function mount(t, initialSchema, request, backendOverrides = {}) {
       ownerDocument: document, textContent: '', dataset: {}, content: { querySelector: selector => document.querySelector(selector) },
       classList: { add() {} }, append() {}, prepend() {}, before() {}, replaceWith() {}, replaceChildren() {}, setAttribute() {},
       toggleAttribute() {}, querySelectorAll: () => [],
-      showModal() { this.open = true; }, close() { this.open = false; }, focus() {},
+      showModal() { this.open = true; },
+      close(value) { this.open = false; this.returnValue = value; this.dispatchEvent(new Event('close')); },
+      focus() {},
     });
   }
   document.createElement = document.createElementNS = element;
@@ -215,17 +217,18 @@ test('external reload prompts in the viewer and discards edits only after confir
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.deepEqual(dirtyStates, [false, true]);
   button('reload-external').dispatchEvent(new Event('click'));
-  assert.equal(button('external-reload-dialog').open, true);
-  button('external-reload-cancel').dispatchEvent(new Event('click'));
-  assert.equal(button('external-reload-dialog').open, false);
+  assert.equal(button('discard-edits-dialog').open, true);
+  button('discard-edits-cancel').dispatchEvent(new Event('click'));
+  assert.equal(button('discard-edits-dialog').open, false);
   assert.equal(f.finishCount, 0);
   assert.deepEqual(external, []);
+  await Promise.resolve();
   button('reload-external').dispatchEvent(new Event('click'));
   send(3, 'second');
   send(4, 'latest');
-  button('external-reload-confirm').dispatchEvent(new Event('click'));
+  button('discard-edits-confirm').dispatchEvent(new Event('click'));
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(button('external-reload-dialog').open, false);
+  assert.equal(button('discard-edits-dialog').open, false);
   assert.equal(f.finishCount, 1);
   assert.deepEqual(external, ['latest']);
   assert.deepEqual(dirtyStates, [false, true, false]);

@@ -198,6 +198,82 @@ async function clearSortAndInsert(page, firstValue) {
   await page.locator('#reset').click();
   await page.locator('#record-count').filter({ hasText: '4 rows' }).waitFor();
 }
+
+async function clickBackdrop(page) {
+  const viewport = page.viewportSize();
+  await page.mouse.click(viewport.width - 3, viewport.height - 3);
+}
+
+async function checkDialogDismissal(page, selector, open) {
+  const dialog = page.locator(`${selector}[open]`);
+  for (const dismiss of [() => page.keyboard.press('Escape'), () => clickBackdrop(page)]) {
+    await open();
+    await dialog.waitFor();
+    await dialog.evaluate(el => {
+      el.removeAttribute('data-smoke-closed');
+      el.addEventListener('close', () => el.setAttribute('data-smoke-closed', ''), { once: true });
+    });
+    await dismiss();
+    await page.locator(`${selector}[data-smoke-closed]:not([open])`).waitFor({ state: 'attached' });
+  }
+}
+
+async function checkEditorDialogs(page) {
+  await checkDialogDismissal(page, '#csv-options-dialog', () => page.locator('#csv-options').click());
+  await checkDialogDismissal(page, '#insert-column-dialog', async () => {
+    await page.locator('#insert-menu').click();
+    await page.getByRole('menuitem', { name: 'Column After', exact: true }).click();
+  });
+  await checkDialogDismissal(page, '#rename-column-dialog', async () => {
+    await page.locator('#grid .ag-header-cell[col-id="title"]').click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Rename Column', exact: true }).click();
+  });
+  assert.equal(await page.locator('#save').isDisabled(), true);
+}
+
+async function checkChartDialogs(page) {
+  const openCharts = () => page.locator('#add-chart').click();
+  await checkDialogDismissal(page, '#heatmap-chart-dialog', async () => {
+    await openCharts();
+    await page.waitForFunction(() => document.activeElement?.id === 'chart-date-column');
+  });
+  const firstTitle = page.locator('#grid .ag-row[row-index="0"] [col-id="title"]');
+  await edit(page, firstTitle, 'discard this draft');
+  await openCharts();
+  await page.locator('#discard-chart-dirty').click();
+  await page.waitForFunction(() => document.activeElement?.id === 'chart-date-column');
+  await page.keyboard.press('Escape');
+  await edit(page, firstTitle, 'keep this draft');
+  await checkDialogDismissal(page, '#chart-dirty-dialog', openCharts);
+  assert.equal(await firstTitle.innerText(), 'keep this draft');
+  await page.locator('#reset').click();
+  await firstTitle.filter({ hasText: 'hello' }).waitFor();
+}
+
+async function checkConflictAndProgressDialogs(page) {
+  const firstTitle = page.locator('#grid .ag-row[row-index="0"] [col-id="title"]');
+  await edit(page, firstTitle, 'keep this conflicting draft');
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/save', async route => {
+    await held;
+    await route.fulfill({ status: 409, body: 'source file changed externally' });
+  }, { times: 1 });
+  try {
+    await page.locator('#save').click();
+    const loading = page.locator('#loading-dialog[open]');
+    await loading.waitFor();
+    await page.keyboard.press('Escape');
+    await clickBackdrop(page);
+    assert.equal(await loading.isVisible(), true);
+  } finally {
+    release();
+  }
+  await checkDialogDismissal(page, '#discard-edits-dialog', () => page.locator('#reload-external').click());
+  assert.equal(await firstTitle.innerText(), 'keep this conflicting draft');
+  assert.equal(fs.readFileSync(fixture, 'utf8'), source);
+}
+
 async function commonActions(page) {
   await page.locator('#insert-menu').click();
   await page.getByText('Row after',{exact:true}).click();
@@ -225,6 +301,14 @@ async function commonActions(page) {
   await page.locator('#file-input').setInputFiles({name:'smoke.csv',mimeType:'text/csv',buffer:Buffer.from(source)});
   await page.locator('#grid .ag-cell').filter({hasText:'hello'}).waitFor();
   assert.equal(await page.locator('#open-sql-query,#add-chart').count(),0);
+  await checkEditorDialogs(page);
+  const firstWasmTitle = page.locator('#grid .ag-row[row-index="0"] [col-id="title"]');
+  await edit(page, firstWasmTitle, 'keep this draft');
+  await checkDialogDismissal(page, '#discard-edits-dialog', () =>
+    page.locator('#file-input').setInputFiles({ name: 'different.csv', mimeType: 'text/csv', buffer: Buffer.from(source) }));
+  assert.equal(await firstWasmTitle.innerText(), 'keep this draft');
+  await page.locator('#reset').click();
+  await firstWasmTitle.filter({ hasText: 'hello' }).waitFor();
   await commonActions(page);
   await editWhileSorted(page, 'WASM updated');
   const downloaded=page.waitForEvent('download');await page.locator('#save').click();
@@ -283,6 +367,8 @@ async function commonActions(page) {
   await page.goto(await nativeUrl(true));
   await page.locator('#grid .ag-cell').filter({hasText:'hello'}).waitFor();
   await page.locator('#open-sql-query').waitFor();await page.locator('#add-chart').waitFor();
+  await checkEditorDialogs(page);
+  await checkChartDialogs(page);
   await commonActions(page);
   await checkPendingEdit(page);
   await checkRejectedAppend(page);
@@ -330,6 +416,10 @@ async function commonActions(page) {
   await page.getByRole('menuitem', { name: 'Clear sort' }).click();
   await page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]').filter({ hasText: 'hello' }).waitFor();
   console.log('Native read-only: edit controls absent; query-only column menu passed');
+  await page.goto(await nativeUrl(true));
+  await page.locator('#grid .ag-cell').filter({hasText:'hello'}).waitFor();
+  await checkConflictAndProgressDialogs(page);
+  console.log('Shared dialog dismissal passed, including Charts, file replacement and conflict confirmation');
   assert.deepEqual(errors,[]);
  } catch (error) { for (const p of browser.contexts().flatMap(c=>c.pages())) { console.log(await p.locator('body').innerText()); await p.screenshot({path:path.join(output,'smoke-failure.png')}); } console.log('Page errors:',errors); throw error; }
  finally {await browser.close();for(const child of processes)child.kill();}

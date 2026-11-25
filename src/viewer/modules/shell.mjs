@@ -1,6 +1,6 @@
 import { applyCsvOptionsHostUi, updateHeaderToggle } from './csv-options.mjs';
 import { applyHostGridTheme } from './host-theme.mjs';
-import './dialog-dismiss.mjs';
+import { createDialog } from './dialog.mjs';
 import { mountViewerShell } from './shell-markup.mjs';
 import { createHostGridAdapter } from './host-grid.mjs';
 import { createSaveState } from './save-state.mjs';
@@ -32,14 +32,16 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const autoSaveSwitch = document.getElementById('autosave');
   const autoSaveValue = document.getElementById('autosave-value');
   const reloadExternalButton = document.getElementById('reload-external');
-  const externalReloadDialog = document.getElementById('external-reload-dialog');
-  const externalReloadCancel = document.getElementById('external-reload-cancel');
-  const externalReloadConfirm = document.getElementById('external-reload-confirm');
+  const discardEditsDialog = createDialog(document.getElementById('discard-edits-dialog'));
+  const discardEditsTitle = document.getElementById('discard-edits-title');
+  const discardEditsDescription = document.getElementById('discard-edits-description');
+  const discardEditsCancel = document.getElementById('discard-edits-cancel');
+  const discardEditsConfirm = document.getElementById('discard-edits-confirm');
   const recoveryButton = document.getElementById('download-recovery');
   const conflictNotice = document.getElementById('csv-conflict');
   const resetButton = document.getElementById('reset');
   const csvOptionsButton = document.getElementById('csv-options');
-  const csvOptionsDialog = document.getElementById('csv-options-dialog');
+  const csvOptionsDialog = createDialog(document.getElementById('csv-options-dialog'));
   const csvOptionsForm = document.getElementById('csv-options-form');
   const csvDelimiter = document.getElementById('csv-options-delimiter');
   const csvQuote = document.getElementById('csv-options-quote');
@@ -53,15 +55,15 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const insertMenuButton = document.getElementById('insert-menu');
   const deleteMenuButton = document.getElementById('delete-menu');
   const gridElement = document.getElementById('grid');
-  const loadingDialog = document.getElementById('loading-dialog');
+  const loadingDialog = createDialog(document.getElementById('loading-dialog'), { dismissible: false });
   const loadingTitleNode = document.getElementById('loading-title');
   const loadingDetailNode = document.getElementById('loading-detail');
-  const insertColumnDialog = document.getElementById('insert-column-dialog');
+  const insertColumnDialog = createDialog(document.getElementById('insert-column-dialog'));
   const insertColumnForm = document.getElementById('insert-column-form');
   const insertColumnName = document.getElementById('insert-column-name');
   const insertColumnError = document.getElementById('insert-column-error');
   const cancelInsertColumn = document.getElementById('cancel-insert-column');
-  const renameColumnDialog = document.getElementById('rename-column-dialog');
+  const renameColumnDialog = createDialog(document.getElementById('rename-column-dialog'));
   const renameColumnForm = document.getElementById('rename-column-form');
   const renameColumnName = document.getElementById('rename-column-name');
   const renameColumnError = document.getElementById('rename-column-error');
@@ -94,6 +96,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   let hostBridge = null;
   let engineReady = false;
   let pendingOpenFile = null;
+  let confirmingDiscard = false;
   let autoSave = false;
   let autoSaveOverride;
   let autoSaveTimer;
@@ -124,28 +127,11 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   function showLoading(title, detail = '') {
     loadingTitleNode.textContent = title;
     loadingDetailNode.textContent = detail;
-    if (!loadingDialog.open) {
-      if (typeof loadingDialog.showModal === 'function') {
-        loadingDialog.showModal();
-      } else {
-        loadingDialog.setAttribute('open', '');
-      }
-    }
+    loadingDialog.show();
   }
 
   function hideLoading() {
-    if (loadingDialog.open) {
-      loadingDialog.close();
-    }
-  }
-
-  function showDialog(dialog, focusTarget) {
-    if (typeof dialog.showModal === 'function') {
-      dialog.showModal();
-    } else {
-      dialog.setAttribute('open', '');
-    }
-    focusTarget?.focus();
+    loadingDialog.close();
   }
 
   function queueMutation(type, payload, generation, notify) {
@@ -573,6 +559,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   async function openBuffer(name, buffer, sourceLabel) {
     saveState.changed();
     const generation = ++viewGeneration;
+    discardEditsDialog.close();
     pendingEntryCount = 0;
     viewOpen = false;
     rowCount = 0;
@@ -620,11 +607,12 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   async function requestOpenFile(file) {
-    if (dirty && !window.confirm(
-      `Open ${file.name}? Unsaved changes to ${activeName || 'the current file'} will be lost.`,
-    )) {
-      return;
-    }
+    if (confirmingDiscard) return;
+    if (hasLocalChanges() && !await confirmDiscardEdits(
+      `Open ${file.name}?`,
+      `Opening this file discards unsaved edits to ${activeName}.`,
+      'Discard edits and open',
+    )) return;
     await openFileWhenReady(file);
   }
 
@@ -753,7 +741,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     }
     insertColumnName.value = '';
     clearColumnError();
-    showDialog(insertColumnDialog, insertColumnName);
+    insertColumnDialog.show(insertColumnName);
   }
 
   function showRenameColumnDialog(column) {
@@ -768,7 +756,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     pendingRenameColumn = column;
     renameColumnName.value = column;
     clearRenameColumnError();
-    showDialog(renameColumnDialog, renameColumnName);
+    renameColumnDialog.show(renameColumnName);
     renameColumnName.select();
   }
 
@@ -998,7 +986,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     document.getElementById('csv-options-headers').textContent =
       `${csvOptions.hasHeaders ? 'Headers' : 'Display labels'}: ${activeColumns.join(', ')}`;
     csvOptionsError.hidden = true;
-    showDialog(csvOptionsDialog, csvHasHeaders.disabled ? csvDelimiter : csvHasHeaders);
+    csvOptionsDialog.show(csvHasHeaders.disabled ? csvDelimiter : csvHasHeaders);
   });
   csvInputRead.addEventListener('click', async () => {
     if (dirty || saving || readingCsv) return;
@@ -1191,18 +1179,34 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       (error || 'Could not save a copy of your edits.');
   }
 
-  function requestExternalReload() {
-    if (!pendingExternal || saving || refreshingExternal || externalReloadDialog.open) return;
-    if (hasLocalChanges()) showDialog(externalReloadDialog, externalReloadCancel);
-    else void refreshExternal({ discard: true });
+  async function confirmDiscardEdits(title, description, actionLabel) {
+    if (confirmingDiscard) return false;
+    const generation = viewGeneration;
+    confirmingDiscard = true;
+    discardEditsTitle.textContent = title;
+    discardEditsDescription.textContent = description;
+    discardEditsConfirm.textContent = actionLabel;
+    try {
+      const result = await discardEditsDialog.showForResult(discardEditsCancel);
+      return result === 'discard' && generation === viewGeneration;
+    } finally {
+      confirmingDiscard = false;
+    }
   }
 
-  reloadExternalButton.addEventListener('click', requestExternalReload);
-  externalReloadCancel.addEventListener('click', () => externalReloadDialog.close());
-  externalReloadConfirm.addEventListener('click', () => {
-    externalReloadDialog.close();
-    void refreshExternal({ discard: true });
-  });
+  async function requestExternalReload() {
+    if (!pendingExternal || saving || refreshingExternal || confirmingDiscard) return;
+    if (hasLocalChanges() && !await confirmDiscardEdits(
+      'Discard edits and reload CSV?',
+      'Reloading opens the latest file from disk and discards your unsaved edits.',
+      'Discard edits and reload',
+    )) return;
+    await refreshExternal({ discard: true });
+  }
+
+  reloadExternalButton.addEventListener('click', () => { void requestExternalReload(); });
+  discardEditsCancel.addEventListener('click', () => discardEditsDialog.close());
+  discardEditsConfirm.addEventListener('click', () => discardEditsDialog.close('discard'));
 
   let saving = false;
   async function saveCurrentChanges({ automatic = false } = {}) {
@@ -1279,7 +1283,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
 
   async function resetCurrentChanges() {
     if (!viewOpen || saving || refreshingExternal) return;
-    if (pendingExternal || externalConflict) { requestExternalReload(); return; }
+    if (pendingExternal || externalConflict) { await requestExternalReload(); return; }
     await finishEditing();
     await csvMutations.settle();
     showLoading('Resetting CSV', `${activeName} is being restored from the original bytes.`);
@@ -1360,6 +1364,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       viewGeneration += 1;
       pendingRowFocus = null;
       for (const dispose of featureDisposers.reverse()) dispose();
+      for (const dialog of [discardEditsDialog, csvOptionsDialog, insertColumnDialog, renameColumnDialog, loadingDialog]) dialog.destroy();
       for (const menu of [...menus, rowMenu, columnMenu]) menu?.destroy?.();
       compactLayout.destroy(); removeBeforeUnload?.(); hostGrid.destroy(); gridApi.destroy(); backend.destroy?.();
     },
