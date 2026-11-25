@@ -18,13 +18,6 @@ export const shellMarkup = `
         <button id="delete-menu" type="button">Delete</button>
       </template>
       <template id="csv-save-actions">
-        <label id="autosave-control" class="autosave-control" hidden>
-          <span>AutoSave</span>
-          <span class="autosave-switch">
-            <input type="checkbox" role="switch" id="autosave" />
-            <span id="autosave-value" aria-hidden="true">Off</span>
-          </span>
-        </label>
         <button id="reload-external" type="button" hidden>Reload CSV</button>
         <button id="download-recovery" type="button" hidden>Save edits copy</button>
       </template>

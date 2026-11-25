@@ -8,6 +8,7 @@ if(NOT DEFINED VIEWER_SOURCE_DIR OR NOT DEFINED AG_GRID_SOURCE_DIR OR NOT DEFINE
 endif()
 
 set(_assets
+  "/assets/modules/autosave.mjs|${VIEWER_SOURCE_DIR}/modules/autosave.mjs|application/javascript|viewer_autosave"
   "/assets/modules/editor-toolbar.mjs|${VIEWER_SOURCE_DIR}/modules/editor-toolbar.mjs|application/javascript|editor_toolbar"
   "/assets/modules/viewer-toolbar.mjs|${VIEWER_SOURCE_DIR}/modules/viewer-toolbar.mjs|application/javascript|viewer_toolbar"
   "/json-editor.html|${VIEWER_SOURCE_DIR}/modules/json-editor.html|text/html|json_editor_0"

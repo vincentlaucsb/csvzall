@@ -17,7 +17,7 @@ test('a host change during the initial JSON read refreshes the mounted document'
   });
   let reads = 0;
   const win = Object.assign(new EventTarget(), {
-    parent: {}, location: { search: '?token=viewer' },
+    parent: { postMessage() {} }, location: { search: '?token=viewer' },
     document: { querySelector: () => new EventTarget() },
     fetch: () => ++reads === 1 ? firstRead : response(2),
   });
@@ -49,7 +49,7 @@ test('Reset restores the last successful save, then follows an external edit wit
     return nodes.get(selector);
   } };
   const win = Object.assign(new EventTarget(), {
-    document, parent: {}, location: { search: '' },
+    document, parent: { postMessage() {} }, location: { search: '' },
     fetch: async (_url, options) => {
       if (options.method === 'POST') { disk = options.body; writes++; }
       else if (pendingRead) await pendingRead;
@@ -89,6 +89,100 @@ test('Reset restores the last successful save, then follows an external edit wit
   assert.equal(editor.state.doc.toString(), '5');
   assert.equal(writes, 1);
   assert.ok(reset.disabled && save.disabled);
+});
+
+test('hosted JSON debounces AutoSave and uses the same revision check as manual Save', async () => {
+  let disk = '1', writes = 0;
+  let pendingRead;
+  const nodes = new Map();
+  const posted = [];
+  const timers = new Map();
+  let nextTimer = 0;
+  const document = { querySelector(selector) {
+    if (!nodes.has(selector)) nodes.set(selector, new EventTarget());
+    return nodes.get(selector);
+  } };
+  const win = Object.assign(new EventTarget(), {
+    document, parent: { postMessage(message) { posted.push(message); } }, location: { search: '' },
+    setTimeout(callback, delay) {
+      assert.equal(delay, 800);
+      timers.set(++nextTimer, callback);
+      return nextTimer;
+    },
+    clearTimeout(id) { timers.delete(id); },
+    fetch: async (_url, options) => {
+      if (options.method === 'POST') {
+        writes++;
+        if (options.headers['If-Match'] !== disk) return { ok: false, text: async () => 'The JSON file changed on disk.' };
+        disk = options.body;
+      } else if (pendingRead) await pendingRead;
+      return { ok: true, json: () => ({ text: disk, revision: disk, name: 'example.json', editable: true }) };
+    },
+  });
+  const text = value => ({ eq: other => other.toString() === value, toString: () => value, length: value.length });
+  let edit;
+  await openJsonEditor(win, (_parent, format, _editable, update) => {
+    const editor = { state: { doc: text(format.display) }, destroy() {} };
+    edit = value => { editor.state.doc = text(value); update(editor.state.doc); };
+    return editor;
+  });
+  const sendPolicy = (enabled, visible) => win.dispatchEvent(Object.assign(new Event('message'), {
+    source: win.parent,
+    data: { source: 'obsidian-csvzall', type: 'json-autosave-settings', version: 1, enabled, visible },
+  }));
+  const runTimer = async () => {
+    assert.equal(timers.size, 1);
+    const [callback] = timers.values();
+    timers.clear();
+    callback();
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  const toggle = nodes.get('#autosave');
+  assert.equal(posted[0].type, 'json-autosave-ready');
+  sendPolicy(true, true);
+  edit('2');
+  edit('3');
+  assert.equal(timers.size, 1);
+  await runTimer();
+  assert.equal(disk, '3');
+  assert.equal(writes, 1);
+  assert.equal(timers.size, 0);
+
+  let releaseRead;
+  pendingRead = new Promise(resolve => { releaseRead = resolve; });
+  win.dispatchEvent(new Event('focus'));
+  await new Promise(resolve => setImmediate(resolve));
+  edit('4');
+  await runTimer();
+  sendPolicy(false, true);
+  releaseRead();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(writes, 1, 'a queued automatic save honors a policy update before writing');
+  assert.equal(disk, '3');
+  sendPolicy(true, true);
+
+  edit('4');
+  disk = '5';
+  await runTimer();
+  assert.equal(disk, '5');
+  assert.match(nodes.get('#status').textContent, /changed on disk/);
+  assert.equal(timers.size, 0, 'conflicts do not trigger an automatic retry');
+  assert.equal(nodes.get('#save').disabled, false);
+  nodes.get('#save').dispatchEvent(new Event('click'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(disk, '5');
+  assert.equal(writes, 3);
+  assert.equal(timers.size, 0);
+
+  toggle.checked = false;
+  toggle.dispatchEvent(new Event('change'));
+  edit('6');
+  sendPolicy(true, true);
+  assert.equal(timers.size, 0, 'a visible local override persists across settings updates');
+  sendPolicy(true, false);
+  assert.equal(nodes.get('#autosave-control').hidden, true);
+  sendPolicy(true, true);
+  assert.equal(timers.size, 1, 'hiding clears the prior local override');
 });
 
 test('view opens JSON without CSV indexing and preserves the disk format', { timeout: 20000 }, async t => {
