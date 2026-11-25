@@ -17,7 +17,7 @@ const shell = createViewerShell({
   createGrid, createContextMenu, createDropdownMenu, features: [],
 });
 const host = createHostBridge({
-  onOpenFile: file => shell.openBuffer(file.name || 'input.csv', file.buffer, 'Host file'),
+  onOpenFile: file => shell.openBuffer(file.name || 'input.csv', file.buffer),
   onHostModeChange: shell.setHostMode,
   onViewportResize: shell.onViewportResize,
   onSaveRequested: shell.save,

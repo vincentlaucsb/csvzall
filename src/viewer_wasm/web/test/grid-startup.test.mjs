@@ -104,6 +104,27 @@ test('paging reuses the grid, column definitions and datasource and writes an un
   assert.equal(f.options('datasource').length, 1);
 });
 
+test('opening a CSV keeps the table visible during file reads and worker indexing', async t => {
+  let rejectOpen;
+  const indexing = new Promise((_, reject) => { rejectOpen = reject; });
+  const f = mount(t, { ready: true }, type => {
+    assert.equal(type, 'open');
+    return indexing;
+  });
+  await f.shell.start();
+  const loading = f.document.getElementById('loading-dialog');
+  let finishRead;
+  const file = { name: 'sample.csv', arrayBuffer: () => new Promise(resolve => { finishRead = resolve; }) };
+  const opening = f.shell.requestOpenFile(file);
+  assert.ok(!loading.open);
+  finishRead(new ArrayBuffer(0));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(!loading.open);
+  rejectOpen(new Error('Unreadable CSV'));
+  await opening;
+  assert.equal(f.document.getElementById('status').textContent, 'Unreadable CSV');
+});
+
 test('a newly opened file replaces the datasource and updates the columns of the existing grid', async t => {
   const initial = { file: 'first.csv', columns: ['name'], rowCount: 1 };
   const replacement = { columns: ['total', 'date'], rowCount: 2 };

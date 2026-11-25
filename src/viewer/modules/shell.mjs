@@ -253,6 +253,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const canEditCell = ({ data, colDef }) =>
     editable && Boolean(data) && !refreshingExternal && !externalConflict && !changingStructure && !pendingCellFields.get(data)?.has(colDef.field);
   const gridOptions = {
+    loading: false,
     columnDefs: [],
     readOnlyEdit: true,
     defaultColDef: {
@@ -556,7 +557,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     setStatus(`Loaded ${name}.`, 'Loaded.');
   }
 
-  async function openBuffer(name, buffer, sourceLabel) {
+  async function openBuffer(name, buffer) {
     saveState.changed();
     const generation = ++viewGeneration;
     discardEditsDialog.close();
@@ -566,18 +567,15 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     activeColumns = [];
     setDirty(false);
     refreshActionState();
-    showLoading('Opening CSV', `${sourceLabel || name} is being indexed in the background.`);
     setStatus(`Opening ${name}...`);
     try {
       const schema = await request('open', { name, buffer }, [buffer]);
       if (generation === viewGeneration) {
-        hideLoading();
         loadView(schema, name);
         scheduleExternal();
       }
     } catch (error) {
       if (generation === viewGeneration) {
-        hideLoading();
         setStatus(error instanceof Error ? error.message : 'Open failed');
       }
     }
@@ -587,13 +585,11 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     try {
       const { name, buffer } = await readLocalFile(file, {
         onStart(name) {
-          showLoading('Opening CSV', `${name} is being read from your device.`);
           setStatus(`Opening ${name}...`);
         },
       });
-      await openBuffer(name, buffer, name);
+      await openBuffer(name, buffer);
     } catch (error) {
-      hideLoading();
       setStatus(error instanceof Error ? error.message : 'Could not read the selected file.');
     }
   }
@@ -617,7 +613,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   async function openHostFile(file) {
-    await openBuffer(file.name || 'input.csv', file.buffer, 'Host file');
+    await openBuffer(file.name || 'input.csv', file.buffer);
   }
 
   function columnIndexFor(column) {

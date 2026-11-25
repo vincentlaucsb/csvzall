@@ -52,6 +52,7 @@ This file is the canonical AI reference for this repository.
 
 ## Design rules
 
+- Open CSVs directly into the table in native and WASM viewers. Keep the initial file read, engine initialization, and indexing free of loading screens, modal progress dialogs, and grid loading overlays. Measure startup through the first frame containing CSV values.
 - Target C++23 and prefer modern language features.
 - Use `std::string_view` at API boundaries where lifetimes are safe.
 - Never store `std::string_view` in persistent data structures; store `std::string` instead.
