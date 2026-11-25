@@ -23,6 +23,14 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
+## Viewer startup regressions
+
+Shared-shell startup tests live in `src/viewer_wasm/web/test/` and cover both
+native and WASM startup paths. For repeat-layout regressions, count the grid
+API calls or DOM writes triggered by repeated inputs. Include a changed input
+that requires an update. Use paired runs of packaged helpers to measure time
+to first populated rows.
+
 ## Embedded viewer build regression
 
 `csvzall_viewer_asset_build_test` configures and compiles a small isolated CMake

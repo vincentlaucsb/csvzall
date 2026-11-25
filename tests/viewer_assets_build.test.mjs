@@ -29,7 +29,7 @@ test('embedded assets track content rather than archive timestamps', async () =>
   };
   try {
     mkdirSync(path.join(source, 'cmake'), { recursive: true });
-    for (const name of ['viewer_assets.cmake', 'embed_viewer_assets.cmake']) {
+    for (const name of ['viewer_assets.cmake', 'embed_viewer_assets.cmake', 'viewer_esbuild.cmake']) {
       writeFileSync(path.join(source, 'cmake', name), readFileSync(path.join(repository, 'cmake', name)));
     }
     const script = readFileSync(path.join(source, 'cmake/embed_viewer_assets.cmake'), 'utf8');
@@ -37,8 +37,12 @@ test('embedded assets track content rather than archive timestamps', async () =>
     for (const match of script.matchAll(/\|\$\{(VIEWER_SOURCE_DIR|AG_GRID_SOURCE_DIR|POPRIGHT_SOURCE_DIR)\}\/([^|]+)\|/g)) {
       const file = path.join(source, roots[match[1]], match[2]);
       mkdirSync(path.dirname(file), { recursive: true });
-      writeFileSync(file, `initial ${match[2]}`);
+      writeFileSync(file, match[2] === "viewer.js" ? 'console.log("initial viewer");' : `initial ${match[2]}`);
     }
+    const entry = path.join(source, 'src/viewer/viewer.js');
+    const nested = path.join(source, 'src/viewer/nested.mjs');
+    writeFileSync(entry, "import './nested.mjs';");
+    writeFileSync(nested, 'console.log("original nested module");');
     writeFileSync(path.join(source, 'CMakeLists.txt'), `cmake_minimum_required(VERSION 3.25)
 project(asset_regression LANGUAGES CXX)
 include(cmake/viewer_assets.cmake)
@@ -58,7 +62,8 @@ int main(int argc, char** argv) {
   std::cout << csvzall::pipeline::commands::EmbeddedViewerAssetText(*asset);
 }
 `);
-    run(cmake, ['-S', cmakePath(source), '-B', cmakePath(build), '-G', generator, '-DCMAKE_BUILD_TYPE=Release']);
+    run(cmake, ['-S', cmakePath(source), '-B', cmakePath(build), '-G', generator, '-DCMAKE_BUILD_TYPE=Release',
+      ...(process.env.CSVZALL_ESBUILD_EXECUTABLE ? [`-DCSVZALL_ESBUILD_EXECUTABLE=${process.env.CSVZALL_ESBUILD_EXECUTABLE}`] : [])]);
     const rebuild = () => run(cmake, ['--build', build, '--config', 'Release']);
     rebuild();
     const exe = readFileSync(path.join(build, 'probe-Release.txt'), 'utf8');
@@ -82,6 +87,7 @@ int main(int argc, char** argv) {
     for (const [file, route] of [
       ['vendor/popright/dist/ContextMenu.js', '/assets/popright/ContextMenu.js'],
       ['src/viewer/viewer.js', '/assets/viewer.js'],
+      ['vendor/ag-grid/ag-grid-community.min.noStyle.js', '/assets/ag-grid-community.min.js'],
       ['vendor/ag-grid/ag-grid.css', '/assets/ag-grid.css'],
     ]) {
       await nextTimestampTick();
@@ -89,11 +95,11 @@ int main(int argc, char** argv) {
       const originalTime = statSync(changed).mtime;
       const headerTime = statSync(hpp).mtimeMs;
       const content = `changed ${file} @PRESERVE_THIS_LITERAL@`;
-      writeFileSync(changed, content);
+      writeFileSync(changed, file.endsWith('/viewer.js') ? `console.log(${JSON.stringify(content)});` : content);
       utimesSync(changed, new Date(0), new Date(0));
       const beforeBuild = snapshot();
       const output = rebuild();
-      assert.equal(run(exe, [route]), content, JSON.stringify({
+      assert.ok(run(exe, [route]).includes(content), JSON.stringify({
         beforeBuild, afterBuild: snapshot(),
         generatedContainsChange: readFileSync(cpp, 'utf8').includes(content), output,
       }, null, 2));
@@ -109,13 +115,13 @@ int main(int argc, char** argv) {
     writeFileSync(scriptPath, script.replace('/assets/viewer.js|', '/assets/renamed.js|'));
     utimesSync(scriptPath, new Date(0), new Date(0));
     rebuild();
-    assert.match(run(exe, ['/assets/renamed.js']), /^changed src\/viewer\/viewer.js/);
+    assert.match(run(exe, ['/assets/renamed.js']), /changed src\/viewer\/viewer.js/);
     noOp();
     // Clean or partially deleted generated files recover without touching inputs.
     await nextTimestampTick();
     rmSync(hpp);
     rebuild();
-    assert.match(run(exe, ['/assets/renamed.js']), /^changed/);
+    assert.match(run(exe, ['/assets/renamed.js']), /changed/);
     noOp();
   } finally {
     rmSync(root, { recursive: true, force: true });

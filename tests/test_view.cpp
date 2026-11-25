@@ -325,7 +325,7 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   const auto viewer_js = client.Get("/assets/viewer.js");
   REQUIRE(viewer_js);
   REQUIRE(viewer_js->status == 200);
-  REQUIRE(viewer_js->body.find("features: [sqlFeature, chartsFeature]") != std::string::npos);
+  REQUIRE(viewer_js->body.find("createContextMenu") != std::string::npos);
 
   const auto sql_module = client.Get("/assets/modules/sql.mjs");
   REQUIRE(sql_module);
@@ -656,7 +656,7 @@ TEST_CASE("view: Add chart endpoint keeps config-only sql when the form omits it
   {
     std::ofstream config(dir / ".csvzall" / "charts.json", std::ios::binary);
     config << R"({"charts":[{"id":"monthly","type":"bar","input":"rides.csv","output":"charts/monthly.svg",)"
-           << R"("options":{"sql":"SELECT substr(day,1,7) AS month, SUM(miles) AS miles FROM data GROUP BY month","label":"month","value":"miles"}}]})";
+           << R"("options":{"sql":"SELECT substr(day,1,7) AS month, SUM(miles) AS miles FROM data GROUP BY month","label":"month","values":[{"column":"miles","label":"Distance","color":"#123456"}],"xLabel":"Month","yLabel":"Miles"}}]})";
   }
 
   pipeline::RunOptions options;
@@ -681,7 +681,6 @@ TEST_CASE("view: Add chart endpoint keeps config-only sql when the form omits it
       "application/json");
   REQUIRE(response);
   REQUIRE(response->status == 200);
-  server.Stop();
 
   const auto config_text = ReadTextFile(dir / ".csvzall" / "charts.json");
   CHECK(config_text.find("GROUP BY month") != std::string::npos);
@@ -689,6 +688,24 @@ TEST_CASE("view: Add chart endpoint keeps config-only sql when the form omits it
   const auto svg = ReadTextFile(dir / "charts" / "monthly.svg");
   CHECK(svg.find(">2026-01</text>") != std::string::npos);
   CHECK(svg.find(">2026-01-15</text>") == std::string::npos);
+
+
+  CHECK(config_text.find("Distance") != std::string::npos);
+  CHECK(config_text.find("#123456") != std::string::npos);
+  CHECK(config_text.find("Month") != std::string::npos);
+  const auto cleared = client.Post(
+      "/api/chart-config/heatmap", headers,
+      R"({"type":"bar","id":"monthly","sql":"","label":"day","value":"miles","xLabel":"Training day","yLabel":"Distance ridden","output":"charts/monthly.svg","runOnSave":false})",
+      "application/json");
+  REQUIRE(cleared);
+  REQUIRE(cleared->status == 200);
+  const auto cleared_text = ReadTextFile(dir / ".csvzall" / "charts.json");
+  CHECK(cleared_text.find("GROUP BY month") == std::string::npos);
+  CHECK(cleared_text.find("Distance") != std::string::npos);
+  CHECK(cleared_text.find("#123456") != std::string::npos);
+  CHECK(cleared_text.find("Training day") != std::string::npos);
+  CHECK(cleared_text.find("Distance ridden") != std::string::npos);
+  server.Stop();
 
   std::filesystem::remove_all(dir);
 }

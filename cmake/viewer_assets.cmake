@@ -1,9 +1,13 @@
+include("${CMAKE_CURRENT_LIST_DIR}/viewer_esbuild.cmake")
+
 # A target always runs the inexpensive content check before consumers compile.
 # BYPRODUCTS lets Ninja restat the outputs, avoiding recompilation on a no-op build.
 function(csvzall_add_viewer_assets target source_dir generated_dir)
+  csvzall_find_esbuild(esbuild)
   add_custom_target(${target}
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${generated_dir}"
     COMMAND "${CMAKE_COMMAND}"
+      "-DESBUILD=${esbuild}"
       "-DOUTPUT_CPP=${generated_dir}/viewer_assets.cpp"
       "-DOUTPUT_HPP=${generated_dir}/viewer_assets.hpp"
       "-DVIEWER_SOURCE_DIR=${source_dir}/src/viewer"

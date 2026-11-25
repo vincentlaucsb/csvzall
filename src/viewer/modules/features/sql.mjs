@@ -6,7 +6,7 @@ export const sqlFeature = {
   id: 'sql',
   mount(shell) {
     const doc = shell.gridElement.ownerDocument;
-    const removeStyle = mountFeatureStyle(doc, new URL('./sql.css', import.meta.url));
+    const removeStyle = mountFeatureStyle(doc, new URL('/assets/modules/features/sql.css', doc.baseURI));
     doc.getElementById('viewer-tools').insertAdjacentHTML('beforeend', '<button id="open-sql-query" type="button" aria-expanded="false" aria-controls="sqlite-query-toolbar">SQLite query</button>');
     doc.getElementById('feature-panels').insertAdjacentHTML('beforeend', `
     <section id="sqlite-query-toolbar" class="sqlite-query-toolbar" aria-label="SQLite query" hidden>

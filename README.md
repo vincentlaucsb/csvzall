@@ -583,7 +583,8 @@ release runner.
 | Library | Author / maintainer | Role | How it's sourced |
 |---|---|---|---|
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) v0.18.5 | [Yuji Hirose](https://github.com/yhirose) and contributors | Embedded local HTTP server for the `view` command | Vendored single header under `vendor/httplib` |
-| [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) v32.3.9 | [AG Grid Ltd.](https://www.ag-grid.com/) | Interactive browser table for the `view` command | Vendored browser assets under `vendor/ag-grid`, embedded into csvzall at build time |
+| [esbuild](https://esbuild.github.io/) 0.25.12 | Evan Wallace and contributors | Bundles native viewer JavaScript at build time | CMake downloads a checksum-pinned host binary on Windows, macOS and Linux x64/arm64, or accepts `CSVZALL_ESBUILD_EXECUTABLE` |
+| [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) v32.3.9 | [AG Grid Ltd.](https://www.ag-grid.com/) | Interactive browser table for the `view` command | The npm package's `dist/ag-grid-community.min.noStyle.js`, `styles/ag-grid.css`, and `styles/ag-theme-alpine.css` are vendored under `vendor/ag-grid` and embedded at build time |
 | [Popright](https://github.com/vincentlaucsb/popright) v0.1.2 | [Vincent La](https://github.com/vincentlaucsb) | Context menu and dropdown menu primitives for the native `view` command and csvzall Browser web app | Vendored npm package under `vendor/popright`, embedded into csvzall at build time and linked into the browser editor Vite app via a local file dependency |
 | [Tabler Icons](https://github.com/tabler/tabler-icons) | [Paweł Kuna](https://github.com/codecalm) and contributors | Viewer toolbar and context menu icons | Selected inline SVG paths in `src/viewer/viewer.js` |
 

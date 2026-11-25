@@ -5,7 +5,9 @@ export function createNativeAdapter({
 } = {}) {
   const headers = { 'X-Session-Token': token };
   let current;
+  let firstPage;
   async function json(path, body, params = {}) {
+    if (body !== undefined) firstPage = undefined;
     if (!token) throw new Error('Missing session token. Open the viewer from csvzall.');
     const url = new URL(path, windowRef.location.origin);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
@@ -28,11 +30,24 @@ export function createNativeAdapter({
   };
   return {
     capabilities: { localFiles: false, columnOrder: true },
+    prefetchFirstPage(limit) {
+      // A failed speculative read can be retried when the grid actually asks for rows.
+      const result = json('/api/rows', undefined, { offset: 0, limit }).catch(() => undefined);
+      firstPage = { limit, result };
+    },
     fetchJson: (path, params) => json(path, undefined, params),
     postJson: (path, body = {}) => json(path, body),
     async request(type, payload = {}) {
       if (type === 'init') return schema();
-      if (type === 'readRows') return json('/api/rows', undefined, payload);
+      if (type === 'readRows') {
+        const page = firstPage;
+        firstPage = undefined;
+        if (page && payload.offset === 0 && payload.limit === page.limit && Object.keys(payload).length === 2) {
+          const result = await page.result;
+          if (result !== undefined) return result;
+        }
+        return json('/api/rows', undefined, payload);
+      }
       if (!operations[type]) throw new Error(`Unsupported native operation: ${type}`);
       const body = type === 'editCell'
         ? { row: payload.rowIndex, column: payload.column, value: payload.value } : payload;

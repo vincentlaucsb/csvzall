@@ -5,7 +5,7 @@ export const chartsFeature = {
  id: 'charts',
  mount(shell) {
   const doc = shell.gridElement.ownerDocument;
-  const removeStyle = mountFeatureStyle(doc, new URL('./charts.css', import.meta.url));
+  const removeStyle = mountFeatureStyle(doc, new URL('/assets/modules/features/charts.css', doc.baseURI));
   doc.getElementById('viewer-tools').insertAdjacentHTML('beforeend', '<button id="add-chart" type="button">Charts</button>');
   doc.body.insertAdjacentHTML('beforeend', `
   <dialog id="chart-dirty-dialog" class="csvzall-dialog">

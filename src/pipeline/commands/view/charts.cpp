@@ -450,8 +450,38 @@ std::size_t RenderRunOnSaveChartsForCurrentCsv(const CsvViewData& data,
 
 namespace {
 
-// The viewer chart form has no sql field for heatmap/bar/line charts, so a save
-// keeps the sql an existing chart of the same id and type already has.
+// Preserve presentation metadata for columns retained by the form.
+void PreserveValueMetadata(common::ChartSpec& spec,
+                           const std::vector<common::ChartSpec>& existing_charts, const Json& body) {
+  for (const auto& existing : existing_charts) {
+    if (existing.id != spec.id || existing.type != spec.type) continue;
+    auto retain = [](auto& values, auto& scalar, const auto& previous) {
+      if (values.empty() && !scalar.empty()) {
+        const auto match = std::find_if(previous.begin(), previous.end(), [&](const auto& old) { return old.column == scalar; });
+        if (match != previous.end()) { values.push_back(*match); scalar.clear(); }
+      }
+      for (auto& value : values) {
+        const auto match = std::find_if(previous.begin(), previous.end(), [&](const auto& old) {
+          return old.column == value.column;
+        });
+        if (match != previous.end()) value = *match;
+      }
+    };
+    if (spec.type == "heatmap") retain(spec.heatmap.values, spec.heatmap.value_column, existing.heatmap.values);
+    else if (spec.type == "bar") {
+      retain(spec.bar.values, spec.bar.value_column, existing.bar.values);
+      if (!body.contains("xLabel")) spec.bar.x_label = existing.bar.x_label;
+      if (!body.contains("yLabel")) spec.bar.y_label = existing.bar.y_label;
+    } else if (spec.type == "line") {
+      retain(spec.line.values, spec.line.y_column, existing.line.values);
+      if (!body.contains("xLabel")) spec.line.x_label = existing.line.x_label;
+      if (!body.contains("yLabel")) spec.line.y_label = existing.line.y_label;
+    }
+    return;
+  }
+}
+
+// Older clients omit sql; an explicit empty field clears the transform.
 void PreserveConfigOnlySql(common::ChartSpec& spec,
                            const std::vector<common::ChartSpec>& existing_charts) {
   for (const auto& existing : existing_charts) {
@@ -570,7 +600,9 @@ static common::ChartSpec ChartSpecForBody(const CsvViewData& data, std::string_v
   } else {
     throw std::runtime_error("unknown chart type: " + type);
   }
-  PreserveConfigOnlySql(spec, charts);
+  const auto fields = Json::parse(body);
+  PreserveValueMetadata(spec, charts, fields);
+  if (!fields.contains("sql")) PreserveConfigOnlySql(spec, charts);
   return spec;
 }
 

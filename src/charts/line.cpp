@@ -1,14 +1,53 @@
 #include "csv_chart_common.hpp"
+#include "line_time.hpp"
 
 #include <svgplot/svgplot.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <optional>
 #include <stdexcept>
 #include <utility>
 
 namespace csvzall::charts {
+namespace {
+
+class LineXAxis {
+public:
+  double parse(csv::CSVField field, const std::string& column) {
+    const auto date = ParseLineDate(field.get<std::string>());
+    if (dates_ && *dates_ != date.has_value()) {
+      throw std::runtime_error("line x must contain only numbers or only ISO dates/timestamps in column: " + column);
+    }
+    dates_ = date.has_value();
+    if (!date) return ParseNumericField(field, column, "line x");
+    first_day_ = first_day_ ? std::min(*first_day_, std::floor(*date)) : std::floor(*date);
+    return *date;
+  }
+
+  std::string render(std::vector<svgplot::Series>& series, const LineSpec& spec) const {
+    svgplot::ChartOptions options;
+    options.title = spec.title;
+    options.x_label = spec.x_label;
+    options.y_label = spec.y_label;
+    if (first_day_) {
+      for (auto& item : series) {
+        for (auto& point : item.points) point.x -= *first_day_;
+      }
+      const auto origin = std::chrono::sys_days{std::chrono::days{static_cast<int>(*first_day_)}};
+      options.x_label = (spec.x_label.empty() ? spec.x_column : spec.x_label) +
+          " (days since " + pipeline::common::FormatIsoDate(origin) + " UTC)";
+    }
+    return svgplot::line_chart(series, options).str();
+  }
+
+private:
+  std::optional<bool> dates_;
+  std::optional<double> first_day_;
+};
+
+}  // namespace
 
 CsvChartResult RenderLineCsv(csv::CSVReader& reader,
                              const std::vector<std::string>& headers,
@@ -34,6 +73,7 @@ CsvChartResult RenderLineCsv(csv::CSVReader& reader,
   }
 
   CsvChartResult result;
+  LineXAxis x_axis;
   if (value_specs.size() > 1) {
     std::vector<std::size_t> value_indices;
     value_indices.reserve(value_specs.size());
@@ -48,7 +88,7 @@ CsvChartResult RenderLineCsv(csv::CSVReader& reader,
 
     std::vector<std::vector<svgplot::Point>> points_by_value(value_specs.size());
     for (auto& row : reader) {
-      const auto x = ParseNumericField(row[*x_index], spec.x_column, "line x");
+      const auto x = x_axis.parse(row[*x_index], spec.x_column);
       for (std::size_t i = 0; i < value_specs.size(); ++i) {
         points_by_value[i].push_back({
             x,
@@ -71,11 +111,7 @@ CsvChartResult RenderLineCsv(csv::CSVReader& reader,
           ValueColor(value_specs[i], i, spec.color_scheme)});
     }
 
-    svgplot::ChartOptions chart_options;
-    chart_options.title = spec.title;
-    chart_options.x_label = spec.x_label;
-    chart_options.y_label = spec.y_label;
-    result.svg = svgplot::line_chart(series, chart_options).str();
+    result.svg = x_axis.render(series, spec);
     return result;
   }
 
@@ -95,7 +131,7 @@ CsvChartResult RenderLineCsv(csv::CSVReader& reader,
       order.push_back(series);
     }
     points_by_series[series].push_back({
-        ParseNumericField(row[*x_index], spec.x_column, "line x"),
+        x_axis.parse(row[*x_index], spec.x_column),
         ParseNumericField(row[*y_index], value_specs.front().column, "line y")});
     ++result.rows_processed;
     AccumulateRowBytes(row, result);
@@ -111,11 +147,7 @@ CsvChartResult RenderLineCsv(csv::CSVReader& reader,
     series.push_back({order[i], std::move(points), svgplot::default_series_color(i)});
   }
 
-  svgplot::ChartOptions chart_options;
-  chart_options.title = spec.title;
-  chart_options.x_label = spec.x_label;
-  chart_options.y_label = spec.y_label;
-  result.svg = svgplot::line_chart(series, chart_options).str();
+  result.svg = x_axis.render(series, spec);
   return result;
 }
 

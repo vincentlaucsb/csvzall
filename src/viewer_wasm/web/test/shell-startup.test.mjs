@@ -52,3 +52,63 @@ test('startup errors remain visible without opening or dismissing an operation d
   assert.deepEqual(f.dialogs, []);
   assert.equal(f.context.fileInput.disabled, true);
 });
+
+function countFixture(rowCount) {
+  const frames = [];
+  const node = { textContent: '' };
+  const context = {
+    recordCountNode: node, resultMode: false, viewGeneration: 0, rowCount: 0, activeColumns: [],
+    document: { getElementById: () => ({}) }, gridApi: { applyColumnState() {} },
+    pendingCellEdits: new Set(), requestAnimationFrame: fn => frames.push(fn),
+    setDatasource(value) { context.datasource = value; },
+    request: async () => ({ totalRows: rowCount, offset: 0, rows: [] }),
+    rowsToObjects: () => [], setGridColumnDefs() {}, setDirty() {}, setStatus() {}, hostBridge: null,
+  };
+  const functions = factory.body.body.filter(n => n.type === 'FunctionDeclaration' &&
+    ['loadView', 'applySchema', 'updateRecordCount'].includes(n.id.name));
+  runInNewContext(functions.map(n => source.slice(n.start, n.end)).join('\n'), context);
+  const schema = { columns: ['id'], rowCount };
+  context.loadView(schema, 'sample.csv', { deferInitialCount: true });
+  const read = () => context.datasource.getRows({
+    startRow: 0, endRow: 500, sortModel: [], successCallback() {}, failCallback() {},
+  });
+  return { context, node, frames, read };
+}
+
+test('initial table count waits through a paint opportunity, including toolbar restoration', async () => {
+  const { context, node, frames, read } = countFixture(1000);
+  context.updateRecordCount(); // SQL toolbar restores the table as it mounts.
+  assert.equal(node.textContent, '');
+  await read();
+  frames.shift()();
+  assert.equal(node.textContent, '');
+  frames.shift()();
+  assert.equal(node.textContent, `${(1000).toLocaleString()} rows, 1 columns`);
+  context.applySchema({ columns: ['id'], rowCount: 999 });
+  assert.equal(node.textContent, '999 rows, 1 columns');
+});
+
+test('empty tables show their count immediately and an old frame cannot change a replacement view', async () => {
+  assert.equal(countFixture(0).node.textContent, '0 rows, 1 columns');
+  const { context, node, frames, read } = countFixture(2);
+  await read();
+  context.loadView({ columns: ['new'], rowCount: 3 }, 'other.csv', { deferInitialCount: true });
+  frames.shift()();
+  frames.shift()();
+  assert.equal(node.textContent, '');
+});
+
+test('a query opened during startup keeps its result count and a failed first page shows the known CSV count', async () => {
+  const sql = countFixture(5);
+  await sql.read();
+  sql.context.resultMode = true;
+  sql.node.textContent = '1 SQLite result row';
+  sql.frames.shift()();
+  sql.frames.shift()();
+  assert.equal(sql.node.textContent, '1 SQLite result row');
+
+  const failed = countFixture(5);
+  failed.context.request = async () => { throw new Error('Row load failed'); };
+  await failed.read();
+  assert.equal(failed.node.textContent, '5 rows, 1 columns');
+});

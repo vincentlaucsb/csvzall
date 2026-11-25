@@ -8,14 +8,7 @@ import { chartsFeature } from './modules/features/charts.mjs';
 
 async function loadMenuFactories() {
   try {
-    const response = await fetch('/assets/popright/index.js', {
-      cache: 'force-cache',
-      credentials: 'same-origin',
-    });
-    if (!response.ok) {
-      return { createContextMenu: createFallbackContextMenu, createDropdownMenu: null };
-    }
-    const popright = await import('/assets/popright/index.js');
+    const popright = await import('popright');
     return {
       createContextMenu: popright.createContextMenu,
       createDropdownMenu: popright.createDropdownMenu ?? null,

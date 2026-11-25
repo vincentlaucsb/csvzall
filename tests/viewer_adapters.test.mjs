@@ -32,6 +32,63 @@ test('native adapter preserves authentication, source row identity and structura
   await assert.rejects(adapter.request('unsupported'), /Unsupported native operation/);
 });
 
+function prefetchFixture(onRows) {
+  const queries = [];
+  const adapter = createNativeAdapter({
+    token: 'test-token',
+    windowRef: { location: { origin: 'http://127.0.0.1' } },
+    async fetchRef(url) {
+      let value = { columns: [], totalRows: 0 };
+      if (url.pathname === '/api/rows') {
+        queries.push(Object.fromEntries(url.searchParams));
+        value = await onRows(queries.length);
+      }
+      return { ok: true, text: async () => JSON.stringify(value) };
+    },
+  });
+  return { adapter, queries };
+}
+
+test('native grid consumes the in-flight first page once across schema initialization', async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const { adapter, queries } = prefetchFixture(count => count === 1 ? pending : { rows: [['updated']] });
+  const page = { offset: 0, limit: 500 };
+  adapter.prefetchFirstPage(500);
+  assert.deepEqual(queries, [{ offset: '0', limit: '500' }]);
+  await adapter.request('init');
+  const read = adapter.request('readRows', page);
+  finish({ rows: [['original']] });
+  assert.deepEqual(await read, { rows: [['original']] });
+  assert.deepEqual(await adapter.request('readRows', page), { rows: [['updated']] });
+  assert.equal(queries.length, 2);
+});
+
+test('native grid discards the prefetched response on a different block, sort or edit', async () => {
+  const page = { offset: 0, limit: 500 };
+  for (const payload of [{ ...page, offset: 500 }, { ...page, limit: 10 }, { ...page, sortColumn: 'id', sortDirection: 'desc' }]) {
+    const { adapter, queries } = prefetchFixture(count => ({ count }));
+    adapter.prefetchFirstPage(500);
+    assert.deepEqual(await adapter.request('readRows', payload), { count: 2 });
+    assert.deepEqual(queries[1], Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, String(value)])));
+    assert.deepEqual(await adapter.request('readRows', page), { count: 3 });
+  }
+  const { adapter } = prefetchFixture(count => ({ count }));
+  adapter.prefetchFirstPage(500);
+  await adapter.request('editCell', { rowIndex: 0, column: 'a', value: 'updated' });
+  assert.deepEqual(await adapter.request('readRows', page), { count: 2 });
+});
+
+test('native grid retries a failed prefetch through its normal row request', async () => {
+  const { adapter } = prefetchFixture(count => {
+    if (count === 1) throw new Error('connection closed');
+    return { rows: [['available']] };
+  });
+  adapter.prefetchFirstPage(500);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(await adapter.request('readRows', { offset: 0, limit: 500 }), { rows: [['available']] });
+});
+
 test('native adapter refuses missing tokens and surfaces server persistence failures', async () => {
   const windowRef = { location: { origin: 'http://127.0.0.1:1234', search: '' } };
   const missing = createNativeAdapter({ windowRef, fetchRef: () => assert.fail('must not make an unauthenticated request') });
