@@ -1,5 +1,5 @@
 // The CSV shell inserts its optional controls around the same document actions as JSON.
-export function createEditorToolbar(doc, decorate) {
+export function createEditorToolbar(doc, decorate, filenameTag = 'h1') {
   const element = (tag, className) => {
     const node = doc.createElement(tag);
     node.className = className;
@@ -7,7 +7,7 @@ export function createEditorToolbar(doc, decorate) {
   };
   const header = element('header', 'topbar');
   const meta = element('div', 'file-meta');
-  const filename = doc.createElement('h1');
+  const filename = doc.createElement(filenameTag);
   filename.textContent = 'Loading…';
   meta.append(filename);
   const actions = element('div', 'toolbar-actions');

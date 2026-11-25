@@ -18,7 +18,7 @@ export async function openJsonEditor(win, createEditor = createJsonEditor) {
     if (!response.ok) throw new Error(await response.text() || response.statusText);
     return response.json();
   }
-  let saved, editor, saving = false;
+  let saved, editor, pendingSaves = 0;
   let refreshPending = false;
   const state = { dirty: false };
   win.addEventListener('focus', scheduleRefresh);
@@ -41,24 +41,27 @@ export async function openJsonEditor(win, createEditor = createJsonEditor) {
     if (state.dirty !== dirty) postDirtyState(dirty);
     state.dirty = dirty;
     status.textContent = dirty ? 'Unsaved changes' : '';
-    button.disabled = !dirty || Boolean(saving) || !source.editable;
+    button.disabled = !dirty || pendingSaves > 0 || !source.editable;
     reset.disabled = button.disabled;
     if (!dirty && refreshPending) scheduleRefresh();
   };
-  const save = () => enqueue(async () => {
-    const doc = editor.state.doc;
-    if (doc.eq(saved)) return true;
+  const save = () => {
+    pendingSaves++;
     button.disabled = true;
     reset.disabled = true;
-    saving = true;
-    try {
+    return enqueue(async () => {
+      const doc = editor.state.doc;
+      if (doc.eq(saved)) return true;
       const result = await request({ method: 'POST', headers: { 'If-Match': revision, 'Content-Type': 'text/plain;charset=utf-8' },
         body: format.serialize(doc.toString()) });
       revision = result.revision;
       saved = doc;
-    } finally { saving = false; update(editor.state.doc); }
-    return true;
-  });
+      return true;
+    }).finally(() => {
+      pendingSaves--;
+      update(editor.state.doc);
+    });
+  };
   const saveClick = () => { void save().catch(reportError); };
   const mount = () => createEditor(document.querySelector('#editor'), format, source.editable, update, saveClick);
   function scheduleRefresh() {

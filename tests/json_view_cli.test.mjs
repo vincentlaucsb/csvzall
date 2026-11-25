@@ -42,6 +42,7 @@ test('a host change during the initial JSON read refreshes the mounted document'
 
 test('Reset restores the last successful save, then follows an external edit without writing', async () => {
   let disk = '1', writes = 0;
+  let pendingRead;
   const nodes = new Map();
   const document = { querySelector(selector) {
     if (!nodes.has(selector)) nodes.set(selector, new EventTarget());
@@ -51,6 +52,7 @@ test('Reset restores the last successful save, then follows an external edit wit
     document, parent: {}, location: { search: '' },
     fetch: async (_url, options) => {
       if (options.method === 'POST') { disk = options.body; writes++; }
+      else if (pendingRead) await pendingRead;
       return { ok: true, json: () => ({ text: disk, revision: disk, name: 'example.json', editable: true }) };
     },
   });
@@ -65,9 +67,16 @@ test('Reset restores the last successful save, then follows an external edit wit
   const edit = value => editor.dispatch({ changes: { insert: text(value) } });
   const settle = () => new Promise(resolve => setImmediate(resolve));
   assert.ok(reset.disabled && save.disabled);
+  let releaseRead;
+  pendingRead = new Promise(resolve => { releaseRead = resolve; });
+  win.dispatchEvent(new Event('focus'));
+  await settle();
   edit('2');
   assert.ok(!reset.disabled && !save.disabled);
   save.dispatchEvent(new Event('click'));
+  assert.ok(reset.disabled && save.disabled, 'save queued behind a refresh');
+  reset.dispatchEvent(new Event('click'));
+  releaseRead();
   await settle();
   edit('3');
   reset.dispatchEvent(new Event('click'));
