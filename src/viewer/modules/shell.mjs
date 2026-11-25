@@ -32,6 +32,9 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const autoSaveSwitch = document.getElementById('autosave');
   const autoSaveValue = document.getElementById('autosave-value');
   const reloadExternalButton = document.getElementById('reload-external');
+  const externalReloadDialog = document.getElementById('external-reload-dialog');
+  const externalReloadCancel = document.getElementById('external-reload-cancel');
+  const externalReloadConfirm = document.getElementById('external-reload-confirm');
   const recoveryButton = document.getElementById('download-recovery');
   const conflictNotice = document.getElementById('csv-conflict');
   const resetButton = document.getElementById('reset');
@@ -1077,6 +1080,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
 
   function showExternalConflict() {
     externalConflict = true;
+    if (!dirty && gridApi.getEditingCells().length) setDirty(true);
     reloadExternalButton.hidden = false;
     recoveryButton.hidden = false;
     conflictNotice.textContent = 'The CSV changed on disk. Save a copy of your edits before reloading if you want to keep them.';
@@ -1097,6 +1101,10 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     scheduleExternal();
   }
 
+  function hasLocalChanges() {
+    return dirty || gridApi.getEditingCells().length > 0 || pendingCellEdits.size > 0 || changingStructure;
+  }
+
   async function refreshExternal({ discard = false } = {}) {
     const change = pendingExternal;
     if (!change || !viewOpen || saving || refreshingExternal || readingCsv) return;
@@ -1106,7 +1114,6 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       return;
     }
     if (discard && change.buffer === undefined && !backend.reload) return;
-    const hasLocalChanges = () => dirty || gridApi.getEditingCells().length || pendingCellEdits.size || changingStructure;
     if (!discard && hasLocalChanges()) {
       const changed = !backend.reload || await backend.externalChanged().catch(() => true);
       if (pendingExternal !== change) return;
@@ -1122,8 +1129,6 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       scheduleExternal();
       return;
     }
-    if (discard && (dirty || gridApi.getEditingCells().length) &&
-        !window.confirm('Discard your unsaved edits and reload the CSV from disk?')) return;
     refreshingExternal = true;
     const wasInert = document.body.inert;
     document.body.inert = true;
@@ -1186,7 +1191,18 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       (error || 'Could not save a copy of your edits.');
   }
 
-  reloadExternalButton.addEventListener('click', () => { void refreshExternal({ discard: true }); });
+  function requestExternalReload() {
+    if (!pendingExternal || saving || refreshingExternal || externalReloadDialog.open) return;
+    if (hasLocalChanges()) showDialog(externalReloadDialog, externalReloadCancel);
+    else void refreshExternal({ discard: true });
+  }
+
+  reloadExternalButton.addEventListener('click', requestExternalReload);
+  externalReloadCancel.addEventListener('click', () => externalReloadDialog.close());
+  externalReloadConfirm.addEventListener('click', () => {
+    externalReloadDialog.close();
+    void refreshExternal({ discard: true });
+  });
 
   let saving = false;
   async function saveCurrentChanges({ automatic = false } = {}) {
@@ -1263,7 +1279,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
 
   async function resetCurrentChanges() {
     if (!viewOpen || saving || refreshingExternal) return;
-    if (pendingExternal || externalConflict) { await refreshExternal({ discard: true }); return; }
+    if (pendingExternal || externalConflict) { requestExternalReload(); return; }
     await finishEditing();
     await csvMutations.settle();
     showLoading('Resetting CSV', `${activeName} is being restored from the original bytes.`);

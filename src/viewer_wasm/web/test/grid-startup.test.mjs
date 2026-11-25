@@ -13,7 +13,7 @@ function mount(t, initialSchema, request, backendOverrides = {}) {
       ownerDocument: document, textContent: '', dataset: {}, content: { querySelector: selector => document.querySelector(selector) },
       classList: { add() {} }, append() {}, prepend() {}, before() {}, replaceWith() {}, replaceChildren() {}, setAttribute() {},
       toggleAttribute() {}, querySelectorAll: () => [],
-      showModal() { this.open = true; }, close() { this.open = false; },
+      showModal() { this.open = true; }, close() { this.open = false; }, focus() {},
     });
   }
   document.createElement = document.createElementNS = element;
@@ -195,6 +195,41 @@ test('a native external change alerts during editing and preserves edits in a ho
   f.shell.recoveryResult({ success: true, path: 'sample.edits.json' });
   assert.match(notice.textContent, /sample\.edits\.json/);
   assert.equal(f.shell.dirty, true);
+});
+
+test('external reload prompts in the viewer and discards edits only after confirmation', async t => {
+  const schema = { file: 'sample.csv', columns: ['name'], rowCount: 1 };
+  const external = [];
+  const f = mount(t, schema, async (type, payload) => {
+    assert.equal(type, 'open');
+    external.push(new TextDecoder().decode(payload.buffer));
+    return schema;
+  });
+  const dirtyStates = [];
+  f.shell.connectHost({ isHostMode: () => true, emitDirtyState: dirty => dirtyStates.push(dirty) });
+  await f.shell.start();
+  f.setEditing(true);
+  const send = (revision, text) => f.shell.externalChange({ revision, buffer: new TextEncoder().encode(text).buffer });
+  const button = id => f.document.getElementById(id);
+  send(2, 'first');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(dirtyStates, [false, true]);
+  button('reload-external').dispatchEvent(new Event('click'));
+  assert.equal(button('external-reload-dialog').open, true);
+  button('external-reload-cancel').dispatchEvent(new Event('click'));
+  assert.equal(button('external-reload-dialog').open, false);
+  assert.equal(f.finishCount, 0);
+  assert.deepEqual(external, []);
+  button('reload-external').dispatchEvent(new Event('click'));
+  send(3, 'second');
+  send(4, 'latest');
+  button('external-reload-confirm').dispatchEvent(new Event('click'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(button('external-reload-dialog').open, false);
+  assert.equal(f.finishCount, 1);
+  assert.deepEqual(external, ['latest']);
+  assert.deepEqual(dirtyStates, [false, true, false]);
+  assert.match(button('status').textContent, /^Loaded new changes /);
 });
 
 test('auto-save waits for a committed edit and leaves the next editor open until a manual save', async t => {

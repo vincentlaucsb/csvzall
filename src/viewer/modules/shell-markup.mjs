@@ -40,6 +40,17 @@ export const shellMarkup = `
       <span id="record-count"></span>
     </footer>
   </div>
+  <dialog id="external-reload-dialog" class="csvzall-dialog"
+      aria-labelledby="external-reload-title" aria-describedby="external-reload-description">
+    <div class="dialog-form">
+      <h2 id="external-reload-title">Discard edits and reload CSV?</h2>
+      <p id="external-reload-description">Reloading opens the latest file from disk and discards your unsaved edits.</p>
+      <div class="dialog-actions">
+        <button id="external-reload-cancel" type="button" autofocus>Cancel</button>
+        <button id="external-reload-confirm" type="button">Discard edits and reload</button>
+      </div>
+    </div>
+  </dialog>
   <dialog id="csv-options-dialog" class="csvzall-dialog" aria-labelledby="csv-options-title">
     <form id="csv-options-form" class="dialog-form">
       <h2 id="csv-options-title">CSV options</h2>
