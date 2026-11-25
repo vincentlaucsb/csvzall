@@ -230,8 +230,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     setStatus(message, 'Unsaved changes.');
   }
 
-  function downloadBytes(name, bytes) {
-    const blob = new Blob([bytes], { type: 'text/csv;charset=utf-8' });
+  function downloadBytes(name, bytes, type = 'text/csv;charset=utf-8') {
+    const blob = new Blob([bytes], { type });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;

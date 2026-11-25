@@ -455,7 +455,7 @@ ThroughputStats FinishStats(const csvzall::pipeline::RunStats& ps,
 }  // namespace
 
 int main(int argc, char** argv) {
-  argparse::ArgumentParser program("csvzall", "0.10.0");
+  argparse::ArgumentParser program("csvzall", "1.0.0");
 #ifndef CSVZALL_OBSIDIAN_BUILD
   program.add_description("csvzall: high-performance CSV ETL and reporting CLI");
   program.add_epilog(R"(Intent groups:

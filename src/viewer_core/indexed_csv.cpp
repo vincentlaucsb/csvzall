@@ -896,9 +896,7 @@ void CsvIndexedFile::reload() {
     if (!has_headers_ && first_record) first_width = row.size();
     first_record = false;
     width = std::max(width, row.size());
-    const auto source_row = static_cast<std::uint64_t>(index_.size());
     index_.push_back({static_cast<std::uint64_t>(row.byte_offset())});
-    rows_.push_back({source_row, {}});
   }
   if (has_headers_ && width > first_width) {
     // Re-read the original first record as data, retaining its byte offset and
@@ -914,6 +912,10 @@ void CsvIndexedFile::reload() {
       : "";
   if (!has_headers_) headers_ = SyntheticHeaders(width);
   if (headers_.empty()) throw std::runtime_error("input appears to have no header row");
+  rows_.reserve(index_.size());
+  for (std::uint64_t source_row = 0; source_row < index_.size(); ++source_row) {
+    rows_.push_back({source_row, {}});
+  }
   columns_.clear();
   for (std::size_t i = 0; i < headers_.size(); ++i) columns_.push_back({headers_[i], i, ""});
   modified_ = false;

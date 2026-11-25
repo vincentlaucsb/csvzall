@@ -107,6 +107,12 @@ This file is the canonical AI reference for this repository.
 - Before manually running `cmake -S ... -B ...`, inspect the target build directory's existing `CMakeCache.txt` or use a fresh build directory to avoid generator mismatches.
 - On Windows with MSVC + Ninja, run configure/build from a Visual Studio developer environment, preferably through the Visual Studio-bundled CMake. Bare sandboxed shells can hang during CMake's compiler/linker probe.
 
+## CSV viewer responsiveness
+
+- Request the initial viewport as soon as its range is known. Apply scroll debouncing only while the viewport is changing. Reuse an in-flight first page when its range, sort, and data are still current.
+- Keep work before the first populated frame limited to what the viewer needs to render the initial viewport correctly. Defer independent toolbar work until those rows have had a chance to paint. Measure the startup cost of any new full-file pass, per-row allocation, or copy with a representative large CSV.
+- When changing paging or scheduling, check both opening and rapid scrolling. Measure open to first populated frame, look for long frame gaps during scrolling, and time the final scroll event to populated cells in the target viewport. In regression tests, verify the first fetch bypasses the scroll delay and obsolete responses cannot replace the current rows.
+
 ## Viewer development mode
 
 - The production `view` command serves embedded first-party viewer assets plus embedded AG Grid and Popright assets.
