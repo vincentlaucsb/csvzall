@@ -20,6 +20,15 @@ export const shellMarkup = `
         <button id="delete-menu" type="button">Delete</button>
         <button id="reset" type="button" disabled>Reset</button>
         <button id="save" type="button" disabled>Save</button>
+        <label id="autosave-control" class="autosave-control" hidden>
+          <span>AutoSave</span>
+          <span class="autosave-switch">
+            <input type="checkbox" role="switch" id="autosave" />
+            <span id="autosave-value" aria-hidden="true">Off</span>
+          </span>
+        </label>
+        <button id="reload-external" type="button" hidden>Reload CSV</button>
+        <button id="download-recovery" type="button" hidden>Save edits copy</button>
       </div>
       <div class="overflow-toolbar"><button id="more-actions" type="button" aria-label="More actions" aria-haspopup="menu" hidden>…</button></div>
       </div>
@@ -30,6 +39,7 @@ export const shellMarkup = `
     </main>
     <footer class="footer">
       <span id="status">Connecting…</span>
+      <span id="csv-conflict" role="alert" hidden></span>
       <span id="record-count"></span>
     </footer>
   </div>

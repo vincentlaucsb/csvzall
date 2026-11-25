@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include <csv.hpp>
 
 #include <cstddef>
@@ -80,7 +82,10 @@ class CsvIndexedFile {
   void insert_column(std::uint64_t column, const std::string& name, const std::string& value);
   void rename_column(const std::string& column, const std::string& name);
   void delete_column(const std::string& column);
+  void keep_original_path();
   bool recover_renamed_source();
+  [[nodiscard]] bool source_changed() const;
+  bool reload_if_changed();
   void reset();
   void save(const std::vector<std::string>& columns = {});
   void write_save_file(const std::filesystem::path& path, const std::vector<std::string>& columns = {}) const;
@@ -123,12 +128,14 @@ class CsvIndexedFile {
   mutable std::optional<SortIndex> sort_index_;
   std::uint64_t file_size_ = 0;
   std::filesystem::file_time_type source_mtime_{};
+  std::array<std::uint64_t, 4> source_identity_{};
   csv::CSVFormat format_;
   csv::CSVFormat output_format_;
   bool has_headers_ = true;
   std::string headers_disabled_reason_;
   bool has_bom_ = false;
   bool modified_ = false;
+  bool allow_rename_recovery_ = true;
   std::string newline_ = "\n";
 };
 
@@ -172,7 +179,10 @@ class CsvViewData {
   void insert_column(std::uint64_t column, const std::string& name, const std::string& value);
   void rename_column(const std::string& column, const std::string& name);
   void delete_column(const std::string& column);
+  void keep_original_path();
   bool recover_renamed_source();
+  [[nodiscard]] bool source_changed() const;
+  bool reload_if_changed();
   void reset();
   void save(const std::vector<std::string>& columns = {});
   void write_save_file(const std::string& path) const;

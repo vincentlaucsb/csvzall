@@ -15,7 +15,11 @@ export function createNativeAdapter({
       method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     const text = await response.text();
-    if (!response.ok) throw new Error(text.trim() || `HTTP ${response.status}`);
+    if (!response.ok) {
+      const error = new Error(text.trim() || `HTTP ${response.status}`);
+      error.conflict = response.status === 409 && text.startsWith('source file changed externally');
+      throw error;
+    }
     return text ? JSON.parse(text) : {};
   }
   async function schema() {
@@ -57,6 +61,13 @@ export function createNativeAdapter({
         return { ...current, columns: [...current.columns] };
       }
       return ['editCell', 'swapRows'].includes(type) ? result : schema();
+    },
+    async externalChanged() {
+      return (await json('/api/reload', { checkOnly: true })).changed;
+    },
+    async reload() {
+      const result = await json('/api/reload', {});
+      return result.changed ? schema() : null;
     },
     async save({ columns }) {
       const reordered = !columns.every((column, index) => current.columns[index] === column);

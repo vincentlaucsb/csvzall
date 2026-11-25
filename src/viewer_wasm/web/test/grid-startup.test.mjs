@@ -5,7 +5,7 @@ import { entryRow, extendEntryRowBlock, sourceRowId } from '../../../viewer/modu
 
 // Let the real shell mount its toolbar and menus. The grid spy below records the
 // API calls that can rebuild headers, reset column state or replace a datasource.
-function mount(t, initialSchema, request) {
+function mount(t, initialSchema, request, backendOverrides = {}) {
   const document = new EventTarget();
   const nodes = new Map();
   function element() {
@@ -13,6 +13,7 @@ function mount(t, initialSchema, request) {
       ownerDocument: document, textContent: '', dataset: {}, content: { cloneNode() {} },
       classList: { add() {} }, append() {}, replaceChildren() {}, setAttribute() {},
       toggleAttribute() {}, querySelectorAll: () => [],
+      showModal() { this.open = true; }, close() { this.open = false; },
     });
   }
   document.createElement = document.createElementNS = element;
@@ -25,7 +26,7 @@ function mount(t, initialSchema, request) {
   const window = Object.assign(new EventTarget(), {
     innerWidth: 1024, innerHeight: 768,
     MutationObserver: class { observe() {} disconnect() {} },
-    requestAnimationFrame: () => 1, cancelAnimationFrame() {}, clearTimeout,
+    requestAnimationFrame: () => 1, cancelAnimationFrame() {}, clearTimeout, setTimeout,
   });
   const frames = [];
   Object.assign(globalThis, { document, window, requestAnimationFrame: fn => frames.push(fn) });
@@ -37,20 +38,36 @@ function mount(t, initialSchema, request) {
   });
 
   const created = [], assigned = [], columnStates = [];
+  let gridOptions;
+  let editing = false;
+  let finishCount = 0;
+  const column = { getColId: () => initialSchema.columns[0] };
   const grid = {
     getColumnState: () => [], applyColumnState: state => columnStates.push(state),
     setGridOption: (key, value) => assigned.push([key, value]),
     getCacheBlockState: () => ({ 1: {} }), destroy() {},
+    getAllDisplayedColumns: () => [column],
+    getEditingCells: () => editing ? [{}] : [],
+    getFocusedCell: () => null, getFirstDisplayedRowIndex: () => 0,
+    ensureIndexVisible() {},
+    stopEditing() { editing = false; finishCount += 1; },
+    refreshCells() {}, purgeInfiniteCache() {},
   };
   const shell = createViewerShell({
     backend: {
       capabilities: { columnOrder: true },
       request: (type, payload) => type === 'init' ? Promise.resolve(initialSchema) : request(type, payload),
+      ...backendOverrides,
     },
-    createGrid(element, options) { created.push(options.columnDefs.map(c => c.field)); return grid; },
+    createGrid(element, options) { gridOptions = options; created.push(options.columnDefs.map(c => c.field)); return grid; },
     createContextMenu: () => ({ update() {}, destroy() {} }),
   });
-  return { shell, created, columnStates, frames, document,
+  return { shell, created, columnStates, frames, document, window, get finishCount() { return finishCount; },
+    setEditing(next) { editing = next; },
+    edit(value) {
+      const data = { [sourceRowId]: 0 };
+      gridOptions.onCellEditRequest({ data, colDef: { field: column.getColId() }, column, node: { data }, newValue: value });
+    },
     options: key => assigned.filter(([name]) => name === key).map(([, value]) => value) };
 }
 
@@ -143,4 +160,98 @@ test('growing the entry row updates only the terminal block and lets a new block
   node.rowIndex = 499;
   extendEntryRowBlock(api, node, data, 500, 500, ['name']);
   assert.deepEqual(calls, [['update'], ['count', 501, true]]);
+});
+
+test('a native external change alerts during editing and preserves edits in a host recovery copy', async t => {
+  const schema = { file: 'sample.csv', columns: ['name'], rowCount: 1 };
+  const calls = [];
+  const f = mount(t, schema, async type => {
+    calls.push(type);
+    return { edited: true };
+  }, {
+    externalChanged: async () => true,
+    reload: async () => { calls.push('reload'); return schema; },
+  });
+  const recoveries = [];
+  f.shell.connectHost({ isHostMode: () => true, emitDirtyState() {} });
+  f.shell.connectRecovery(edits => recoveries.push(JSON.parse(edits)));
+  await f.shell.start();
+  f.edit('value to keep');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  f.setEditing(true);
+  f.shell.externalChange({});
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const notice = f.document.getElementById('csv-conflict');
+  assert.equal(notice.hidden, false);
+  assert.match(notice.textContent, /changed on disk/);
+  assert.equal(f.finishCount, 0);
+  f.shell.setStatus('Unrelated status');
+  assert.match(notice.textContent, /changed on disk/);
+  assert.deepEqual(calls, ['editCell']);
+  f.document.getElementById('download-recovery').dispatchEvent(new Event('click'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(recoveries, [{ file: 'sample.csv', columnOrder: ['name'],
+    edits: [{ type: 'editCell', rowIndex: 0, column: 'name', value: 'value to keep' }] }]);
+  f.shell.recoveryResult({ success: true, path: 'sample.edits.json' });
+  assert.match(notice.textContent, /sample\.edits\.json/);
+  assert.equal(f.shell.dirty, true);
+});
+
+test('auto-save waits for a committed edit and leaves the next editor open until a manual save', async t => {
+  const schema = { file: 'sample.csv', columns: ['name'], rowCount: 1 };
+  const writes = [];
+  const editValues = [];
+  const f = mount(t, schema, async (_, payload) => {
+    editValues.push(payload.value);
+    return { edited: true };
+  }, {
+    async save() { writes.push(editValues.slice()); return {}; },
+    persist: () => new Promise(resolve => { acknowledge = resolve; }),
+  });
+  let acknowledge;
+  let timer;
+  f.window.setTimeout = (callback, delay) => {
+    if (delay === 800) { timer = callback; return 0; }
+    return setTimeout(callback, delay);
+  };
+  f.shell.connectHost({ isHostMode: () => true, emitDirtyState() {} });
+  await f.shell.start();
+  f.shell.setAutoSave({ visible: true, enabled: true });
+  const toggle = f.document.getElementById('autosave');
+  toggle.checked = false;
+  toggle.dispatchEvent(new Event('change'));
+  f.shell.setAutoSave({ visible: true, enabled: true });
+  assert.equal(toggle.checked, false);
+  f.shell.setAutoSave({ visible: false, enabled: true });
+  assert.equal(f.document.getElementById('autosave-control').hidden, true);
+  f.shell.setAutoSave({ visible: true, enabled: true });
+  assert.equal(toggle.checked, true);
+  f.edit('first');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  f.setEditing(true);
+  timer();
+  assert.equal(f.finishCount, 0);
+  assert.deepEqual(writes, []);
+  f.setEditing(false);
+  timer();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(writes, [['first']]);
+  assert.equal(f.finishCount, 0);
+  assert.equal(f.document.body.inert, undefined);
+  f.setEditing(true);
+  f.edit('second');
+  await Promise.resolve();
+  assert.deepEqual(editValues, ['first']);
+  acknowledge(true);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(editValues, ['first', 'second']);
+  assert.equal(f.shell.dirty, true);
+  assert.equal(f.finishCount, 0);
+  f.shell.setAutoSave({ visible: true, enabled: false });
+  const saved = f.shell.save();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(f.finishCount, 1);
+  acknowledge(true);
+  await saved;
+  assert.equal(f.shell.dirty, false);
 });

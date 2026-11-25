@@ -28,6 +28,12 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const statusNode = document.getElementById('status');
   const recordCountNode = document.getElementById('record-count');
   const saveButton = document.getElementById('save');
+  const autoSaveControl = document.getElementById('autosave-control');
+  const autoSaveSwitch = document.getElementById('autosave');
+  const autoSaveValue = document.getElementById('autosave-value');
+  const reloadExternalButton = document.getElementById('reload-external');
+  const recoveryButton = document.getElementById('download-recovery');
+  const conflictNotice = document.getElementById('csv-conflict');
   const resetButton = document.getElementById('reset');
   const csvOptionsButton = document.getElementById('csv-options');
   const csvOptionsDialog = document.getElementById('csv-options-dialog');
@@ -85,6 +91,17 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   let hostBridge = null;
   let engineReady = false;
   let pendingOpenFile = null;
+  let autoSave = false;
+  let autoSaveOverride;
+  let autoSaveTimer;
+  let externalTimer;
+  let pendingExternal;
+  let externalConflict = false;
+  let refreshingExternal = false;
+  let autoSaveFailed = false;
+  let saveBarrier;
+  let requestRecovery;
+  const recovery = [];
   const saveState = createSaveState();
   const csvMutations = createMutationTracker(() => setDirty(true));
   const mutationTypes = new Set(['editCell', 'insertColumn', 'insertRow', 'deleteRow', 'swapRows', 'deleteColumn', 'renameColumn', 'reset', 'csvOptions']);
@@ -129,9 +146,18 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   function queueMutation(type, payload, generation, notify) {
-    return csvMutations.run(() => {
+    const barrier = saveBarrier;
+    if (hostBridge?.isHostMode() && type !== 'reset') recovery.push({ type, ...payload });
+    return csvMutations.run(async () => {
+      await barrier;
       if (!viewOpen || generation !== viewGeneration) throw new Error('The open CSV changed.');
-      return sendRequest(type, payload, []);
+      if (externalConflict) throw new Error('The CSV changed on disk. Save a copy of your edits or reload.');
+      try {
+        return await sendRequest(type, payload, []);
+      } catch (error) {
+        if (error?.conflict) externalChange({});
+        throw error;
+      }
     }, notify);
   }
 
@@ -148,6 +174,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       return await queueMutation(type, payload, generation);
     } finally {
       changingStructure = false;
+      scheduleExternal();
+      scheduleAutoSave();
     }
   }
 
@@ -184,6 +212,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     const changed = dirty !== nextDirty;
     dirty = nextDirty;
     refreshActionState();
+    autoSaveFailed = false;
+    scheduleAutoSave();
     if (changed || force) {
       hostBridge?.emitDirtyState(dirty);
     }
@@ -232,7 +262,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   const canEditCell = ({ data, colDef }) =>
-    editable && Boolean(data) && !changingStructure && !pendingCellFields.get(data)?.has(colDef.field);
+    editable && Boolean(data) && !refreshingExternal && !externalConflict && !changingStructure && !pendingCellFields.get(data)?.has(colDef.field);
   const gridOptions = {
     columnDefs: [],
     readOnlyEdit: true,
@@ -284,6 +314,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     onCellEditingStopped(event) {
       compactLayout?.onCellEditingStopped();
       hostGrid.onCellEditingStopped(event);
+      scheduleExternal();
+      scheduleAutoSave();
     },
     onSortChanged() { pendingRowFocus = null; },
     onCellEditRequest(event) {
@@ -307,6 +339,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       void pending.finally(() => {
         fields.delete(field);
         pendingCellEdits.delete(pending);
+        scheduleExternal();
+        scheduleAutoSave();
       });
     },
   };
@@ -458,6 +492,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     viewOpen = true;
     activeName = name;
     document.getElementById('file-name').textContent = name;
+    recovery.length = 0;
     document.getElementById('summary').textContent = '';
     editable = schema.editable !== false;
     document.getElementById('edit-toolbar').hidden = !editable;
@@ -523,7 +558,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
         } catch (error) {
           params.failCallback();
           showInitialCount();
-          setStatus(error instanceof Error ? error.message : 'Row load failed');
+          if (error?.conflict) externalChange({});
+          else setStatus(error instanceof Error ? error.message : 'Row load failed');
         }
       },
     });
@@ -547,6 +583,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       if (generation === viewGeneration) {
         hideLoading();
         loadView(schema, name);
+        scheduleExternal();
       }
     } catch (error) {
       if (generation === viewGeneration) {
@@ -978,7 +1015,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     } catch (error) {
       csvOptionsError.textContent = error instanceof Error ? error.message : 'Could not read this dialect.';
       csvOptionsError.hidden = false;
-    } finally { readingCsv = false; csvInputRead.disabled = dirty; apply.disabled = false; }
+    } finally { readingCsv = false; csvInputRead.disabled = dirty; apply.disabled = false; scheduleExternal(); scheduleAutoSave(); }
   });
   document.getElementById('csv-options-standard').addEventListener('click', () => {
     csvDelimiter.value = ',';
@@ -1006,7 +1043,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     } catch (error) {
       csvOptionsError.textContent = error instanceof Error ? error.message : 'Could not apply CSV options.';
       csvOptionsError.hidden = false;
-    } finally { apply.disabled = false; }
+    } finally { apply.disabled = false; scheduleExternal(); scheduleAutoSave(); }
   });
 
   fileInput.addEventListener('change', () => {
@@ -1017,21 +1054,168 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     }
   });
 
+  function scheduleAutoSave() {
+    window.clearTimeout(autoSaveTimer);
+    if (!autoSave || !dirty || externalConflict || pendingExternal || autoSaveFailed) return;
+    autoSaveTimer = window.setTimeout(() => { void saveCurrentChanges({ automatic: true }).catch(() => {}); }, 800);
+  }
+
+  function setAutoSave({ enabled, visible }) {
+    autoSaveControl.hidden = !visible;
+    if (!visible) autoSaveOverride = undefined;
+    autoSave = visible && (autoSaveOverride ?? enabled);
+    autoSaveSwitch.checked = autoSave;
+    autoSaveValue.textContent = autoSave ? 'On' : 'Off';
+    scheduleAutoSave();
+  }
+
+  autoSaveSwitch.addEventListener('change', () => {
+    if (autoSaveControl.hidden) return;
+    autoSaveOverride = autoSaveSwitch.checked;
+    setAutoSave({ enabled: autoSaveOverride, visible: true });
+  });
+
+  function showExternalConflict() {
+    externalConflict = true;
+    reloadExternalButton.hidden = false;
+    recoveryButton.hidden = false;
+    conflictNotice.textContent = 'The CSV changed on disk. Save a copy of your edits before reloading if you want to keep them.';
+    conflictNotice.hidden = false;
+    statusNode.hidden = true;
+  }
+
+  function scheduleExternal() {
+    window.clearTimeout(externalTimer);
+    if (!pendingExternal || externalConflict) return;
+    externalTimer = window.setTimeout(() => { void refreshExternal(); }, 0);
+  }
+
+  function externalChange(change) {
+    if (change.revision !== undefined &&
+        (hostBridge?.isCurrentRevision?.(change.revision) || change.revision <= (pendingExternal?.revision ?? 0))) return;
+    pendingExternal = change;
+    scheduleExternal();
+  }
+
+  async function refreshExternal({ discard = false } = {}) {
+    const change = pendingExternal;
+    if (!change || !viewOpen || saving || refreshingExternal || readingCsv) return;
+    if (change.revision !== undefined && hostBridge?.isCurrentRevision?.(change.revision)) {
+      pendingExternal = undefined;
+      scheduleAutoSave();
+      return;
+    }
+    if (discard && change.buffer === undefined && !backend.reload) return;
+    const hasLocalChanges = () => dirty || gridApi.getEditingCells().length || pendingCellEdits.size || changingStructure;
+    if (!discard && hasLocalChanges()) {
+      const changed = !backend.reload || await backend.externalChanged().catch(() => true);
+      if (pendingExternal !== change) return;
+      if (!changed) {
+        pendingExternal = undefined;
+        scheduleAutoSave();
+        return;
+      }
+      if (hasLocalChanges()) {
+        showExternalConflict();
+        return;
+      }
+      scheduleExternal();
+      return;
+    }
+    if (discard && (dirty || gridApi.getEditingCells().length) &&
+        !window.confirm('Discard your unsaved edits and reload the CSV from disk?')) return;
+    refreshingExternal = true;
+    const wasInert = document.body.inert;
+    document.body.inert = true;
+    try {
+      if (discard) {
+        gridApi.stopEditing(true);
+        await Promise.allSettled([...pendingCellEdits]);
+        await csvMutations.settle().catch(() => {});
+      }
+      const buffer = change.buffer?.slice(0);
+      const schema = backend.reload
+        ? await backend.reload()
+        : await request('open', { name: activeName, buffer }, [buffer]);
+      if (schema) {
+        const layout = gridApi.getColumnState();
+        const row = gridApi.getFirstDisplayedRowIndex();
+        const focused = gridApi.getFocusedCell();
+        loadView(schema, activeName);
+        gridApi.applyColumnState({ state: layout, applyOrder: true });
+        if (row >= 0 && row < rowCount) gridApi.ensureIndexVisible(row, 'top');
+        if (focused && focused.rowIndex < rowCount && activeColumns.includes(focused.column.getColId())) {
+          gridApi.setFocusedCell(focused.rowIndex, focused.column.getColId());
+        }
+        if (change.revision !== undefined) hostBridge?.acceptRevision?.(change.revision);
+        setStatus(`Loaded new changes ${new Date().toLocaleString()}`);
+      }
+      if (pendingExternal === change) pendingExternal = undefined;
+      externalConflict = false;
+      reloadExternalButton.hidden = true;
+      recoveryButton.hidden = true;
+      conflictNotice.hidden = true;
+      statusNode.hidden = false;
+    } catch (error) {
+      externalConflict = true;
+      reloadExternalButton.hidden = false;
+      conflictNotice.textContent = error instanceof Error ? error.message : 'Could not reload the CSV.';
+      conflictNotice.hidden = false;
+      statusNode.hidden = true;
+    } finally {
+      document.body.inert = wasInert;
+      refreshingExternal = false;
+      scheduleExternal();
+      scheduleAutoSave();
+    }
+  }
+
+  recoveryButton.addEventListener('click', () => {
+    void (async () => {
+      await finishEditing();
+      await csvMutations.settle().catch(() => {});
+      const columnOrder = currentGridColumns(gridApi, activeColumns);
+      const edits = JSON.stringify({ file: activeName, columnOrder, edits: recovery }, null, 2);
+      requestRecovery(edits);
+    })();
+  });
+
+  function recoveryResult({ success, path, error }) {
+    if (!externalConflict) return;
+    conflictNotice.textContent = success ? `Saved a copy of your edits to ${path}.` :
+      (error || 'Could not save a copy of your edits.');
+  }
+
+  reloadExternalButton.addEventListener('click', () => { void refreshExternal({ discard: true }); });
+
   let saving = false;
-  async function saveCurrentChanges() {
+  async function saveCurrentChanges({ automatic = false } = {}) {
     if (!editable) throw new Error('This CSV is read-only.');
     if (!viewOpen) {
       throw new Error('No CSV is open.');
     }
-    if (saving) throw new Error('A save is already in progress.');
+    if (automatic && (!autoSave || !dirty || externalConflict || pendingExternal ||
+      saving || readingCsv || refreshingExternal || gridApi.getEditingCells().length)) return;
+    if (externalConflict) throw new Error('The CSV changed on disk. Reload CSV before saving.');
+    if (saving || refreshingExternal) throw new Error('A CSV update is already in progress.');
     if (readingCsv) throw new Error('The input dialect is being applied.');
     saving = true;
+    window.clearTimeout(autoSaveTimer);
     const wasInert = document.body.inert;
-    document.body.inert = true;
+    if (!automatic) document.body.inert = true;
+    let releaseWrites;
     try {
-      await finishEditing({ requireSuccess: true });
+      if (!automatic) await finishEditing({ requireSuccess: true });
+      else {
+        const results = await Promise.all([...pendingCellEdits]);
+        const failure = results.find(result => result instanceof Error);
+        if (failure) throw failure;
+      }
       await csvMutations.settle();
-      showLoading('Saving CSV', `${activeName} is being rewritten with your edits.`);
+      if (!dirty || (automatic && (!autoSave || pendingExternal || gridApi.getEditingCells().length))) return;
+      const savedEditCount = recovery.length;
+      saveBarrier = new Promise(resolve => { releaseWrites = resolve; });
+      if (!automatic) showLoading('Saving CSV', `${activeName} is being rewritten with your edits.`);
       const name = activeName;
       let savedResult;
       await saveState.save({
@@ -1050,22 +1234,36 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
           refreshRows();
         },
       });
+      recovery.splice(0, savedEditCount);
       setStatus(savedResult.chartError ? 'Saved. Chart generation failed: ' + savedResult.chartError : 'Saved ' + name + '.',
         savedResult.chartError ? 'Saved. Chart generation failed: ' + savedResult.chartError : 'Saved.');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Download failed');
+      autoSaveFailed = true;
+      if (error?.conflict) {
+        if (backend.reload) pendingExternal ??= {};
+        showExternalConflict();
+      } else {
+        setStatus(error instanceof Error ? error.message : 'Save failed');
+      }
       throw error;
     } finally {
-      hideLoading();
-      document.body.inert = wasInert;
+      saveBarrier = undefined;
+      releaseWrites?.();
+      if (!automatic) {
+        hideLoading();
+        document.body.inert = wasInert;
+      }
       saving = false;
+      scheduleExternal();
+      scheduleAutoSave();
     }
   }
 
   saveButton.addEventListener('click', () => { void saveCurrentChanges().catch(() => {}); });
 
   async function resetCurrentChanges() {
-    if (!viewOpen) return;
+    if (!viewOpen || saving || refreshingExternal) return;
+    if (pendingExternal || externalConflict) { await refreshExternal({ discard: true }); return; }
     await finishEditing();
     await csvMutations.settle();
     showLoading('Resetting CSV', `${activeName} is being restored from the original bytes.`);
@@ -1076,6 +1274,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       setGridColumnDefs(activeColumns);
       setDirty(false);
       refreshRows();
+      recovery.length = 0;
       setStatus(`Reset ${activeName}.`, 'Reset.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Reset failed');
@@ -1118,7 +1317,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     get saving() { return saving; },
     finishEditing: async () => { await finishEditing(); await csvMutations.settle(); },
     save: saveCurrentChanges, reset: resetCurrentChanges, openBuffer, requestOpenFile,
-    setStatus, refreshRows,
+    setStatus, refreshRows, setAutoSave, externalChange, recoveryResult,
+    connectRecovery(callback) { requestRecovery = callback; },
     restoreTable() { resultMode = false; updateRecordCount(); setStatus(dirty ? 'Unsaved changes.' : 'Ready.'); },
     setResultMode(value) { resultMode = value; },
     addColumnAction(action) { columnFeatures.push(action); },
@@ -1136,10 +1336,13 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
           const mounted = feature.mount(shell);
           if (mounted?.destroy) featureDisposers.push(() => mounted.destroy());
         }
+        scheduleExternal();
         if (!viewOpen) { document.getElementById('file-name').textContent = 'csvzall'; setStatus('Open a local CSV file to begin.'); }
       } catch (error) { setStatus(error.message); throw error; }
     },
     destroy() {
+      window.clearTimeout(autoSaveTimer);
+      window.clearTimeout(externalTimer);
       viewGeneration += 1;
       pendingRowFocus = null;
       for (const dispose of featureDisposers.reverse()) dispose();

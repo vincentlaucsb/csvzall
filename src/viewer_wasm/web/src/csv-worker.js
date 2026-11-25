@@ -112,11 +112,19 @@ const handlers = {
 
   open({ name, buffer }) {
     ensureReady();
+    const nextPath = `/working/${activePath.startsWith('/working/0-') ? 1 : 0}-${safeFileName(name)}`;
+    moduleInstance.FS.writeFile(nextPath, new Uint8Array(buffer));
+    let next;
+    try {
+      next = moduleInstance.CsvViewData.open(nextPath);
+    } catch (error) {
+      moduleInstance.FS.unlink(nextPath);
+      throw error;
+    }
     view?.delete?.();
-    view = null;
-    activePath = `/working/${safeFileName(name)}`;
-    moduleInstance.FS.writeFile(activePath, new Uint8Array(buffer));
-    view = moduleInstance.CsvViewData.open(activePath);
+    if (activePath) moduleInstance.FS.unlink(activePath);
+    activePath = nextPath;
+    view = next;
     return schema();
   },
 

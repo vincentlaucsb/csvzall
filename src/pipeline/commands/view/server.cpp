@@ -153,6 +153,7 @@ int ViewServer::Start(const ViewServerOptions& options) {
   impl_->serve_once = options.serve_once;
   impl_->editable = options.editable;
   impl_->obsidian = options.obsidian;
+  if (impl_->obsidian && impl_->data) impl_->data->keep_original_path();
   impl_->stop_requested = false;
   impl_->token = options.session_token.empty() ? GenerateSessionToken() : options.session_token;
   try {
@@ -365,6 +366,12 @@ void ViewServer::RegisterCsvRoutes() {
                         return;
                       }
                       try {
+                        if (impl_->obsidian && impl_->data->source_changed()) {
+                          response.status = 409;
+                          response.set_content("source file changed externally; reload before reading\n",
+                                               "text/plain; charset=utf-8");
+                          return;
+                        }
                         std::string page_json;
                         if (direction.empty()) {
                           page_json = BuildRowsJson(*impl_->data, offset, limit, impl_->data->read_rows(offset, limit));
@@ -410,6 +417,12 @@ void ViewServer::RegisterCsvRoutes() {
                          return;
                        }
                        try {
+                         if (impl_->obsidian && impl_->data->source_changed()) {
+                           response.status = 409;
+                           response.set_content("source file changed externally; reload before editing\n",
+                                                "text/plain; charset=utf-8");
+                           return;
+                         }
                          const bool edited = impl_->data->edit_cell(
                              JsonUintField(request.body, "row"),
                              JsonStringField(request.body, "column"),
@@ -565,6 +578,23 @@ void ViewServer::RegisterCsvRoutes() {
                              JsonStringField(request.body, "quote"),
                              view_internal::JsonBoolField(request.body, "hasHeaders"));
                          response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/reload",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       try {
+                         const bool changed = view_internal::JsonBoolFieldOr(request.body, "checkOnly", false)
+                           ? impl_->data->source_changed()
+                           : impl_->data->reload_if_changed();
+                         response.set_content(changed ? "{\"changed\":true}" : "{\"changed\":false}",
+                                              "application/json; charset=utf-8");
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }

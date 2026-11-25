@@ -21,6 +21,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#elif !defined(__EMSCRIPTEN__)
+#include <sys/stat.h>
 #endif
 
 namespace csvzall::viewer {
@@ -43,6 +45,36 @@ std::filesystem::file_time_type GetFileMtime(const std::string& input_path) {
     throw std::runtime_error("unable to stat input file mtime: " + input_path);
   }
   return mtime;
+}
+
+// A Sync client can preserve the previous modification time when replacing CSV bytes.
+std::array<std::uint64_t, 4> GetSourceIdentity(const std::string& path) {
+#ifdef _WIN32
+  const HANDLE handle = CreateFileW(std::filesystem::path(path).c_str(), FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) throw std::runtime_error("unable to identify CSV source: " + path);
+  BY_HANDLE_FILE_INFORMATION identity{};
+  FILE_BASIC_INFO times{};
+  const bool read = GetFileInformationByHandle(handle, &identity) &&
+      GetFileInformationByHandleEx(handle, FileBasicInfo, &times, sizeof(times));
+  CloseHandle(handle);
+  if (!read) throw std::runtime_error("unable to identify CSV source: " + path);
+  return {identity.dwVolumeSerialNumber, identity.nFileIndexHigh, identity.nFileIndexLow,
+          static_cast<std::uint64_t>(times.ChangeTime.QuadPart)};
+#elif defined(__EMSCRIPTEN__)
+  (void)path;
+  return {};
+#else
+  struct stat identity{};
+  if (stat(path.c_str(), &identity) != 0) throw std::runtime_error("unable to identify CSV source: " + path);
+#ifdef __APPLE__
+  const auto changed = identity.st_ctimespec;
+#else
+  const auto changed = identity.st_ctim;
+#endif
+  return {static_cast<std::uint64_t>(identity.st_dev), static_cast<std::uint64_t>(identity.st_ino),
+          static_cast<std::uint64_t>(changed.tv_sec), static_cast<std::uint64_t>(changed.tv_nsec)};
+#endif
 }
 
 bool FileExists(const std::string& input_path) {
@@ -399,6 +431,7 @@ void CsvIndexedFile::read_csv_options(const std::string& delimiter,
   CsvIndexedFile next;
   next.input_path_ = input_path_;
   next.file_name_ = file_name_;
+  next.allow_rename_recovery_ = allow_rename_recovery_;
   next.format_ = std::move(next_format);
   next.columns_ = columns_;  // Retain the known width of an empty headerless file.
   next.reload();  // Explicit input characters must bypass automatic inference.
@@ -808,8 +841,12 @@ void CsvIndexedFile::delete_column(const std::string& column) {
   mark_modified();
 }
 
+void CsvIndexedFile::keep_original_path() {
+  allow_rename_recovery_ = false;
+}
+
 bool CsvIndexedFile::recover_renamed_source() {
-  return RecoverRenamedSource(input_path_, file_name_, file_size_, source_mtime_);
+  return allow_rename_recovery_ && RecoverRenamedSource(input_path_, file_name_, file_size_, source_mtime_);
 }
 
 void CsvIndexedFile::reload() {
@@ -819,6 +856,7 @@ void CsvIndexedFile::reload() {
 
   file_size_ = GetFileSize(input_path);
   source_mtime_ = GetFileMtime(input_path);
+  source_identity_ = GetSourceIdentity(input_path);
 
   // An empty headerless file can result from deleting its last data row.
   std::ifstream prefix(input_path, std::ios::binary);
@@ -881,6 +919,29 @@ void CsvIndexedFile::reload() {
   modified_ = false;
 }
 
+bool CsvIndexedFile::source_changed() const {
+  return !FileExists(input_path_) ||
+         GetFileSize(input_path_) != file_size_ ||
+         GetFileMtime(input_path_) != source_mtime_ ||
+         GetSourceIdentity(input_path_) != source_identity_;
+}
+
+bool CsvIndexedFile::reload_if_changed() {
+  if (!source_changed()) return false;
+  CsvIndexedFile updated;
+  updated.input_path_ = input_path_;
+  updated.file_name_ = file_name_;
+  updated.allow_rename_recovery_ = allow_rename_recovery_;
+  updated.format_ = format_;
+  if (!has_headers_) updated.columns_ = columns_;
+  updated.reload();
+  if (updated.source_changed()) {
+    throw std::runtime_error("source file changed during reload; try again");
+  }
+  *this = std::move(updated);
+  return true;
+}
+
 void CsvIndexedFile::reset() {
   recover_renamed_source();
   reload();
@@ -888,8 +949,7 @@ void CsvIndexedFile::reset() {
 
 void CsvIndexedFile::save(const std::vector<std::string>& columns) {
   recover_renamed_source();
-  if (GetFileSize(input_path_) != file_size_ ||
-      GetFileMtime(input_path_) != source_mtime_) {
+  if (source_changed()) {
     throw std::runtime_error("source file changed externally; reload before saving");
   }
 
@@ -898,6 +958,9 @@ void CsvIndexedFile::save(const std::vector<std::string>& columns) {
       (target.filename().string() + ".csvzall-save-" + GenerateSaveToken() + ".tmp");
   try {
     write_save_file(temp, columns);
+    if (source_changed()) {
+      throw std::runtime_error("source file changed externally; reload before saving");
+    }
     commit_save_file(temp);
   } catch (...) {
     std::error_code ec;
@@ -1032,8 +1095,20 @@ void CsvViewData::delete_column(const std::string& column) {
   data_.delete_column(column);
 }
 
+void CsvViewData::keep_original_path() {
+  data_.keep_original_path();
+}
+
 bool CsvViewData::recover_renamed_source() {
   return data_.recover_renamed_source();
+}
+
+bool CsvViewData::source_changed() const {
+  return data_.source_changed();
+}
+
+bool CsvViewData::reload_if_changed() {
+  return data_.reload_if_changed();
 }
 
 void CsvViewData::reset() {

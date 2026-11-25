@@ -57,7 +57,7 @@ function countFixture(rowCount) {
   const frames = [];
   const node = { textContent: '' };
   const context = {
-    recordCountNode: node, resultMode: false, viewGeneration: 0, rowCount: 0, rowRevision: 0, activeColumns: [],
+    recordCountNode: node, recovery: [], resultMode: false, viewGeneration: 0, rowCount: 0, rowRevision: 0, activeColumns: [],
     document: { getElementById: () => ({}) }, gridApi: { applyColumnState() {} },
     pendingCellEdits: new Set(), pendingEntryCount: 0, requestAnimationFrame: fn => frames.push(fn),
     setDatasource(value) { context.datasource = value; },

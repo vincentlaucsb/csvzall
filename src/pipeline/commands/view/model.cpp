@@ -209,6 +209,18 @@ void CsvViewData::delete_column(const std::string& column) {
   data_.delete_column(column);
 }
 
+void CsvViewData::keep_original_path() {
+  data_.keep_original_path();
+}
+
+bool CsvViewData::source_changed() const {
+  return data_.source_changed();
+}
+
+bool CsvViewData::reload_if_changed() {
+  return data_.reload_if_changed();
+}
+
 bool CsvViewData::recover_renamed_source() {
   return data_.recover_renamed_source();
 }

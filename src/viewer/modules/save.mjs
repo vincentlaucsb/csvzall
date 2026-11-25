@@ -53,3 +53,30 @@ export function installHostSaveRequests({ win = window, save, getDirty }) {
   win.addEventListener('message', listener);
   return () => win.removeEventListener('message', listener);
 }
+
+export function installHostCsvUpdates({ shell, source, win = window }) {
+  const parent = win.parent !== win ? win.parent : null;
+  if (!parent) return () => {};
+  let requestId = 0;
+  shell.connectRecovery(edits => {
+    const id = ++requestId;
+    parent.postMessage({ source, type: 'csv-recovery-request', version: 1, requestId: id, edits }, '*');
+  });
+  function listener(event) {
+    const data = event.data;
+    if (event.source !== parent || data?.source !== 'obsidian-csvzall' || data.version !== 1) return;
+    if (data.type === 'csv-autosave-settings' && typeof data.enabled === 'boolean' &&
+        typeof data.visible === 'boolean') {
+      shell.setAutoSave(data);
+    } else if (data.type === 'csv-recovery-result' && requestId > 0 && data.requestId === requestId) {
+      shell.recoveryResult(data);
+    } else if (data.type === 'csv-file-modified') {
+      if (source === 'csvzall-wasm-viewer' &&
+          (!(data.buffer instanceof ArrayBuffer) || !Number.isSafeInteger(data.revision) || data.revision < 1)) return;
+      shell.externalChange(data);
+    }
+  }
+  win.addEventListener('message', listener);
+  parent.postMessage({ source, type: 'csv-autosave-ready', version: 1 }, '*');
+  return () => win.removeEventListener('message', listener);
+}
