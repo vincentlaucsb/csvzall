@@ -7,6 +7,38 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
 import { JsonDocument } from '../src/viewer/modules/json-document.mjs';
+import { openJsonEditor } from '../src/viewer/modules/json-editor.mjs';
+
+test('a host change during the initial JSON read refreshes the mounted document', async () => {
+  let releaseRead;
+  const firstRead = new Promise(resolve => { releaseRead = resolve; });
+  const response = value => ({
+    ok: true, json: () => ({ text: JSON.stringify(value), revision: String(value), name: 'file.json', editable: true }),
+  });
+  let reads = 0;
+  const win = Object.assign(new EventTarget(), {
+    parent: {}, location: { search: '?token=viewer' },
+    document: { querySelector: () => new EventTarget() },
+    fetch: () => ++reads === 1 ? firstRead : response(2),
+  });
+  const mounted = [];
+  const opened = openJsonEditor(win, (_parent, format) => {
+    mounted.push(format.display);
+    const doc = { eq: other => doc === other };
+    return { state: { doc }, destroy() {} };
+  });
+  const modified = () => win.dispatchEvent(Object.assign(new Event('message'), {
+    source: win.parent, data: { source: 'obsidian-csvzall', type: 'json-file-modified', version: 1 },
+  }));
+  modified();
+  modified();
+  assert.equal(reads, 1);
+  releaseRead(response(1));
+  await opened;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(mounted, ['1', '2']);
+  assert.equal(reads, 2);
+});
 
 test('view opens JSON without CSV indexing and preserves the disk format', { timeout: 20000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'csvzall JSON '));

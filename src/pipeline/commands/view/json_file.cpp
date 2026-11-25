@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <stdexcept>
+#include <string_view>
 #ifdef _WIN32
 #include <windows.h>
 #include <sddl.h>
@@ -23,6 +24,28 @@
 namespace csvzall::pipeline::commands::view_internal {
 namespace {
 #ifndef _WIN32
+#ifndef __APPLE__
+void PreserveUserAttributes(const std::filesystem::path& source, const std::filesystem::path& staged) {
+  const auto size = listxattr(source.c_str(), nullptr, 0);
+  if (size < 0 && errno == ENOTSUP) return;
+  if (size < 0) throw std::runtime_error("Cannot list JSON file attributes");
+  std::string names(static_cast<std::size_t>(size), '\0');
+  if (listxattr(source.c_str(), names.data(), names.size()) != size)
+    throw std::runtime_error("JSON file attributes changed during save");
+  for (std::size_t offset = 0; offset < names.size();) {
+    const char* name = names.data() + offset;
+    const std::string_view attribute(name);
+    offset += attribute.size() + 1;
+    if (attribute.substr(0, 5) != "user.") continue;
+    const auto length = getxattr(source.c_str(), name, nullptr, 0);
+    if (length < 0) throw std::runtime_error("Cannot read JSON file attribute");
+    std::string value(static_cast<std::size_t>(length), '\0');
+    if (getxattr(source.c_str(), name, value.data(), value.size()) != length ||
+        setxattr(staged.c_str(), name, value.data(), value.size(), 0) != 0)
+      throw std::runtime_error("Cannot preserve JSON file attribute");
+  }
+}
+#endif
 void PreserveAccess(const std::filesystem::path& source, const std::filesystem::path& staged) {
   const int fd = open(source.c_str(), O_WRONLY | O_CLOEXEC);
   if (fd < 0) throw std::runtime_error("JSON file is not writable");
@@ -33,9 +56,10 @@ void PreserveAccess(const std::filesystem::path& source, const std::filesystem::
       chmod(staged.c_str(), access.st_mode & 0777))
     throw std::runtime_error("Cannot preserve JSON file ownership or permissions");
 #ifdef __APPLE__
-  if (copyfile(source.c_str(), staged.c_str(), nullptr, COPYFILE_ACL) != 0)
-    throw std::runtime_error("Cannot preserve JSON file ACL");
+  if (copyfile(source.c_str(), staged.c_str(), nullptr, COPYFILE_ACL | COPYFILE_XATTR) != 0)
+    throw std::runtime_error("Cannot preserve JSON file ACL and attributes");
 #else
+  PreserveUserAttributes(source, staged);
   constexpr auto acl = "system.posix_acl_access";
   const auto size = getxattr(source.c_str(), acl, nullptr, 0);
   if (size < 0 && errno != ENODATA && errno != ENOTSUP)

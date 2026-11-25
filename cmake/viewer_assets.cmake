@@ -17,4 +17,5 @@ function(csvzall_add_viewer_assets target source_dir generated_dir)
     BYPRODUCTS "${generated_dir}/viewer_assets.cpp"
       "${generated_dir}/viewer_assets.hpp" "${generated_dir}/viewer_assets.cpp.sha256"
     VERBATIM)
+  set_property(TARGET ${target} PROPERTY CSVZALL_ESBUILD_EXECUTABLE "${esbuild}")
 endfunction()

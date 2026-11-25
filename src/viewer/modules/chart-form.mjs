@@ -536,6 +536,7 @@ export function mountChartForm(root, options) {
       colorScheme: (chartType.value === 'bar' || chartType.value === 'line') ? chartColorScheme.value : '',
       columns: markdown.columns,
       sql: chartType.value === 'markdown-table' ? markdown.sql : chartQuery.value.trim(),
+      clearSql: chartType.value !== 'markdown-table' && !chartQuery.value.trim(),
       start: chartRangeRolling.checked ? '' : chartStart.value,
       end: chartRangeRolling.checked ? '' : chartEnd.value,
       lookback: chartType.value === 'heatmap' && chartRangeRolling.checked ? currentLookback() : '',

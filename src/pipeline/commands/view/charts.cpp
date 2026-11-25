@@ -481,7 +481,7 @@ void PreserveValueMetadata(common::ChartSpec& spec,
   }
 }
 
-// Older clients omit sql; an explicit empty field clears the transform.
+// Older chart forms omitted sql or always sent an empty string for charts.
 void PreserveConfigOnlySql(common::ChartSpec& spec,
                            const std::vector<common::ChartSpec>& existing_charts) {
   for (const auto& existing : existing_charts) {
@@ -602,7 +602,7 @@ static common::ChartSpec ChartSpecForBody(const CsvViewData& data, std::string_v
   }
   const auto fields = Json::parse(body);
   PreserveValueMetadata(spec, charts, fields);
-  if (!fields.contains("sql")) PreserveConfigOnlySql(spec, charts);
+  if (!fields.value("clearSql", false)) PreserveConfigOnlySql(spec, charts);
   return spec;
 }
 

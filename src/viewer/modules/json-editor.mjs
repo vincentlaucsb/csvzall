@@ -4,24 +4,29 @@ import { JsonDocument } from './json-document.mjs';
 import { postDirtyState, installUnsavedChangesBeforeUnload } from './dirty-state.mjs';
 import { installHostSaveRequests } from './save.mjs';
 
-const status = document.querySelector('#status');
-const button = document.querySelector('#save');
-const token = new URLSearchParams(location.search).get('token');
-
-async function request(options = {}) {
-  const response = await fetch('/api/document', {
-    ...options, headers: { 'X-Session-Token': token, ...options.headers }, cache: 'no-store',
+export async function openJsonEditor(win, createEditor = createJsonEditor) {
+  const document = win.document;
+  const status = document.querySelector('#status');
+  const button = document.querySelector('#save');
+  const token = new URLSearchParams(win.location.search).get('token');
+  async function request(options = {}) {
+    const response = await win.fetch('/api/document', {
+      ...options, headers: { 'X-Session-Token': token, ...options.headers }, cache: 'no-store',
+    });
+    if (!response.ok) throw new Error(await response.text() || response.statusText);
+    return response.json();
+  }
+  let saved, editor, saving = false;
+  let refreshPending = false;
+  const state = { dirty: false };
+  win.addEventListener('focus', scheduleRefresh);
+  win.addEventListener('message', event => {
+    if (win.parent !== win && event.source === win.parent && event.data?.source === 'obsidian-csvzall' &&
+        event.data.type === 'json-file-modified' && event.data.version === 1) scheduleRefresh();
   });
-  if (!response.ok) throw new Error(await response.text() || response.statusText);
-  return response.json();
-}
-
-async function open() {
   const source = await request();
   let format = new JsonDocument(source.text);
   let revision = source.revision;
-  let saved, editor, saving = false;
-  let refreshPending = false;
   let queue = Promise.resolve();
   const enqueue = action => {
     const operation = queue.then(action);
@@ -29,7 +34,6 @@ async function open() {
     return operation;
   };
   const reportError = error => { status.textContent = error.message; };
-  const state = { dirty: false };
   const update = doc => {
     const dirty = !doc.eq(saved);
     if (state.dirty !== dirty) postDirtyState(dirty);
@@ -52,10 +56,10 @@ async function open() {
     return true;
   });
   const saveClick = () => { void save().catch(reportError); };
-  const mount = () => createJsonEditor(document.querySelector('#editor'), format, source.editable, update, saveClick);
+  const mount = () => createEditor(document.querySelector('#editor'), format, source.editable, update, saveClick);
   function scheduleRefresh() {
     refreshPending = true;
-    if (state.dirty) return;
+    if (!editor || state.dirty) return;
     void enqueue(async () => {
       if (state.dirty || !refreshPending) return;
       refreshPending = false;
@@ -78,12 +82,9 @@ async function open() {
   document.title = source.name;
   document.querySelector('#filename').textContent = source.name;
   button.addEventListener('click', saveClick);
-  window.addEventListener('focus', scheduleRefresh);
-  window.addEventListener('message', event => {
-    if (window.parent !== window && event.source === window.parent && event.data?.source === 'obsidian-csvzall' &&
-        event.data.type === 'json-file-modified' && event.data.version === 1) scheduleRefresh();
-  });
-  installHostSaveRequests({ save, getDirty: () => state.dirty });
-  installUnsavedChangesBeforeUnload(state);
+  installHostSaveRequests({ win, save, getDirty: () => state.dirty });
+  installUnsavedChangesBeforeUnload(state, win);
 }
-open().catch(error => { status.textContent = error.message; });
+if (typeof window !== 'undefined') {
+  openJsonEditor(window).catch(error => { document.querySelector('#status').textContent = error.message; });
+}

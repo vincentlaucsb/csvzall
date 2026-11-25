@@ -149,6 +149,7 @@ test('SQL chart aliases and all value columns survive reopen and can be removed'
   await f.fire(f.field('heatmap-chart-form'), 'submit');
   assert.deepEqual(f.requests[1].body.values, ['a', 'b']);
   assert.equal(f.requests[1].body.sql, '');
+  assert.equal(f.requests[1].body.clearSql, true);
 });
 
 test('SQL result columns load on request and ignore stale query results', async () => {
