@@ -26,7 +26,17 @@ struct CsvColumnDescriptor {
 
 struct CsvLogicalRow {
   std::optional<std::uint64_t> source_row;
-  std::unordered_map<std::string, std::string> cells;
+  struct Cell {
+    std::string value;
+    std::optional<std::string> original;
+  };
+  std::unordered_map<std::string, Cell> cells;
+  bool inserted = false;
+};
+
+struct CsvRowChanges {
+  bool inserted;
+  std::vector<std::string> columns;
 };
 
 struct CsvSortedPage {
@@ -57,11 +67,13 @@ class CsvIndexedFile {
 
   [[nodiscard]] std::vector<std::vector<std::string>> read_rows(
       std::uint64_t offset,
-      std::uint64_t limit) const;
+      std::uint64_t limit,
+      bool original_values = false) const;
   [[nodiscard]] CsvSortedPage read_sorted_rows(std::uint64_t offset, std::uint64_t limit,
                                               const std::string& column, bool descending) const;
 
-  void edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
+  [[nodiscard]] CsvRowChanges row_changes(std::uint64_t row) const;
+  bool edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
   void delete_row(std::uint64_t row);
   void insert_row(std::uint64_t row, const std::vector<std::string>& values);
   void swap_rows(std::uint64_t first, std::uint64_t second);
@@ -71,6 +83,8 @@ class CsvIndexedFile {
   bool recover_renamed_source();
   void reset();
   void save(const std::vector<std::string>& columns = {});
+  void write_save_file(const std::filesystem::path& path, const std::vector<std::string>& columns = {}) const;
+  void commit_save_file(const std::filesystem::path& path);
 
  private:
   struct SortIndex {
@@ -90,7 +104,7 @@ class CsvIndexedFile {
       const std::vector<CsvColumnDescriptor>& columns) const;
   [[nodiscard]] static std::vector<std::string> logical_row_values(
       const CsvLogicalRow& row, const std::vector<CsvColumnDescriptor>& columns,
-      const std::vector<std::string>& source_values);
+      const std::vector<std::string>& source_values, bool original_values = false);
   [[nodiscard]] std::size_t column_index(const std::string& column) const;
   [[nodiscard]] bool has_column(const std::string& column) const;
   void refresh_headers();
@@ -150,7 +164,8 @@ class CsvViewData {
   [[nodiscard]] CsvSortedPage read_sorted_rows(std::uint64_t offset, std::uint64_t limit,
                                               const std::string& column, bool descending) const;
 
-  void edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
+  [[nodiscard]] CsvRowChanges row_changes(std::uint64_t row) const;
+  bool edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
   void delete_row(std::uint64_t row);
   void insert_row(std::uint64_t row, const std::vector<std::string>& values);
   void swap_rows(std::uint64_t first, std::uint64_t second);
@@ -160,6 +175,8 @@ class CsvViewData {
   bool recover_renamed_source();
   void reset();
   void save(const std::vector<std::string>& columns = {});
+  void write_save_file(const std::string& path) const;
+  void commit_save_file(const std::string& path);
 
  private:
   explicit CsvViewData(CsvIndexedFile indexed);

@@ -41,6 +41,7 @@ using view_internal::JsonStringArrayFieldOr;
 using view_internal::JsonStringField;
 using view_internal::JsonStringFieldOr;
 using view_internal::JsonUintField;
+using view_internal::JsonUintFieldOr;
 using view_internal::RenderRunOnSaveChartsForCurrentCsv;
 using view_internal::ResolveDevViewerAssetDir;
 using view_internal::SaveResultJson;
@@ -409,11 +410,12 @@ void ViewServer::RegisterCsvRoutes() {
                          return;
                        }
                        try {
-                         impl_->data->edit_cell(
+                         const bool edited = impl_->data->edit_cell(
                              JsonUintField(request.body, "row"),
                              JsonStringField(request.body, "column"),
                              JsonStringField(request.body, "value"));
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                         response.set_content(edited ? "{\"ok\":true,\"edited\":true}" : "{\"ok\":true,\"edited\":false}",
+                                              "application/json; charset=utf-8");
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }
@@ -447,7 +449,7 @@ void ViewServer::RegisterCsvRoutes() {
                        }
                        try {
                          impl_->data->insert_row(
-                             JsonUintField(request.body, "row"),
+                             JsonUintFieldOr(request.body, "row", impl_->data->row_count()),
                              JsonStringArrayField(request.body, "values"));
                          response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
                        } catch (const std::exception& ex) {

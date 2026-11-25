@@ -60,6 +60,7 @@
     const savedNode = document.getElementById('saved');
     let ready = false;
     let savedBytes = null;
+    let shouldFailSave = false;
 
     function csvBuffer() {
       return new TextEncoder().encode('name,count\nAda,1\nGrace,2\n').buffer;
@@ -98,6 +99,12 @@
         statusNode.textContent = `Dirty: ${message.dirty}`;
       }
       if (message.type === 'save-file') {
+        if (shouldFailSave) {
+          shouldFailSave = false;
+          viewer.contentWindow.postMessage({ source: 'obsidian-csvzall', type: 'save-result',
+            requestId: message.requestId, success: false, error: 'Host rejected save.' }, '*');
+          return;
+        }
         savedBytes = new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
         savedNode.textContent = `Last save: ${savedBytes.byteLength} bytes`;
         statusNode.textContent = `Saved ${savedBytes.byteLength} bytes from viewer.`;
@@ -125,6 +132,7 @@
     window.csvzallHostHarness = {
       postOpen,
       savedBytes: () => savedBytes,
+      rejectNextSave: () => { shouldFailSave = true; },
     };
   </script>
 </body>

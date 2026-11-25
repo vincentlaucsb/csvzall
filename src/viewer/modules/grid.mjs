@@ -10,6 +10,8 @@ export function currentGridColumns(api, columns) {
 }
 
 export const sourceRowId = Symbol('_csvzallRowId');
+export const insertedRow = Symbol('csvzallInsertedRow');
+export const editedColumns = Symbol('csvzallEditedColumns');
 
 // AG Grid's built-in block debounce also delays the initial viewport. Schedule
 // at the datasource instead so only the first request for a new file bypasses it.
@@ -52,10 +54,14 @@ export function createPagedDatasource(readRows, isBlockCached) {
   };
 }
 
-export function rowsToObjects(columns, rows, offset = 0, rowIds) {
+export function rowsToObjects(columns, rows, offset = 0, rowIds, changes) {
+  const changesById = changes?.length ? new Map(changes.map(change => [change.rowId, change])) : null;
   return rows.map((values, index) => {
     const row = Object.fromEntries(columns.map((column, columnIndex) => [column, values[columnIndex] ?? '']));
     row[sourceRowId] = rowIds ? rowIds[index] : offset + index;
+    const change = changesById?.get(row[sourceRowId]);
+    if (change?.inserted) row[insertedRow] = true;
+    if (change?.columns.length) row[editedColumns] = new Set(change.columns);
     return row;
   });
 }

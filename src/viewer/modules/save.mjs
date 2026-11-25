@@ -5,14 +5,16 @@ export function buildSavePayload(viewState, getColumns) {
   return { columns: getColumns() };
 }
 
-// Invalidate save checkpoints at dispatch, including structural edits whose
-// backend/worker acknowledgments may arrive after a save response.
+// Dispatch in order because edits and structural changes share row positions.
+// Invalidate save checkpoints when an operation is queued, before its response.
 export function createMutationTracker(onStart) {
   const pending = new Set();
+  let tail = Promise.resolve();
   return {
     run(action) {
       onStart();
-      const result = Promise.resolve().then(action);
+      const result = tail.then(action);
+      tail = result.catch(() => {});
       pending.add(result);
       void result.then(() => pending.delete(result), () => pending.delete(result));
       return result;

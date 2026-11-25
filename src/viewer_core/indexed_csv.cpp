@@ -348,7 +348,7 @@ bool CsvIndexedFile::has_bom() const { return has_bom_; }
 
 void CsvIndexedFile::relabel_columns(const std::vector<std::string>& names) {
   for (auto& row : rows_) {
-    std::unordered_map<std::string, std::string> cells;
+    decltype(row.cells) cells;
     for (std::size_t i = 0; i < columns_.size(); ++i) {
       if (const auto it = row.cells.find(columns_[i].name); it != row.cells.end()) {
         cells[names[i]] = it->second;
@@ -369,7 +369,7 @@ void CsvIndexedFile::set_csv_options(const std::string& delimiter,
   if (has_headers != has_headers_) {
     if (!has_headers) {
       CsvLogicalRow first;
-      for (const auto& column : columns_) first.cells[column.name] = column.name;
+      for (const auto& column : columns_) first.cells[column.name] = {column.name, {}};
       rows_.insert(rows_.begin(), std::move(first));
       relabel_columns(SyntheticHeaders(columns_.size()));
     } else {
@@ -473,7 +473,7 @@ std::vector<std::string> CsvIndexedFile::row_values_for_columns(
 
 std::vector<std::string> CsvIndexedFile::logical_row_values(
     const CsvLogicalRow& row, const std::vector<CsvColumnDescriptor>& columns,
-    const std::vector<std::string>& source_values) {
+    const std::vector<std::string>& source_values, bool original_values) {
   std::vector<std::string> values;
   values.reserve(columns.size());
   for (const auto& column : columns) {
@@ -482,7 +482,8 @@ std::vector<std::string> CsvIndexedFile::logical_row_values(
       value = source_values[*column.source_index];
     }
     if (const auto edit = row.cells.find(column.name); edit != row.cells.end()) {
-      value = edit->second;
+      const auto& cell = edit->second;
+      value = original_values && cell.original ? *cell.original : cell.value;
     }
     values.push_back(std::move(value));
   }
@@ -491,7 +492,7 @@ std::vector<std::string> CsvIndexedFile::logical_row_values(
 
 std::vector<std::vector<std::string>> CsvIndexedFile::read_rows(
     const std::uint64_t offset,
-    const std::uint64_t limit) const {
+    const std::uint64_t limit, bool original_values) const {
   if (offset >= row_count() || limit == 0) {
     return {};
   }
@@ -519,7 +520,7 @@ std::vector<std::vector<std::string>> CsvIndexedFile::read_rows(
   for (std::uint64_t i = 0; i < count;) {
     const auto& row = rows_[offset + i];
     if (!row.source_row) {
-      rows.push_back(logical_row_values(row, columns_, {}));
+      rows.push_back(logical_row_values(row, columns_, {}, original_values));
       ++i;
       continue;
     }
@@ -528,7 +529,7 @@ std::vector<std::vector<std::string>> CsvIndexedFile::read_rows(
     auto source_rows = read_source_rows(*row.source_row, run);
     if (source_rows.size() != run) throw std::out_of_range("row index out of bounds");
     for (std::uint64_t j = 0; j < run; ++j) {
-      rows.push_back(logical_row_values(rows_[offset + i + j], columns_, source_rows[j]));
+      rows.push_back(logical_row_values(rows_[offset + i + j], columns_, source_rows[j], original_values));
     }
     i += run;
   }
@@ -538,34 +539,45 @@ std::vector<std::vector<std::string>> CsvIndexedFile::read_rows(
 CsvIndexedFile::SortIndex CsvIndexedFile::build_sort_index(const std::string& column,
                                                           bool descending) const {
   const auto column_number = column_index(column);
-  std::vector<std::string> keys;
-  keys.reserve(rows_.size());
+  SortIndex index{column, descending, {}};
+  index.row_ids.reserve(rows_.size());
+  std::vector<std::uint64_t> inserted;
+  std::vector<std::string> keys(rows_.size());
   constexpr std::uint64_t batch_size = 500;
   for (std::uint64_t offset = 0; offset < row_count(); offset += batch_size) {
-    for (auto& row : read_rows(offset, batch_size)) {
-      keys.push_back(std::move(row[column_number]));
+    auto rows = read_rows(offset, batch_size, true);
+    if (rows.size() != std::min(batch_size, row_count() - offset)) {
+      throw std::runtime_error("CSV changed while sorting");
+    }
+    for (std::size_t slot = 0; slot < rows.size(); ++slot) {
+      const auto row_id = offset + slot;
+      if (rows_[row_id].inserted) {
+        inserted.push_back(row_id);
+      } else {
+        index.row_ids.push_back(row_id);
+        keys[row_id] = std::move(rows[slot][column_number]);
+      }
     }
   }
-  if (keys.size() != rows_.size()) throw std::runtime_error("CSV changed while sorting");
 
   // A column with any non-numeric value sorts as text. Mixing numeric and
-  // lexical comparisons within the same column would break transitivity.
-  std::vector<long double> numbers;
-  numbers.reserve(keys.size());
-  const bool numeric = std::ranges::all_of(keys, [&](const auto& key) {
+  // lexical comparisons within the same column would break transitivity. Draft
+  // rows are excluded so their values cannot change the comparison before save.
+  std::vector<long double> numbers(keys.size());
+  const bool numeric = std::ranges::all_of(index.row_ids, [&](auto row_id) {
+    const auto& key = keys[row_id];
     char* end = nullptr;
     const auto value = std::strtold(key.c_str(), &end);
-    numbers.push_back(value);
+    numbers[row_id] = value;
     return key.empty() || (end == key.c_str() + key.size() && std::isfinite(value));
   });
 
-  SortIndex index{column, descending, std::vector<std::uint64_t>(rows_.size())};
-  std::iota(index.row_ids.begin(), index.row_ids.end(), std::uint64_t{0});
   std::stable_sort(index.row_ids.begin(), index.row_ids.end(), [&](auto first, auto second) {
     if (descending) std::swap(first, second);
     if (keys[first].empty() != keys[second].empty()) return keys[first].empty();
     return numeric ? numbers[first] < numbers[second] : keys[first] < keys[second];
   });
+  index.row_ids.insert(index.row_ids.end(), inserted.begin(), inserted.end());
   return index;
 }
 
@@ -660,18 +672,38 @@ std::vector<CsvColumnDescriptor> CsvIndexedFile::ordered_columns(
   return ordered;
 }
 
-void CsvIndexedFile::edit_cell(const std::uint64_t row,
+CsvRowChanges CsvIndexedFile::row_changes(std::uint64_t row) const {
+  const auto& logical = rows_.at(row);
+  CsvRowChanges changes{logical.inserted, {}};
+  for (const auto& [column, cell] : logical.cells) {
+    if (cell.original && cell.value != *cell.original) changes.columns.push_back(column);
+  }
+  return changes;
+}
+
+bool CsvIndexedFile::edit_cell(const std::uint64_t row,
                                const std::string& column,
                                const std::string& value) {
   if (row >= row_count()) {
     throw std::out_of_range("row index out of bounds");
   }
-  if (!has_column(column)) {
-    throw std::runtime_error("unknown column: " + column);
+  const auto& descriptor = columns_[column_index(column)];
+  auto& logical = rows_[row];
+  auto iter = logical.cells.find(column);
+  if (iter == logical.cells.end()) {
+    std::string original = descriptor.default_value;
+    if (logical.source_row && descriptor.source_index) {
+      auto source = read_source_row(*logical.source_row);
+      if (*descriptor.source_index < source.size()) original = std::move(source[*descriptor.source_index]);
+    }
+    iter = logical.cells.emplace(column, CsvLogicalRow::Cell{value, std::move(original)}).first;
+  } else {
+    auto& cell = iter->second;
+    if (!cell.original) cell.original = cell.value;
+    cell.value = value;
   }
-  rows_[static_cast<std::size_t>(row)].cells[column] = value;
-  if (sort_index_ && sort_index_->column == column) sort_index_.reset();
   modified_ = true;
+  return iter->second.value != *iter->second.original;
 }
 
 void CsvIndexedFile::delete_row(const std::uint64_t row) {
@@ -691,11 +723,18 @@ void CsvIndexedFile::insert_row(const std::uint64_t row, const std::vector<std::
   }
 
   CsvLogicalRow inserted;
+  inserted.inserted = true;
   for (std::size_t i = 0; i < headers_.size(); ++i) {
-    inserted.cells[headers_[i]] = values[i];
+    inserted.cells[headers_[i]] = {values[i], {}};
   }
+  const bool appended = row == row_count();
   rows_.insert(rows_.begin() + static_cast<std::ptrdiff_t>(row), std::move(inserted));
-  mark_modified();
+  if (appended && sort_index_) {
+    sort_index_->row_ids.push_back(row);
+    modified_ = true;
+  } else {
+    mark_modified();
+  }
 }
 
 void CsvIndexedFile::swap_rows(const std::uint64_t first, const std::uint64_t second) {
@@ -746,9 +785,9 @@ void CsvIndexedFile::rename_column(const std::string& column, const std::string&
 
   columns_[index].name = name;
   for (auto& row : rows_) {
-    if (const auto iter = row.cells.find(column); iter != row.cells.end()) {
-      row.cells[name] = std::move(iter->second);
-      row.cells.erase(iter);
+    if (auto cell = row.cells.extract(column); !cell.empty()) {
+      cell.key() = name;
+      row.cells.insert(std::move(cell));
     }
   }
   mark_modified();
@@ -848,8 +887,6 @@ void CsvIndexedFile::reset() {
 }
 
 void CsvIndexedFile::save(const std::vector<std::string>& columns) {
-  const auto save_columns = ordered_columns(columns);
-
   recover_renamed_source();
   if (GetFileSize(input_path_) != file_size_ ||
       GetFileMtime(input_path_) != source_mtime_) {
@@ -860,40 +897,42 @@ void CsvIndexedFile::save(const std::vector<std::string>& columns) {
   const auto temp = target.parent_path() /
       (target.filename().string() + ".csvzall-save-" + GenerateSaveToken() + ".tmp");
   try {
-    {
-      std::ofstream output(temp, std::ios::binary);
-      if (!output) {
-        throw std::runtime_error("unable to open temporary save file: " + temp.string());
-      }
-      if (has_bom_) output << "\xEF\xBB\xBF";
-      if (has_headers_) WriteRow(output, ColumnNames(save_columns), output_format_, newline_);
-      for (const auto& row : rows_) {
-        WriteRow(output, row_values_for_columns(row, save_columns), output_format_, newline_);
-      }
-      output.close();
-      if (!output) {
-        throw std::runtime_error("failed to write temporary save file: " + temp.string());
-      }
-    }
-
-#ifdef _WIN32
-    if (!MoveFileExW(temp.wstring().c_str(),
-                     target.wstring().c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-      throw std::system_error(
-          static_cast<int>(GetLastError()), std::system_category(), "failed to replace CSV file");
-    }
-#else
-    std::filesystem::rename(temp, target);
-#endif
-    format_ = output_format_;
-    format_.header_row(has_headers_ ? 0 : -1);
-    reload();
+    write_save_file(temp, columns);
+    commit_save_file(temp);
   } catch (...) {
     std::error_code ec;
     std::filesystem::remove(temp, ec);
     throw;
   }
+}
+
+void CsvIndexedFile::write_save_file(const std::filesystem::path& path,
+                                    const std::vector<std::string>& columns) const {
+  const auto save_columns = ordered_columns(columns);
+  std::ofstream output(path, std::ios::binary);
+  if (!output) throw std::runtime_error("unable to open temporary save file: " + path.string());
+  if (has_bom_) output << "\xEF\xBB\xBF";
+  if (has_headers_) WriteRow(output, ColumnNames(save_columns), output_format_, newline_);
+  for (const auto& row : rows_) {
+    WriteRow(output, row_values_for_columns(row, save_columns), output_format_, newline_);
+  }
+  output.close();
+  if (!output) throw std::runtime_error("failed to write temporary save file: " + path.string());
+}
+
+void CsvIndexedFile::commit_save_file(const std::filesystem::path& path) {
+#ifdef _WIN32
+  if (!MoveFileExW(path.c_str(), std::filesystem::path(input_path_).c_str(),
+                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    throw std::system_error(
+        static_cast<int>(GetLastError()), std::system_category(), "failed to replace CSV file");
+  }
+#else
+  std::filesystem::rename(path, input_path_);
+#endif
+  format_ = output_format_;
+  format_.header_row(has_headers_ ? 0 : -1);
+  reload();
 }
 
 CsvViewData CsvViewData::Open(
@@ -957,10 +996,14 @@ CsvSortedPage CsvViewData::read_sorted_rows(std::uint64_t offset, std::uint64_t 
   return data_.read_sorted_rows(offset, limit, column, descending);
 }
 
-void CsvViewData::edit_cell(const std::uint64_t row,
+CsvRowChanges CsvViewData::row_changes(std::uint64_t row) const {
+  return data_.row_changes(row);
+}
+
+bool CsvViewData::edit_cell(const std::uint64_t row,
                             const std::string& column,
                             const std::string& value) {
-  data_.edit_cell(row, column, value);
+  return data_.edit_cell(row, column, value);
 }
 
 void CsvViewData::delete_row(const std::uint64_t row) {
@@ -999,6 +1042,14 @@ void CsvViewData::reset() {
 
 void CsvViewData::save(const std::vector<std::string>& columns) {
   data_.save(columns);
+}
+
+void CsvViewData::write_save_file(const std::string& path) const {
+  data_.write_save_file(path);
+}
+
+void CsvViewData::commit_save_file(const std::string& path) {
+  data_.commit_save_file(path);
 }
 
 }  // namespace csvzall::viewer

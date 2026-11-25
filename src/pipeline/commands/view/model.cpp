@@ -173,10 +173,14 @@ std::vector<std::vector<std::string>> CsvViewData::read_rows(
   return data_.read_sorted_rows(offset, limit, column, descending);
 }
 
-void CsvViewData::edit_cell(const std::uint64_t row,
+::csvzall::viewer::CsvRowChanges CsvViewData::row_changes(std::uint64_t row) const {
+  return data_.row_changes(row);
+}
+
+bool CsvViewData::edit_cell(const std::uint64_t row,
                             const std::string& column,
                             const std::string& value) {
-  data_.edit_cell(row, column, value);
+  return data_.edit_cell(row, column, value);
 }
 
 void CsvViewData::delete_row(const std::uint64_t row) {

@@ -30,31 +30,29 @@ async function nativeUrl(editable) {
     child.on('exit',code=>{clearTimeout(timeout);reject(new Error('native exited '+code+' '+stdout));});
   });
 }
-async function edit(page,value) {
-  await page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]').dblclick();
+async function edit(page, cell, value) {
+  await cell.dblclick();
   await page.locator('#grid .ag-cell-inline-editing input').fill(value);
   await page.keyboard.press('Enter');
   await page.waitForFunction(()=>!document.getElementById('save').disabled);
 }
-async function editWhileSorted(page, value) {
+async function editWhileSorted(page, value, useContextMenu = false) {
   const titleHeader = page.locator('#grid .ag-header-cell[col-id="title"]');
   const firstTitle = page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]');
   assert.equal(await titleHeader.locator('.ag-sort-none-icon').isVisible(), true);
   await titleHeader.click();
   await titleHeader.click();
   await firstTitle.filter({ hasText: 'world' }).waitFor();
-  assert.match(await page.locator('#sort-description').innerText(), /Sorted by title.*Clear the sort to insert or move rows/);
+  assert.match(await page.locator('#sort-description').innerText(), /Sorted by title.*New rows stay at the bottom until you save/);
   assert.equal(await page.locator('#save').isDisabled(), true);
 
   await page.locator('#insert-menu').click();
-  assert.equal(await page.getByRole('menuitem', { name: 'Row Before', exact: true }).isDisabled(), true);
-  assert.equal(await page.getByRole('menuitem', { name: 'Row After', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('menuitem', { name: 'Add row' }).isEnabled(), true);
   await page.keyboard.press('Escape');
   await firstTitle.click({ button: 'right' });
   assert.equal(await page.getByRole('menuitem', { name: 'Move Up', exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('menuitem', { name: 'Move Down', exact: true }).isDisabled(), true);
-  assert.equal(await page.getByRole('menuitem', { name: 'Insert Row Before', exact: true }).isDisabled(), true);
-  assert.equal(await page.getByRole('menuitem', { name: 'Insert Row After', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('menuitem', { name: 'Add row' }).isEnabled(), true);
   await page.keyboard.press('Escape');
 
   await firstTitle.dblclick();
@@ -63,8 +61,67 @@ async function editWhileSorted(page, value) {
   await page.locator('#status').filter({ hasText: 'Unsaved changes' }).waitFor();
   await page.locator('#grid .ag-cell-inline-editing[col-id="id"] input').fill('22');
   await page.keyboard.press('Enter');
-  await firstTitle.filter({ hasText: 'hello' }).waitFor();
-  await edit(page, value);
+  await firstTitle.and(page.locator('.csvzall-edited-cell')).filter({ hasText: 'aardvark' }).waitFor();
+  const secondTitle = page.locator('#grid .ag-row[row-index="1"] .ag-cell[col-id="title"]');
+  assert.equal(await secondTitle.innerText(), 'hello');
+  await edit(page, secondTitle, value);
+
+  if (useContextMenu) await firstTitle.click({ button: 'right' });
+  else await page.locator('#insert-menu').click();
+  await page.getByRole('menuitem', { name: 'Add row' }).click();
+  const newRow = page.locator('#grid .ag-row.csvzall-inserted-row[row-index="2"]');
+  await newRow.locator('.ag-cell.ag-cell-focus[col-id="id"]').waitFor();
+  await page.keyboard.type('3');
+  await page.keyboard.press('Enter');
+  await newRow.locator('.csvzall-edited-cell[col-id="id"]').filter({ hasText: '3' }).waitFor();
+  await edit(page, newRow.locator('.ag-cell[col-id="title"]'), 'zenith');
+  await newRow.locator('.csvzall-edited-cell[col-id="title"]').filter({ hasText: 'zenith' }).waitFor();
+  assert.equal(await firstTitle.innerText(), 'aardvark');
+}
+
+async function checkSavedSort(page) {
+  const firstTitle = page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]');
+  await firstTitle.filter({ hasText: 'zenith' }).waitFor();
+  assert.equal(await page.locator('#grid .csvzall-edited-cell, #grid .csvzall-inserted-row').count(), 0);
+}
+
+async function checkAppendAcrossPages(page) {
+  const rows = Array.from({ length: 515 }, (_, index) => `${index + 1},row`);
+  await page.locator('#file-input').setInputFiles({
+    name: 'paged.csv', mimeType: 'text/csv', buffer: Buffer.from(`id,title\n${rows.join('\n')}\n`),
+  });
+  await page.locator('#record-count').filter({ hasText: '515 rows' }).waitFor();
+  await page.locator('#grid .ag-header-cell[col-id="id"]').click();
+  await page.locator('#insert-menu').click();
+  await page.getByRole('menuitem', { name: 'Add row' }).click();
+  await page.locator('#grid .ag-row.csvzall-inserted-row[row-index="515"] .ag-cell.ag-cell-focus[col-id="id"]').waitFor();
+  await page.locator('#reset').click();
+  await page.locator('#record-count').filter({ hasText: '515 rows' }).waitFor();
+}
+
+async function checkPendingEdit(page) {
+  const target = page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]');
+  let releaseEdit;
+  const holdEdit = new Promise(resolve => { releaseEdit = resolve; });
+  await page.route('**/api/edit-cell', async route => {
+    await holdEdit;
+    await route.continue();
+  }, { times: 1 });
+  const dispatched = page.waitForRequest('**/api/edit-cell');
+  await edit(page, target, 'pending');
+  await dispatched;
+  try {
+    await target.dblclick();
+    assert.equal(await page.locator('#grid .ag-cell-inline-editing').count(), 0);
+    assert.equal(await target.innerText(), 'hello');
+  } finally {
+    releaseEdit();
+  }
+  await target.and(page.locator('.csvzall-edited-cell')).filter({ hasText: 'pending' }).waitFor();
+  await edit(page, target, 'hello');
+  await target.and(page.locator(':not(.csvzall-edited-cell)')).filter({ hasText: 'hello' }).waitFor();
+  await page.locator('#reset').click();
+  await page.locator('#save:disabled').waitFor();
 }
 
 async function clearSortAndInsert(page, firstValue) {
@@ -72,14 +129,14 @@ async function clearSortAndInsert(page, firstValue) {
   await page.locator('#sort-notice').waitFor({ state: 'hidden' });
   await page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]').filter({ hasText: firstValue }).waitFor();
   await page.locator('#insert-menu').click();
-  await page.getByText('Row After', { exact: true }).click();
-  await page.locator('#record-count').filter({ hasText: '3 rows' }).waitFor();
+  await page.getByText('Row after', { exact: true }).click();
+  await page.locator('#record-count').filter({ hasText: '4 rows' }).waitFor();
   await page.locator('#reset').click();
-  await page.locator('#record-count').filter({ hasText: '2 rows' }).waitFor();
+  await page.locator('#record-count').filter({ hasText: '3 rows' }).waitFor();
 }
 async function commonActions(page) {
   await page.locator('#insert-menu').click();
-  await page.getByText('Row After',{exact:true}).click();
+  await page.getByText('Row after',{exact:true}).click();
   await page.waitForFunction(()=>document.getElementById('record-count').textContent.startsWith('3 rows'));
   await page.locator('#reset').click();
   await page.waitForFunction(()=>document.getElementById('record-count').textContent.startsWith('2 rows'));
@@ -108,11 +165,13 @@ async function commonActions(page) {
   await editWhileSorted(page, 'WASM updated');
   const downloaded=page.waitForEvent('download');await page.locator('#save').click();
   const stream=await (await downloaded).createReadStream();let text='';for await(const chunk of stream)text+=chunk;
-  assert.equal(text, 'id,title\n1,WASM updated\n22,aardvark\n');
+  assert.equal(text, 'id,title\n1,WASM updated\n22,aardvark\n3,zenith\n');
   await page.waitForFunction(()=>document.getElementById('save').disabled);
+  await checkSavedSort(page);
   await clearSortAndInsert(page, 'WASM updated');
   await page.screenshot({path:path.join(output,'wasm-shell.png')});
   const wasmSelected = await page.locator('#grid').evaluate(el=>getComputedStyle(el).getPropertyValue('--ag-selected-row-background-color'));
+  await checkAppendAcrossPages(page);
   console.log('WASM: real engine open, insert/reset, rename/reset, edit/download, clean state passed');
   await page.setViewportSize({width:390,height:844});
   await page.goto(wasmUrl + '/host-harness.html');
@@ -120,7 +179,12 @@ async function commonActions(page) {
   const hosted = page.frameLocator('#viewer');
   await hosted.locator('#grid .ag-cell').filter({hasText:'Ada'}).waitFor();
   assert.equal(await hosted.locator('#file-tools').isVisible(),false);
-  await hosted.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="name"]').dblclick();
+  const hostedNameHeader = hosted.locator('#grid .ag-header-cell[col-id="name"]');
+  await hostedNameHeader.click();
+  await hostedNameHeader.click();
+  const hostedFirstName = hosted.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="name"]');
+  await hostedFirstName.filter({ hasText: 'Grace' }).waitFor();
+  await hosted.locator('#grid .ag-row[row-index="1"] .ag-cell[col-id="name"]').dblclick();
   const editor = hosted.locator('#grid .ag-cell-inline-editing input');
   await editor.fill('Hosted updated');
   const gridBefore = await hosted.locator('#grid').boundingBox();
@@ -136,11 +200,19 @@ async function commonActions(page) {
   assert.deepEqual(await hosted.locator('#grid').boundingBox(),gridBefore);
   assert.ok(gridBefore.x>=0 && gridBefore.width<=390);
   await page.keyboard.press('Enter');
+  await page.evaluate(() => window.csvzallHostHarness.rejectNextSave());
+  await hosted.locator('#save').click();
+  await hosted.locator('#status').filter({ hasText: 'Host rejected save' }).waitFor();
+  assert.equal(await hosted.locator('#save').isEnabled(), true);
+  await hostedNameHeader.click(); // clear
+  await hostedNameHeader.click(); // ascending
+  await hostedFirstName.and(hosted.locator('.csvzall-edited-cell')).filter({ hasText: 'Hosted updated' }).waitFor();
   await hosted.locator('#save').click();
   await page.locator('#saved').filter({hasText:'Last save:'}).waitFor();
   assert.match(await page.evaluate(()=>new TextDecoder().decode(window.csvzallHostHarness.savedBytes())),/Hosted updated/);
   await hosted.locator('#save:disabled').waitFor();
-  await hosted.locator('#grid .ag-cell').filter({hasText:'Hosted updated'}).waitFor();
+  await hosted.locator('#grid .ag-row[row-index="1"] .ag-cell[col-id="name"]').filter({hasText:'Hosted updated'}).waitFor();
+  assert.equal(await hosted.locator('#grid .csvzall-edited-cell').count(), 0);
   await page.screenshot({path:path.join(output,'hosted-mobile-shell.png')});
   console.log('Hosted WASM: early file queue, mobile layout, live theme with active editor, stable grid size, acknowledged save passed');
   await page.setViewportSize({width:1200,height:700});
@@ -148,7 +220,8 @@ async function commonActions(page) {
   await page.locator('#grid .ag-cell').filter({hasText:'hello'}).waitFor();
   await page.locator('#open-sql-query').waitFor();await page.locator('#add-chart').waitFor();
   await commonActions(page);
-  await editWhileSorted(page, 'native updated');
+  await checkPendingEdit(page);
+  await editWhileSorted(page, 'native updated', true);
   await page.locator('#open-sql-query').click();
   await page.locator('#sql-query').fill('SELECT title FROM data WHERE id = 1');
   await page.locator('#run-sql').click();
@@ -162,7 +235,8 @@ async function commonActions(page) {
   await page.locator('#exit-sql-query').click();
   await page.locator('#save').click();
   await page.waitForFunction(()=>document.getElementById('save').disabled);
-  assert.equal(fs.readFileSync(fixture,'utf8'), 'id,title\n1,native updated\n22,aardvark\n');
+  assert.equal(fs.readFileSync(fixture,'utf8'), 'id,title\n1,native updated\n22,aardvark\n3,zenith\n');
+  await checkSavedSort(page);
   await clearSortAndInsert(page, 'native updated');
   await page.locator('#add-chart').click();
   await page.locator('#heatmap-chart-dialog[open] #chart-id').waitFor();

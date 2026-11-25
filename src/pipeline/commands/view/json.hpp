@@ -21,6 +21,7 @@ std::string BuildStartupJson(const std::string& url);
 std::string SaveResultJson(std::size_t charts_generated, std::string_view chart_error = {});
 
 std::uint64_t JsonUintField(std::string_view body, std::string_view field);
+std::uint64_t JsonUintFieldOr(std::string_view body, std::string_view field, std::uint64_t fallback);
 std::string JsonStringField(std::string_view body, std::string_view field);
 std::vector<std::string> JsonStringArrayField(std::string_view body, std::string_view field);
 bool JsonBoolField(std::string_view body, std::string_view field);

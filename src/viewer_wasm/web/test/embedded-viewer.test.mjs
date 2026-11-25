@@ -99,7 +99,8 @@ test('embedded build contains its worker and engine while the standalone release
         return reply.result;
       };
       const savedText = async () => {
-        const saved = await check('save');
+        const saved = await check('prepareSave');
+        await check('finishSave', { saveId: saved.saveId, commit: true });
         return new TextDecoder('utf-8', { ignoreBOM: true }).decode(new Uint8Array(saved.buffer, saved.byteOffset, saved.byteLength));
       };
       const sortableCsv = 'id,score\nalpha,10\nbeta,2\ngamma,2\n';
@@ -112,11 +113,31 @@ test('embedded build contains its worker and engine while the standalone release
       assert.deepEqual(Array.from(lastPage.rowIds), [0]);
       assert.equal(firstPage.rows[0][0], 'beta');
       assert.equal(await savedText(), sortableCsv);
-      await check('editCell', { rowIndex: firstPage.rowIds[0], column: 'score', value: '25' });
-      assert.deepEqual(Array.from((await readSorted(0, 3)).rowIds), [2, 0, 1]);
-      assert.deepEqual(Array.from((await readSorted(0, 3, 'desc')).rowIds), [1, 0, 2]);
-      await check('editCell', { rowIndex: (await readSorted(1, 1)).rowIds[0], column: 'id', value: 'renamed' });
-      assert.equal(await savedText(), 'id,score\nrenamed,10\nbeta,25\ngamma,2\n');
+      const beta = firstPage.rowIds[0];
+      assert.equal((await check('editCell', { rowIndex: beta, column: 'score', value: '25' })).edited, true);
+      assert.equal((await check('editCell', { rowIndex: beta, column: 'id', value: 'beta' })).edited, false);
+      await check('insertRow', { values: ['draft', 'text'] });
+      assert.deepEqual(Array.from((await readSorted(0, 2)).rowIds), [1, 2]);
+      assert.deepEqual(Array.from((await readSorted(2, 2)).rowIds), [0, 3]);
+      assert.deepEqual(Array.from((await readSorted(0, 4, 'desc')).rowIds), [0, 1, 2, 3]);
+      const changes = JSON.parse(JSON.stringify((await readSorted(0, 4)).changes));
+      assert.deepEqual(changes, [
+        { rowId: 1, inserted: false, columns: ['score'] },
+        { rowId: 3, inserted: true, columns: [] },
+      ]);
+      const rejectedSave = await check('prepareSave');
+      assert.deepEqual(Array.from((await readSorted(0, 4)).rowIds), [1, 2, 0, 3]);
+      await check('finishSave', { saveId: rejectedSave.saveId, commit: false });
+      assert.deepEqual(Array.from((await readSorted(0, 4)).rowIds), [1, 2, 0, 3]);
+      assert.deepEqual(JSON.parse(JSON.stringify((await readSorted(0, 4)).changes)), changes);
+
+      assert.equal((await check('editCell', { rowIndex: beta, column: 'score', value: '2' })).edited, false);
+      assert.equal((await readSorted(0, 2)).changes.length, 0);
+      await check('editCell', { rowIndex: beta, column: 'score', value: '25' });
+      await check('editCell', { rowIndex: 3, column: 'score', value: '1' });
+      assert.equal(await savedText(), 'id,score\nalpha,10\nbeta,25\ngamma,2\ndraft,1\n');
+      assert.deepEqual(Array.from((await readSorted(0, 4)).rowIds), [3, 2, 0, 1]);
+      assert.equal((await readSorted(0, 4)).changes.length, 0);
       for (const value of ["'hello'", "'semi;colon'", "'pipe|value'", "'it''s'", "O'Brien"]) {
         const csv = `name,note\na,${value}\n`;
         const opened = await check('open', { name: 'literal.csv', buffer: new TextEncoder().encode(csv).buffer });
@@ -127,7 +148,7 @@ test('embedded build contains its worker and engine while the standalone release
       for (const quote of ["'", '~']) {
         await check('open', { name: 'ambiguous.csv', buffer: new TextEncoder().encode("name,note\na,O'Brien~literal\n").buffer });
         await check('csvOptions', { delimiter: ',', quote, hasHeaders: true });
-        const saved = await check('save');
+        const saved = await check('prepareSave');
         const savedBytes = new Uint8Array(saved.buffer, saved.byteOffset, saved.byteLength);
         await check('open', { name: 'ambiguous.csv', buffer: savedBytes.slice().buffer });
         await check('readCsvOptions', { delimiter: ',', quote, hasHeaders: true });

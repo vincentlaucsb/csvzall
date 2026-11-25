@@ -79,7 +79,8 @@ class CsvViewData {
   [[nodiscard]] ::csvzall::viewer::CsvSortedPage read_sorted_rows(
       std::uint64_t offset, std::uint64_t limit, const std::string& column, bool descending) const;
 
-  void edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
+  [[nodiscard]] ::csvzall::viewer::CsvRowChanges row_changes(std::uint64_t row) const;
+  bool edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
   void delete_row(std::uint64_t row);
   void insert_row(std::uint64_t row, const std::vector<std::string>& values);
   void swap_rows(std::uint64_t first, std::uint64_t second);
