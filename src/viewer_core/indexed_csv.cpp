@@ -923,7 +923,7 @@ bool CsvIndexedFile::source_changed() const {
   return !FileExists(input_path_) ||
          GetFileSize(input_path_) != file_size_ ||
          GetFileMtime(input_path_) != source_mtime_ ||
-         GetSourceIdentity(input_path_) != source_identity_;
+         (!allow_rename_recovery_ && GetSourceIdentity(input_path_) != source_identity_);
 }
 
 bool CsvIndexedFile::reload_if_changed() {
