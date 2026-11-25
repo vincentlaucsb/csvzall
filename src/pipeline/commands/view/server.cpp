@@ -451,7 +451,9 @@ void ViewServer::RegisterCsvRoutes() {
                          impl_->data->insert_row(
                              JsonUintFieldOr(request.body, "row", impl_->data->row_count()),
                              JsonStringArrayField(request.body, "values"));
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                         response.set_content("{\"ok\":true,\"totalRows\":" +
+                                              std::to_string(impl_->data->row_count()) + "}",
+                                              "application/json; charset=utf-8");
                        } catch (const std::exception& ex) {
                          BadRequest(response, ex.what());
                        }

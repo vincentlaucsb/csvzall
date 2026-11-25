@@ -5,7 +5,7 @@ import { mountViewerShell } from './shell-markup.mjs';
 import { createHostGridAdapter } from './host-grid.mjs';
 import { createSaveState } from './save-state.mjs';
 import { createMutationTracker } from './save.mjs';
-import { createPagedDatasource, currentGridColumns, editedColumns, insertedRow, rowsToObjects, rowInsertionIndex, sourceRowId } from './grid.mjs';
+import { createPagedDatasource, currentGridColumns, editedColumns, entryRow, extendEntryRowBlock, insertedRow, makeEntryRow, rowsToObjects, rowInsertionIndex, sourceRowId } from './grid.mjs';
 import { createTablerIcon as createIcon, decorateButton, decorateIconButton, decorateMenuButton } from './icons.mjs';
 import { readLocalFile } from './local-file.mjs';
 import { installUnsavedChangesBeforeUnload } from './dirty-state.mjs';
@@ -27,9 +27,6 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const filePicker = document.querySelector('.file-picker');
   const statusNode = document.getElementById('status');
   const recordCountNode = document.getElementById('record-count');
-  const sortNotice = document.getElementById('sort-notice');
-  const sortDescription = document.getElementById('sort-description');
-  const clearSort = document.getElementById('clear-sort');
   const saveButton = document.getElementById('save');
   const resetButton = document.getElementById('reset');
   const csvOptionsButton = document.getElementById('csv-options');
@@ -62,7 +59,9 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const cancelRenameColumn = document.getElementById('cancel-rename-column');
 
   const pendingCellEdits = new Set();
+  let saveEditDrain = null;
   const pendingCellFields = new WeakMap();
+  const pendingEntryRows = new WeakMap();
   let viewOpen = false;
   let editable = true;
   let changingStructure = false;
@@ -73,11 +72,14 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   let csvOptions = null;
   let readingCsv = false;
   let rowCount = 0;
+  let rowRevision = 0;
   let waitingForInitialCount = false;
   let viewGeneration = 0;
   let datasource;
   let dirty = false;
   let dataDirty = false;
+  let columnOrderDirty = false;
+  let pendingEntryCount = 0;
   let pendingInsertColumn = 0;
   let pendingRenameColumn = '';
   let hostBridge = null;
@@ -126,21 +128,24 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     focusTarget?.focus();
   }
 
+  function queueMutation(type, payload, generation, notify) {
+    return csvMutations.run(() => {
+      if (!viewOpen || generation !== viewGeneration) throw new Error('The open CSV changed.');
+      return sendRequest(type, payload, []);
+    }, notify);
+  }
+
   async function request(type, payload = {}, transfer = []) {
     if ((mutationTypes.has(type) || type === 'readCsvOptions') && (!editable || !viewOpen)) throw new Error('This CSV is read-only.');
     if (type === 'swapRows' && activeSort()) throw new Error('Clear the sort to move rows.');
     if (!mutationTypes.has(type)) return sendRequest(type, payload, transfer);
     const generation = viewGeneration;
-    const mutate = () => {
-      if (!viewOpen || generation !== viewGeneration) throw new Error('The open CSV changed.');
-      return sendRequest(type, payload, transfer);
-    };
-    if (type === 'editCell') return csvMutations.run(mutate);
+    if (type === 'editCell') return queueMutation(type, payload, generation);
     if (changingStructure) throw new Error('Wait for the current table change to finish.');
     changingStructure = true;
     try {
       await finishEditing();
-      return await csvMutations.run(mutate);
+      return await queueMutation(type, payload, generation);
     } finally {
       changingStructure = false;
     }
@@ -166,8 +171,16 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
 
   function setDirty(nextDirty, { force = false, columnOrder = false } = {}) {
     if (nextDirty || columnOrder) saveState.changed();
-    if (!columnOrder) dataDirty = nextDirty;
-    if (columnOrder) nextDirty = dataDirty || nextDirty;
+    if (columnOrder) columnOrderDirty = nextDirty;
+    else {
+      dataDirty = nextDirty;
+      if (!nextDirty) columnOrderDirty = false;
+    }
+    refreshDirtyState(force);
+  }
+
+  function refreshDirtyState(force = false) {
+    const nextDirty = dataDirty || columnOrderDirty || pendingEntryCount > 0;
     const changed = dirty !== nextDirty;
     dirty = nextDirty;
     refreshActionState();
@@ -187,12 +200,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     return gridApi.getColumnState().find(column => column.sort === 'asc' || column.sort === 'desc');
   }
 
-  function renderSortNotice() {
-    const sort = activeSort();
-    sortNotice.hidden = !viewOpen || resultMode || !sort;
-    const direction = sort?.sort === 'asc' ? 'ascending' : 'descending';
-    sortDescription.textContent = sortNotice.hidden ? '' :
-      `Sorted by ${sort.colId} (${direction}).${editable ? ' New rows stay at the bottom until you save.' : ''}`;
+  function displayedRowCount() {
+    return rowCount + Number(editable);
   }
 
   function markDataDirty(message = `Unsaved changes in ${activeName}.`) {
@@ -223,7 +232,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   const canEditCell = ({ data, colDef }) =>
-    editable && !changingStructure && !pendingCellFields.get(data)?.has(colDef.field);
+    editable && Boolean(data) && !changingStructure && !pendingCellFields.get(data)?.has(colDef.field);
   const gridOptions = {
     columnDefs: [],
     readOnlyEdit: true,
@@ -235,11 +244,14 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       filter: false,
       minWidth: 140,
       flex: 1,
+      valueFormatter: ({ data, value, column, api }) =>
+        data?.[entryRow] && api.getAllDisplayedColumns()[0] === column ? 'Add row…' : value,
       cellClassRules: {
         'csvzall-edited-cell': ({ data, colDef }) => data?.[editedColumns]?.has(colDef.field) ?? false,
       },
     },
     rowClassRules: {
+      'csvzall-entry-row': ({ data }) => data?.[entryRow] === true,
       'csvzall-inserted-row': ({ data }) => data?.[insertedRow] === true,
     },
     rowModelType: 'infinite',
@@ -250,6 +262,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       checkboxes: false,
       headerCheckbox: false,
       enableClickSelection: true,
+      isRowSelectable: ({ data }) => Number.isInteger(data?.[sourceRowId]),
     },
     cacheBlockSize,
     maxBlocksInCache: 8,
@@ -263,6 +276,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       if (editable && viewOpen && event.finished && backend.capabilities.columnOrder) {
         const columns = currentGridColumns(gridApi, activeColumns);
         setDirty(!columns.every((column, index) => column === activeColumns[index]), { columnOrder: true });
+        const entry = gridApi.getRenderedNodes().find(node => node.data?.[entryRow]);
+        if (entry) gridApi.refreshCells({ rowNodes: [entry], force: true });
       }
     },
     onCellEditingStarted(event) { compactLayout?.onCellEditingStarted(); hostGrid.onCellEditingStarted(event); },
@@ -270,22 +285,25 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       compactLayout?.onCellEditingStopped();
       hostGrid.onCellEditingStopped(event);
     },
-    onSortChanged() { pendingRowFocus = null; renderSortNotice(); },
+    onSortChanged() { pendingRowFocus = null; },
     onCellEditRequest(event) {
+      const data = event.data;
       if (!editable || !viewOpen || typeof event.colDef.field !== 'string' ||
-          !Number.isInteger(event.data?.[sourceRowId])) {
+          (!data?.[entryRow] && !Number.isInteger(data?.[sourceRowId])) ||
+          (data?.[entryRow] && (event.newValue ?? '') === '')) {
         return;
       }
-      let fields = pendingCellFields.get(event.data);
+      let fields = pendingCellFields.get(data);
       if (!fields) {
         fields = new Set();
-        pendingCellFields.set(event.data, fields);
+        pendingCellFields.set(data, fields);
       }
       const field = event.colDef.field;
       if (fields.has(field)) return;
       fields.add(field);
       const pending = commitCellEdit(event, viewGeneration);
       pendingCellEdits.add(pending);
+      saveEditDrain?.add(pending);
       void pending.finally(() => {
         fields.delete(field);
         pendingCellEdits.delete(pending);
@@ -294,10 +312,6 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   };
 
   const gridApi = createGrid(gridElement, gridOptions);
-  clearSort.addEventListener('click', () => {
-    gridApi.stopEditing();
-    gridApi.applyColumnState({ defaultState: { sort: null } });
-  });
 
   document.addEventListener('contextmenu', (event) => {
     event.preventDefault();
@@ -312,7 +326,6 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       minWidth: 140,
       flex: 1,
     })));
-    renderSortNotice();
   }
 
   function setDatasource({ getRows }) {
@@ -331,17 +344,14 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   function selectedSourceRow() {
+    const focused = gridApi.getFocusedCell();
+    const focusedData = focused && gridApi.getDisplayedRowAtIndex(focused.rowIndex)?.data;
+    if (focusedData?.[entryRow]) return rowCount;
     const selected = gridApi.getSelectedRows ? gridApi.getSelectedRows() : [];
     if (Number.isInteger(selected[0]?.[sourceRowId])) {
       return selected[0][sourceRowId];
     }
-    const focused = gridApi.getFocusedCell ? gridApi.getFocusedCell() : null;
-    if (focused && Number.isInteger(focused.rowIndex) && typeof gridApi.getDisplayedRowAtIndex === 'function') {
-      const focusedNode = gridApi.getDisplayedRowAtIndex(focused.rowIndex);
-      if (Number.isInteger(focusedNode?.data?.[sourceRowId])) {
-        return focusedNode.data[sourceRowId];
-      }
-    }
+    if (Number.isInteger(focusedData?.[sourceRowId])) return focusedData[sourceRowId];
     return rowCount;
   }
 
@@ -381,28 +391,70 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   async function commitCellEdit(event, generation) {
     const column = event.colDef.field;
     const value = event.newValue ?? '';
+    const data = event.data;
     try {
+      if (data[entryRow]) {
+        const existing = pendingEntryRows.get(data);
+        if (!existing) {
+          const pending = appendEntryRow(event.node, data, column, value, generation);
+          pendingEntryRows.set(data, pending);
+          try { await pending; }
+          finally { pendingEntryRows.delete(data); }
+          return;
+        }
+        await existing;
+        if (generation !== viewGeneration || !viewOpen) return;
+      }
       const { edited } = await request('editCell', {
-        rowIndex: event.data[sourceRowId],
+        rowIndex: data[sourceRowId],
         column,
         value,
       });
       if (!viewOpen || generation !== viewGeneration) return;
       markDataDirty();
-      if (event.node.data !== event.data) return;
-      event.data[column] = value;
-      const columns = event.data[editedColumns] ??= new Set();
+      if (event.node.data !== data) return;
+      data[column] = value;
+      const columns = data[editedColumns] ??= new Set();
       if (edited) columns.add(column);
       else columns.delete(column);
       gridApi.refreshCells({ rowNodes: [event.node], columns: [event.column] });
     } catch (error) {
       if (!viewOpen || generation !== viewGeneration) return;
-      setStatus(error instanceof Error ? error.message : 'Edit failed');
+      const failure = error instanceof Error ? error : new Error('Edit failed');
+      setStatus(failure.message);
+      return failure;
     }
+  }
+
+  async function appendEntryRow(node, data, column, value, generation) {
+    const values = activeColumns.map(field => field === column ? value : '');
+    // Tab can start editing the next cell before the append is acknowledged.
+    // Queue the append like a cell edit, without stopping the next editor.
+    pendingEntryCount += 1;
+    refreshDirtyState();
+    let schema;
+    try {
+      schema = await queueMutation('insertRow', { values }, generation, () => saveState.changed());
+      if (schema && generation === viewGeneration) markDataDirty();
+    } finally {
+      if (generation === viewGeneration) {
+        pendingEntryCount -= 1;
+        refreshDirtyState();
+      }
+    }
+    if (!viewOpen || generation !== viewGeneration) return;
+    applySchema(schema);
+    rowRevision += 1;
+    delete data[entryRow];
+    data[sourceRowId] = rowCount - 1;
+    data[insertedRow] = true;
+    data[column] = value;
+    extendEntryRowBlock(gridApi, node, data, rowCount, cacheBlockSize, activeColumns);
   }
 
   function loadView(schema, name, { deferInitialCount = false } = {}) {
     pendingRowFocus = null;
+    pendingEntryCount = 0;
     viewOpen = true;
     activeName = name;
     document.getElementById('file-name').textContent = name;
@@ -426,25 +478,31 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
           const offset = params.startRow;
           const limit = Math.max(params.endRow - params.startRow, 1);
           const [sort] = params.sortModel;
-          if (pendingCellEdits.size) await Promise.all([...pendingCellEdits]);
           const payload = { offset, limit };
           if (sort) {
             Object.assign(payload, { sortColumn: sort.colId, sortDirection: sort.sort });
           }
-          const page = await request('readRows', payload);
-          if (generation !== viewGeneration) {
-            params.failCallback();
-            return;
-          }
+          let page;
+          let revision;
+          do {
+            if (pendingCellEdits.size) await Promise.all([...pendingCellEdits]);
+            if (generation !== viewGeneration) return params.failCallback();
+            revision = rowRevision;
+            page = await request('readRows', payload);
+            if (pendingEntryCount > 0) await Promise.all([...pendingCellEdits]);
+            if (generation !== viewGeneration) return params.failCallback();
+          } while (revision !== rowRevision);
           if (sort && (!Array.isArray(page.rowIds) || page.rowIds.length !== page.rows.length ||
               !page.rowIds.every(Number.isInteger))) {
             throw new Error('Sorted rows could not be matched to the CSV.');
           }
           const countChanged = rowCount !== page.totalRows;
           rowCount = page.totalRows;
-          params.successCallback(
-            rowsToObjects(activeColumns, page.rows, page.offset, page.rowIds, page.changes),
-            page.totalRows);
+          const rows = rowsToObjects(activeColumns, page.rows, page.offset, page.rowIds, page.changes);
+          if (editable && offset + rows.length === rowCount && rows.length < limit) {
+            rows.push(makeEntryRow(activeColumns));
+          }
+          params.successCallback(rows, displayedRowCount());
           const focus = pendingRowFocus;
           if (focus && focus.index >= offset && focus.index < offset + page.rows.length) {
             requestAnimationFrame(() => {
@@ -476,8 +534,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   async function openBuffer(name, buffer, sourceLabel) {
     saveState.changed();
     const generation = ++viewGeneration;
+    pendingEntryCount = 0;
     viewOpen = false;
-    renderSortNotice();
     rowCount = 0;
     activeColumns = [];
     setDirty(false);
@@ -576,7 +634,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       refreshRows();
       if (append) {
         pendingRowFocus = { index: schema.rowCount - 1 };
-        gridApi.setRowCount(schema.rowCount, true);
+        gridApi.setRowCount(displayedRowCount(), true);
         gridApi.ensureIndexVisible(pendingRowFocus.index, 'bottom');
       }
       markDataDirty();
@@ -718,7 +776,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const columnMenu = createContextMenu({
     trigger: 'manual',
     theme: 'system',
-    items: () => [
+    items: ({ data }) => [
+      ...(data?.column && activeSort()?.colId === data.column ? [{ id: 'clear-sort', label: 'Clear sort' }, { type: 'separator' }] : []),
       ...columnFeatures.map(feature => ({ id: feature.id, label: feature.label, icon: () => createIcon(feature.icon) })),
       ...(editable ? [
       { id: 'rename-column', label: 'Rename Column', icon: () => createIcon('pencil'), disabled: csvOptions?.hasHeaders === false },
@@ -728,6 +787,11 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     ],
     onSelect(event) {
       const column = event.context.data?.column;
+      if (event.id === 'clear-sort' && activeSort()?.colId === column) {
+        gridApi.stopEditing();
+        gridApi.applyColumnState({ defaultState: { sort: null } });
+        return;
+      }
       const feature = columnFeatures.find(item => item.id === event.id);
       if (feature) { event.close(); feature.run(column); return; }
       if (event.id === 'rename-column' && typeof column === 'string') {
@@ -766,7 +830,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       return;
     }
     event.preventDefault();
-    if (!editable && !columnFeatures.length) return;
+    if (!editable && !columnFeatures.length && activeSort()?.colId !== column) return;
     columnMenu.open({
       x: event.clientX,
       y: event.clientY,
@@ -776,18 +840,20 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     });
   });
 
-  function rowInsertItems(prefix) {
+  function rowInsertItems(prefix, includeAppend = false) {
     const icon = () => createIcon('row-insert-bottom');
+    const addRow = { id: 'add-row', label: 'Add row', icon };
     return activeSort()
-      ? [{ id: 'add-row', label: 'Add row', icon }]
+      ? [addRow]
       : [
+          ...(includeAppend ? [addRow] : []),
           { id: 'insert-row-before', label: `${prefix}before`, icon },
           { id: 'insert-row-after', label: `${prefix}after`, icon },
         ];
   }
 
   createToolbarDropdown(insertMenuButton, () => [
-    ...rowInsertItems('Row '),
+    ...rowInsertItems('Row ', true),
     { type: 'separator' },
     { id: 'insert-column-before', label: 'Column Before', icon: () => createIcon('column-insert-right') },
     { id: 'insert-column-after', label: 'Column After', icon: () => createIcon('column-insert-right') },
@@ -963,9 +1029,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     const wasInert = document.body.inert;
     document.body.inert = true;
     try {
-      gridApi.stopEditing();
-      await new Promise(resolve => window.setTimeout(resolve, 0));
-      await Promise.all([...pendingCellEdits]);
+      await finishEditing({ requireSuccess: true });
       await csvMutations.settle();
       showLoading('Saving CSV', `${activeName} is being rewritten with your edits.`);
       const name = activeName;
@@ -1022,10 +1086,21 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   resetButton.addEventListener('click', () => { void resetCurrentChanges(); });
 
 
-  async function finishEditing() {
-    gridApi.stopEditing();
-    await new Promise(resolve => window.setTimeout(resolve, 0));
-    await Promise.all([...pendingCellEdits]);
+  async function finishEditing({ requireSuccess = false } = {}) {
+    const pending = new Set(pendingCellEdits);
+    if (requireSuccess) saveEditDrain = pending;
+    try {
+      gridApi.stopEditing();
+      await new Promise(resolve => window.setTimeout(resolve, 0));
+      for (const edit of pendingCellEdits) pending.add(edit);
+      const results = await Promise.all(pending);
+      if (requireSuccess) {
+        const failure = results.find(result => result instanceof Error);
+        if (failure) throw failure;
+      }
+    } finally {
+      if (saveEditDrain === pending) saveEditDrain = null;
+    }
   }
   decorateMenuButton(insertMenuButton, 'plus', 'Insert');
   decorateMenuButton(deleteMenuButton, 'trash', 'Delete');
@@ -1044,8 +1119,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     finishEditing: async () => { await finishEditing(); await csvMutations.settle(); },
     save: saveCurrentChanges, reset: resetCurrentChanges, openBuffer, requestOpenFile,
     setStatus, refreshRows,
-    restoreTable() { resultMode = false; renderSortNotice(); updateRecordCount(); setStatus(dirty ? 'Unsaved changes.' : 'Ready.'); },
-    setResultMode(value) { resultMode = value; renderSortNotice(); },
+    restoreTable() { resultMode = false; updateRecordCount(); setStatus(dirty ? 'Unsaved changes.' : 'Ready.'); },
+    setResultMode(value) { resultMode = value; },
     addColumnAction(action) { columnFeatures.push(action); },
     connectHost(host) { hostBridge = host; setHostMode(host.isHostMode()); },
     setHostMode, onViewportResize: hostGrid.onViewportResize,

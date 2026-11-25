@@ -21,7 +21,7 @@ function fixture() {
     engineReady: false, pendingOpenFile: null, viewOpen: false, hostBridge: { isHostMode: () => false },
     fileInput: { disabled: true }, features: [], featureDisposers: [], shell: {},
     document: { getElementById: () => ({ textContent: '' }) },
-    setStatus: text => statuses.push(text),
+    setStatus: text => statuses.push(text), scheduleExternal() {},
     loadView: (schema, name) => { context.viewOpen = true; views.push({ schema, name }); },
     showLoading: (...args) => dialogs.push(['show', ...args]),
     hideLoading: () => dialogs.push(['hide']),
@@ -57,15 +57,15 @@ function countFixture(rowCount) {
   const frames = [];
   const node = { textContent: '' };
   const context = {
-    recordCountNode: node, resultMode: false, viewGeneration: 0, rowCount: 0, activeColumns: [],
+    recordCountNode: node, resultMode: false, viewGeneration: 0, rowCount: 0, rowRevision: 0, activeColumns: [],
     document: { getElementById: () => ({}) }, gridApi: { applyColumnState() {} },
-    pendingCellEdits: new Set(), requestAnimationFrame: fn => frames.push(fn),
+    pendingCellEdits: new Set(), pendingEntryCount: 0, requestAnimationFrame: fn => frames.push(fn),
     setDatasource(value) { context.datasource = value; },
     request: async () => ({ totalRows: rowCount, offset: 0, rows: [] }),
-    rowsToObjects: () => [], setGridColumnDefs() {}, setDirty() {}, setStatus() {}, hostBridge: null,
+    rowsToObjects: () => [], makeEntryRow: () => ({}), setGridColumnDefs() {}, setDirty() {}, setStatus() {}, hostBridge: null,
   };
   const functions = factory.body.body.filter(n => n.type === 'FunctionDeclaration' &&
-    ['loadView', 'applySchema', 'updateRecordCount'].includes(n.id.name));
+    ['loadView', 'applySchema', 'updateRecordCount', 'displayedRowCount'].includes(n.id.name));
   runInNewContext(functions.map(n => source.slice(n.start, n.end)).join('\n'), context);
   const schema = { columns: ['id'], rowCount };
   context.loadView(schema, 'sample.csv', { deferInitialCount: true });
@@ -111,4 +111,25 @@ test('a query opened during startup keeps its result count and a failed first pa
   failed.context.request = async () => { throw new Error('Row load failed'); };
   await failed.read();
   assert.equal(failed.node.textContent, '5 rows, 1 columns');
+});
+
+test('Save sees a failed edit that starts and finishes during stopEditing', async () => {
+  const finish = factory.body.body.find(node => node.type === 'FunctionDeclaration' && node.id.name === 'finishEditing');
+  const failure = new Error('Insert rejected');
+  const pendingCellEdits = new Set();
+  const context = {
+    Error, pendingCellEdits, saveEditDrain: null,
+    window: { setTimeout },
+    gridApi: {
+      stopEditing() {
+        const edit = Promise.resolve(failure);
+        pendingCellEdits.add(edit);
+        context.saveEditDrain?.add(edit);
+        void edit.then(() => pendingCellEdits.delete(edit));
+      },
+    },
+  };
+  runInNewContext(source.slice(finish.start, finish.end), context);
+  await assert.rejects(context.finishEditing({ requireSuccess: true }), /Insert rejected/);
+  assert.equal(context.saveEditDrain, null);
 });

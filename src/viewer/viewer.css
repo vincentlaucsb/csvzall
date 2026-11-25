@@ -76,9 +76,9 @@ button:disabled {
   --csvzall-shared-shell-v1: 1;
   height: 100%;
   display: grid;
-  grid-template-areas: "main-toolbar" "query-toolbar" "sort-notice" "data" "footer";
+  grid-template-areas: "main-toolbar" "query-toolbar" "data" "footer";
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   background: var(--csvzall-background-primary);
 }
 
@@ -504,24 +504,6 @@ button:disabled {
   color: var(--popright-disabled-color, var(--csvzall-text-muted));
 }
 
-.sort-notice {
-  grid-area: sort-notice;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.35rem 0.75rem;
-  background: var(--csvzall-background-secondary);
-  border-bottom: 1px solid var(--csvzall-border);
-}
-
-#sort-description {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-#clear-sort { flex: 0 0 auto; }
-
 .grid-wrap {
   grid-area: data;
   min-width: 0;
@@ -582,6 +564,11 @@ button:disabled {
 
 #grid .ag-row.csvzall-inserted-row {
   background-color: color-mix(in srgb, var(--csvzall-accent) 12%, var(--ag-background-color));
+}
+
+#grid .ag-row.csvzall-entry-row .ag-cell-value {
+  color: var(--csvzall-text-muted);
+  font-style: italic;
 }
 
 #grid .ag-cell.csvzall-edited-cell {

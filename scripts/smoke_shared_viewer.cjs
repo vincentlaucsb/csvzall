@@ -43,8 +43,16 @@ async function editWhileSorted(page, value, useContextMenu = false) {
   await titleHeader.click();
   await titleHeader.click();
   await firstTitle.filter({ hasText: 'world' }).waitFor();
-  assert.match(await page.locator('#sort-description').innerText(), /Sorted by title.*New rows stay at the bottom until you save/);
+  assert.equal(await page.locator('#sort-notice').count(), 0);
   assert.equal(await page.locator('#save').isDisabled(), true);
+  const emptyRow = page.locator('#grid .csvzall-entry-row[row-index="2"]');
+  await emptyRow.getByText('Add row…').dblclick();
+  const emptyEditor = emptyRow.locator('.ag-cell-inline-editing input');
+  assert.equal(await emptyEditor.inputValue(), '');
+  await page.keyboard.press('Enter');
+  await emptyRow.getByText('Add row…').waitFor();
+  assert.equal(await page.locator('#save').isDisabled(), true);
+  assert.match(await page.locator('#record-count').innerText(), /^2 rows/);
 
   await page.locator('#insert-menu').click();
   assert.equal(await page.getByRole('menuitem', { name: 'Add row' }).isEnabled(), true);
@@ -77,12 +85,38 @@ async function editWhileSorted(page, value, useContextMenu = false) {
   await edit(page, newRow.locator('.ag-cell[col-id="title"]'), 'zenith');
   await newRow.locator('.csvzall-edited-cell[col-id="title"]').filter({ hasText: 'zenith' }).waitFor();
   assert.equal(await firstTitle.innerText(), 'aardvark');
+
+  let releaseAppend;
+  if (useContextMenu) {
+    const holdAppend = new Promise(resolve => { releaseAppend = resolve; });
+    await page.route('**/api/insert-row', async route => {
+      await holdAppend;
+      await route.continue();
+    }, { times: 1 });
+  }
+  const entry = page.locator('#grid .csvzall-entry-row[row-index="3"]');
+  const added = page.locator('#grid .csvzall-inserted-row[row-index="3"]');
+  try {
+    await entry.locator('.ag-cell[col-id="title"]').dblclick();
+    await entry.locator('input').fill('0');
+    await page.keyboard.press('Shift+Tab');
+    const firstEditor = page.locator('#grid .ag-row[row-index="3"] .ag-cell-inline-editing[col-id="id"] input');
+    await firstEditor.fill('4');
+    await page.keyboard.press('Enter');
+  } finally {
+    releaseAppend?.();
+  }
+  await added.locator('.ag-cell[col-id="id"]').filter({ hasText: '4' }).waitFor();
+  assert.equal(await added.locator('.ag-cell[col-id="title"]').innerText(), '0');
+  await page.locator('#grid .csvzall-entry-row[row-index="4"]').getByText('Add row…').waitFor();
+  assert.match(await page.locator('#record-count').innerText(), /^4 rows/);
 }
 
 async function checkSavedSort(page) {
   const firstTitle = page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]');
   await firstTitle.filter({ hasText: 'zenith' }).waitFor();
   assert.equal(await page.locator('#grid .csvzall-edited-cell, #grid .csvzall-inserted-row').count(), 0);
+  await page.locator('#grid .csvzall-entry-row[row-index="4"]').getByText('Add row…').waitFor();
 }
 
 async function checkAppendAcrossPages(page) {
@@ -124,15 +158,45 @@ async function checkPendingEdit(page) {
   await page.locator('#save:disabled').waitFor();
 }
 
+async function checkRejectedAppend(page) {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/insert-row', async route => {
+    await held;
+    await route.fulfill({ status: 400, contentType: 'text/plain', body: 'Append temporarily rejected.' });
+  }, { times: 1 });
+  let saves = 0;
+  const countSave = request => { if (new URL(request.url()).pathname === '/api/save') saves += 1; };
+  page.on('request', countSave);
+  const entry = page.locator('#grid .csvzall-entry-row[row-index="2"]');
+  try {
+    const dispatched = page.waitForRequest('**/api/insert-row');
+    await edit(page, entry.locator('.ag-cell[col-id="id"]'), '3');
+    await dispatched;
+    await page.locator('#save').click();
+    await page.locator('body[inert]').waitFor();
+    release();
+    await page.locator('#status').filter({ hasText: 'Append temporarily rejected' }).waitFor();
+    await page.locator('body:not([inert])').waitFor();
+    assert.equal(saves, 0);
+    assert.equal(await page.locator('#save').isDisabled(), true);
+    await entry.getByText('Add row…').waitFor();
+    assert.equal(fs.readFileSync(fixture, 'utf8'), source);
+  } finally {
+    release();
+    page.off('request', countSave);
+  }
+}
+
 async function clearSortAndInsert(page, firstValue) {
-  await page.getByRole('button', { name: 'Clear sort' }).click();
-  await page.locator('#sort-notice').waitFor({ state: 'hidden' });
+  await page.locator('#grid .ag-header-cell[col-id="title"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Clear sort' }).click();
   await page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]').filter({ hasText: firstValue }).waitFor();
   await page.locator('#insert-menu').click();
   await page.getByText('Row after', { exact: true }).click();
-  await page.locator('#record-count').filter({ hasText: '4 rows' }).waitFor();
+  await page.locator('#record-count').filter({ hasText: '5 rows' }).waitFor();
   await page.locator('#reset').click();
-  await page.locator('#record-count').filter({ hasText: '3 rows' }).waitFor();
+  await page.locator('#record-count').filter({ hasText: '4 rows' }).waitFor();
 }
 async function commonActions(page) {
   await page.locator('#insert-menu').click();
@@ -165,7 +229,7 @@ async function commonActions(page) {
   await editWhileSorted(page, 'WASM updated');
   const downloaded=page.waitForEvent('download');await page.locator('#save').click();
   const stream=await (await downloaded).createReadStream();let text='';for await(const chunk of stream)text+=chunk;
-  assert.equal(text, 'id,title\n1,WASM updated\n22,aardvark\n3,zenith\n');
+  assert.equal(text, 'id,title\n1,WASM updated\n22,aardvark\n3,zenith\n4,0\n');
   await page.waitForFunction(()=>document.getElementById('save').disabled);
   await checkSavedSort(page);
   await clearSortAndInsert(page, 'WASM updated');
@@ -221,6 +285,7 @@ async function commonActions(page) {
   await page.locator('#open-sql-query').waitFor();await page.locator('#add-chart').waitFor();
   await commonActions(page);
   await checkPendingEdit(page);
+  await checkRejectedAppend(page);
   await editWhileSorted(page, 'native updated', true);
   await page.locator('#open-sql-query').click();
   await page.locator('#sql-query').fill('SELECT title FROM data WHERE id = 1');
@@ -235,7 +300,7 @@ async function commonActions(page) {
   await page.locator('#exit-sql-query').click();
   await page.locator('#save').click();
   await page.waitForFunction(()=>document.getElementById('save').disabled);
-  assert.equal(fs.readFileSync(fixture,'utf8'), 'id,title\n1,native updated\n22,aardvark\n3,zenith\n');
+  assert.equal(fs.readFileSync(fixture,'utf8'), 'id,title\n1,native updated\n22,aardvark\n3,zenith\n4,0\n');
   await checkSavedSort(page);
   await clearSortAndInsert(page, 'native updated');
   await page.locator('#add-chart').click();
@@ -255,9 +320,15 @@ async function commonActions(page) {
   await page.goto(await nativeUrl(false));
   await page.locator('#grid .ag-cell').filter({hasText:'hello'}).waitFor();
   assert.equal(await page.locator('#edit-toolbar').isVisible(),false);
-  await page.locator('#grid .ag-header-cell[col-id="title"]').click({button:'right'});
+  assert.equal(await page.locator('#grid .csvzall-entry-row').count(), 0);
+  const readOnlyTitle = page.locator('#grid .ag-header-cell[col-id="title"]');
+  await readOnlyTitle.click();
+  await readOnlyTitle.click();
+  await readOnlyTitle.click({button:'right'});
   await page.getByText('Query column',{exact:true}).waitFor();
   assert.equal(await page.getByText('Rename Column',{exact:true}).count(),0);
+  await page.getByRole('menuitem', { name: 'Clear sort' }).click();
+  await page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]').filter({ hasText: 'hello' }).waitFor();
   console.log('Native read-only: edit controls absent; query-only column menu passed');
   assert.deepEqual(errors,[]);
  } catch (error) { for (const p of browser.contexts().flatMap(c=>c.pages())) { console.log(await p.locator('body').innerText()); await p.screenshot({path:path.join(output,'smoke-failure.png')}); } console.log('Page errors:',errors); throw error; }

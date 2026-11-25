@@ -10,7 +10,7 @@ test('native adapter preserves authentication, source row identity and structura
     fetchRef: async (url, options) => {
       calls.push({ url, options });
       let value = {};
-      if (url.pathname === '/api/insert-row') totalRows++;
+      if (url.pathname === '/api/insert-row') value = { ok: true, totalRows: ++totalRows };
       if (url.pathname === '/api/rename-column') columns = ['id', 'title'];
       if (url.pathname === '/api/save' && JSON.parse(options.body).columns) columns = JSON.parse(options.body).columns;
       if (url.pathname === '/api/schema') value = { file: 'tasks.csv', columns, totalRows, editable: true };
@@ -24,6 +24,7 @@ test('native adapter preserves authentication, source row identity and structura
   await adapter.request('editCell', { rowIndex: 500, column: 'name', value: 'updated' });
   assert.deepEqual(JSON.parse(calls.find(call => call.url.pathname === '/api/edit-cell').options.body), { row: 500, column: 'name', value: 'updated' });
   assert.equal((await adapter.request('insertRow', { row: 0, values: ['', ''] })).rowCount, 3);
+  assert.equal(calls.filter(call => call.url.pathname === '/api/schema').length, 1);
   assert.deepEqual((await adapter.request('renameColumn', { column: 'name', name: 'title' })).columns, ['id', 'title']);
   const saved = await adapter.save({ columns: ['title', 'id'] });
   assert.deepEqual(saved.schema.columns, ['title', 'id']);

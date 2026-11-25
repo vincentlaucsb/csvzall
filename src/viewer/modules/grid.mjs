@@ -12,6 +12,28 @@ export function currentGridColumns(api, columns) {
 export const sourceRowId = Symbol('_csvzallRowId');
 export const insertedRow = Symbol('csvzallInsertedRow');
 export const editedColumns = Symbol('csvzallEditedColumns');
+export const entryRow = Symbol('csvzallEntryRow');
+
+export function makeEntryRow(columns) {
+  return { ...Object.fromEntries(columns.map(column => [column, ''])), [entryRow]: true };
+}
+
+export function extendEntryRowBlock(api, node, data, rowCount, blockSize, columns) {
+  const index = rowCount - 1;
+  const cached = node.data === data && node.rowIndex === index;
+  if (cached) node.updateData(data);
+  api.setRowCount(rowCount + 1, true);
+  if (!cached) {
+    api.refreshInfiniteCache();
+  } else if (rowCount % blockSize !== 0) {
+    // Initialize the unused slot the same way AG Grid's InfiniteBlock does.
+    // updateData alone leaves the slot without an ID when it becomes a real row.
+    const next = api.getDisplayedRowAtIndex(rowCount);
+    if (next?.setDataAndId) next.setDataAndId(makeEntryRow(columns), String(rowCount));
+    else api.refreshInfiniteCache();
+  }
+  // At a block boundary the datasource supplies the new entry on demand.
+}
 
 // AG Grid's built-in block debounce also delays the initial viewport. Schedule
 // at the datasource instead so only the first request for a new file bypasses it.

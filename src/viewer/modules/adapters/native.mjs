@@ -52,6 +52,10 @@ export function createNativeAdapter({
       const body = type === 'editCell'
         ? { row: payload.rowIndex, column: payload.column, value: payload.value } : payload;
       const result = await json(`/api/${operations[type]}`, body);
+      if (type === 'insertRow' && current && Number.isSafeInteger(result.totalRows)) {
+        current = { ...current, totalRows: result.totalRows, rowCount: result.totalRows };
+        return { ...current, columns: [...current.columns] };
+      }
       return ['editCell', 'swapRows'].includes(type) ? result : schema();
     },
     async save({ columns }) {

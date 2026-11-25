@@ -11,8 +11,8 @@ export function createMutationTracker(onStart) {
   const pending = new Set();
   let tail = Promise.resolve();
   return {
-    run(action) {
-      onStart();
+    run(action, notify = onStart) {
+      notify();
       const result = tail.then(action);
       tail = result.catch(() => {});
       pending.add(result);

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createViewerShell } from '../../../viewer/modules/shell.mjs';
+import { entryRow, extendEntryRowBlock, sourceRowId } from '../../../viewer/modules/grid.mjs';
 
 // Let the real shell mount its toolbar and menus. The grid spy below records the
 // API calls that can rebuild headers, reset column state or replace a datasource.
@@ -96,4 +97,50 @@ test('a newly opened file replaces the datasource and updates the columns of the
   assert.equal(sources.length, 2);
   assert.notEqual(sources[0], sources[1]);
   assert.deepEqual(f.shell.schema.columns, replacement.columns);
+});
+
+test('the entry row appears in the next block when the CSV fills an entire block', async t => {
+  const initial = { file: 'paged.csv', columns: ['name'], rowCount: 500 };
+  const f = mount(t, initial, async (type, { offset, limit }) => {
+    assert.equal(type, 'readRows');
+    const rows = Array.from({ length: Math.min(limit, initial.rowCount - offset) }, (_, i) => [String(offset + i)]);
+    return { totalRows: initial.rowCount, offset, rows };
+  });
+  await f.shell.start();
+  const [datasource] = f.options('datasource');
+  function read(startRow) {
+    return new Promise((resolve, reject) => datasource.getRows({
+      startRow, endRow: startRow + 500, sortModel: [],
+      successCallback: (rows, lastRow) => resolve({ rows, lastRow }), failCallback: reject,
+    }));
+  }
+  const first = await read(0);
+  const last = await read(500);
+  assert.equal(first.rows.length, 500);
+  assert.equal(first.rows.at(-1)[sourceRowId], 499);
+  assert.equal(first.lastRow, 501);
+  assert.equal(last.lastRow, 501);
+  assert.equal(last.rows.length, 1);
+  assert.equal(last.rows[0][entryRow], true);
+  assert.equal(last.rows[0][sourceRowId], undefined);
+  assert.equal(f.shell.schema.totalRows, 500);
+});
+
+test('growing the entry row updates only the terminal block and lets a new block load on demand', () => {
+  const calls = [];
+  const data = { [sourceRowId]: 498 };
+  const api = {
+    setRowCount: (...args) => calls.push(['count', ...args]),
+    getDisplayedRowAtIndex: index => ({
+      setDataAndId: (row, id) => calls.push(['entry', index, row[entryRow], id]),
+    }),
+    refreshInfiniteCache: () => assert.fail('Appending to a cached entry must not re-read the grid'),
+  };
+  const node = { rowIndex: 498, data, updateData: () => calls.push(['update']) };
+  extendEntryRowBlock(api, node, data, 499, 500, ['name']);
+  assert.deepEqual(calls, [['update'], ['count', 500, true], ['entry', 499, true, '499']]);
+  calls.length = 0;
+  node.rowIndex = 499;
+  extendEntryRowBlock(api, node, data, 500, 500, ['name']);
+  assert.deepEqual(calls, [['update'], ['count', 501, true]]);
 });
