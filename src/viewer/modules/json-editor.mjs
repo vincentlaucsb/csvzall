@@ -2,7 +2,8 @@ import './host-theme.mjs';
 import { createJsonEditor } from './codemirror-json.mjs';
 import { JsonDocument } from './json-document.mjs';
 import { postDirtyState, installUnsavedChangesBeforeUnload } from './dirty-state.mjs';
-import { installHostSaveRequests } from './save.mjs';
+import { createAutosave } from './autosave.mjs';
+import { installHostAutosave, installHostSaveRequests } from './save.mjs';
 import { createViewerToolbar } from './viewer-toolbar.mjs';
 
 export async function openJsonEditor(win, createEditor = createJsonEditor) {
@@ -19,14 +20,19 @@ export async function openJsonEditor(win, createEditor = createJsonEditor) {
     return response.json();
   }
   let saved, editor, pendingSaves = 0;
+  let autosavePolicy, autosave;
   let refreshPending = false;
   const state = { dirty: false };
   win.addEventListener('focus', scheduleRefresh);
-  win.addEventListener('message', event => {
-    if (win.parent !== win && event.source === win.parent && event.data?.source === 'obsidian-csvzall' &&
-        event.data.type === 'json-file-modified' && event.data.version === 1) scheduleRefresh();
+  const disconnect = installHostAutosave({
+    win, source: 'csvzall-viewer', documentType: 'json',
+    setPolicy: policy => {
+      if (autosave) autosave.setPolicy({ ...policy, visible: source.editable && policy.visible });
+      else autosavePolicy = policy;
+    },
+    onMessage: data => { if (data.type === 'json-file-modified') scheduleRefresh(); },
   });
-  const source = await request();
+  const source = await request().catch(error => { disconnect(); throw error; });
   let format = new JsonDocument(source.text);
   let revision = source.revision;
   let queue = Promise.resolve();
@@ -36,7 +42,15 @@ export async function openJsonEditor(win, createEditor = createJsonEditor) {
     return operation;
   };
   const reportError = error => { status.textContent = error.message; };
-  const update = doc => {
+  autosave = createAutosave({
+    control: document.querySelector('#autosave-control'), input: document.querySelector('#autosave'),
+    value: document.querySelector('#autosave-value'),
+  }, {
+    win,
+    canSave: () => source.editable && state.dirty && pendingSaves === 0,
+    save: () => save().catch(error => { reportError(error); throw error; }),
+  });
+  const update = (doc, edited = false) => {
     const dirty = !doc.eq(saved);
     if (state.dirty !== dirty) postDirtyState(dirty);
     state.dirty = dirty;
@@ -44,8 +58,11 @@ export async function openJsonEditor(win, createEditor = createJsonEditor) {
     button.disabled = !dirty || pendingSaves > 0 || !source.editable;
     reset.disabled = button.disabled;
     if (!dirty && refreshPending) scheduleRefresh();
+    if (edited) autosave.edited();
+    else autosave.schedule();
   };
   const save = () => {
+    autosave.cancel();
     pendingSaves++;
     button.disabled = true;
     reset.disabled = true;
@@ -57,13 +74,17 @@ export async function openJsonEditor(win, createEditor = createJsonEditor) {
       revision = result.revision;
       saved = doc;
       return true;
+    }).catch(error => {
+      autosave.failed();
+      throw error;
     }).finally(() => {
       pendingSaves--;
       update(editor.state.doc);
     });
   };
   const saveClick = () => { void save().catch(reportError); };
-  const mount = () => createEditor(document.querySelector('#editor'), format, source.editable, update, saveClick);
+  const mount = () => createEditor(document.querySelector('#editor'), format, source.editable,
+    doc => update(doc, true), saveClick);
   function scheduleRefresh() {
     refreshPending = true;
     if (!editor || state.dirty) return;
@@ -86,6 +107,7 @@ export async function openJsonEditor(win, createEditor = createJsonEditor) {
   editor = mount();
   saved = editor.state.doc;
   update(saved);
+  if (autosavePolicy) autosave.setPolicy({ ...autosavePolicy, visible: source.editable && autosavePolicy.visible });
   document.title = source.name;
   document.querySelector('#file-name').textContent = source.name;
   button.addEventListener('click', saveClick);

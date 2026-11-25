@@ -1,3 +1,4 @@
+import { createAutosave } from './autosave.mjs';
 import { applyCsvOptionsHostUi, updateHeaderToggle } from './csv-options.mjs';
 import { applyHostGridTheme } from './host-theme.mjs';
 import { createDialog } from './dialog.mjs';
@@ -97,17 +98,19 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   let engineReady = false;
   let pendingOpenFile = null;
   let confirmingDiscard = false;
-  let autoSave = false;
-  let autoSaveOverride;
-  let autoSaveTimer;
   let externalTimer;
   let pendingExternal;
   let externalConflict = false;
   let refreshingExternal = false;
-  let autoSaveFailed = false;
   let saveBarrier;
   let requestRecovery;
   const recovery = [];
+  const autoSave = createAutosave({ control: autoSaveControl, input: autoSaveSwitch, value: autoSaveValue }, {
+    win: window,
+    canSave: () => dirty && !externalConflict && !pendingExternal,
+    save: () => saveCurrentChanges({ automatic: true }),
+  });
+  const scheduleAutoSave = autoSave.schedule;
   const saveState = createSaveState();
   const csvMutations = createMutationTracker(() => setDirty(true));
   const mutationTypes = new Set(['editCell', 'insertColumn', 'insertRow', 'deleteRow', 'swapRows', 'deleteColumn', 'renameColumn', 'reset', 'csvOptions']);
@@ -201,8 +204,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     const changed = dirty !== nextDirty;
     dirty = nextDirty;
     refreshActionState();
-    autoSaveFailed = false;
-    scheduleAutoSave();
+    autoSave.edited();
     if (changed || force) {
       hostBridge?.emitDirtyState(dirty);
     }
@@ -1045,27 +1047,6 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     }
   });
 
-  function scheduleAutoSave() {
-    window.clearTimeout(autoSaveTimer);
-    if (!autoSave || !dirty || externalConflict || pendingExternal || autoSaveFailed) return;
-    autoSaveTimer = window.setTimeout(() => { void saveCurrentChanges({ automatic: true }).catch(() => {}); }, 800);
-  }
-
-  function setAutoSave({ enabled, visible }) {
-    autoSaveControl.hidden = !visible;
-    if (!visible) autoSaveOverride = undefined;
-    autoSave = visible && (autoSaveOverride ?? enabled);
-    autoSaveSwitch.checked = autoSave;
-    autoSaveValue.textContent = autoSave ? 'On' : 'Off';
-    scheduleAutoSave();
-  }
-
-  autoSaveSwitch.addEventListener('change', () => {
-    if (autoSaveControl.hidden) return;
-    autoSaveOverride = autoSaveSwitch.checked;
-    setAutoSave({ enabled: autoSaveOverride, visible: true });
-  });
-
   function showExternalConflict() {
     externalConflict = true;
     if (!dirty && gridApi.getEditingCells().length) setDirty(true);
@@ -1214,13 +1195,13 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     if (!viewOpen) {
       throw new Error('No CSV is open.');
     }
-    if (automatic && (!autoSave || !dirty || externalConflict || pendingExternal ||
+    if (automatic && (!autoSave.enabled || !dirty || externalConflict || pendingExternal ||
       saving || readingCsv || refreshingExternal || gridApi.getEditingCells().length)) return;
     if (externalConflict) throw new Error('The CSV changed on disk. Reload CSV before saving.');
     if (saving || refreshingExternal) throw new Error('A CSV update is already in progress.');
     if (readingCsv) throw new Error('The input dialect is being applied.');
     saving = true;
-    window.clearTimeout(autoSaveTimer);
+    autoSave.cancel();
     const wasInert = document.body.inert;
     if (!automatic) document.body.inert = true;
     let releaseWrites;
@@ -1232,7 +1213,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
         if (failure) throw failure;
       }
       await csvMutations.settle();
-      if (!dirty || (automatic && (!autoSave || pendingExternal || gridApi.getEditingCells().length))) return;
+      if (!dirty || (automatic && (!autoSave.enabled || pendingExternal || gridApi.getEditingCells().length))) return;
       const savedEditCount = recovery.length;
       saveBarrier = new Promise(resolve => { releaseWrites = resolve; });
       if (!automatic) showLoading('Saving CSV', `${activeName} is being rewritten with your edits.`);
@@ -1258,7 +1239,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       setStatus(savedResult.chartError ? 'Saved. Chart generation failed: ' + savedResult.chartError : 'Saved ' + name + '.',
         savedResult.chartError ? 'Saved. Chart generation failed: ' + savedResult.chartError : 'Saved.');
     } catch (error) {
-      autoSaveFailed = true;
+      autoSave.failed();
       if (error?.conflict) {
         if (backend.reload) pendingExternal ??= {};
         showExternalConflict();
@@ -1335,7 +1316,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     get saving() { return saving; },
     finishEditing: async () => { await finishEditing(); await csvMutations.settle(); },
     save: saveCurrentChanges, reset: resetCurrentChanges, openBuffer, requestOpenFile,
-    setStatus, refreshRows, setAutoSave, externalChange, recoveryResult,
+    setStatus, refreshRows, setAutoSave: autoSave.setPolicy, externalChange, recoveryResult,
     connectRecovery(callback) { requestRecovery = callback; },
     restoreTable() { resultMode = false; updateRecordCount(); setStatus(dirty ? 'Unsaved changes.' : 'Ready.'); },
     setResultMode(value) { resultMode = value; },
@@ -1359,7 +1340,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       } catch (error) { setStatus(error.message); throw error; }
     },
     destroy() {
-      window.clearTimeout(autoSaveTimer);
+      autoSave.dispose();
       window.clearTimeout(externalTimer);
       viewGeneration += 1;
       pendingRowFocus = null;
