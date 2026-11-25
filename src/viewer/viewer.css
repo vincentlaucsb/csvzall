@@ -492,6 +492,8 @@ button:disabled {
 .app-shell .ag-theme-alpine-auto-dark {
   --ag-font-family: var(--csvzall-font-family);
   --ag-font-size: var(--csvzall-content-size);
+  --ag-row-height: max(calc(7 * var(--ag-grid-size)), calc(1.5 * var(--csvzall-content-size) + var(--csvzall-space-2)));
+  --ag-header-height: max(calc(8 * var(--ag-grid-size)), var(--ag-row-height));
   --ag-background-color: var(--csvzall-background-primary);
   --ag-foreground-color: var(--csvzall-text-normal);
   --ag-data-color: var(--csvzall-text-normal);
@@ -509,6 +511,13 @@ button:disabled {
   --ag-control-panel-background-color: var(--csvzall-background-secondary);
   --ag-menu-background-color: var(--csvzall-background-primary);
   --ag-modal-overlay-background-color: color-mix(in srgb, var(--csvzall-background-primary) 70%, transparent);
+}
+
+.csvzall-row-measure {
+  position: absolute;
+  visibility: hidden;
+  width: 0;
+  height: var(--ag-row-height);
 }
 
 /* Alpine adds a pixel to row text. Use the same content size as CodeMirror. */

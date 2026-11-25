@@ -339,10 +339,15 @@ async function commonActions(page) {
   const inputHandle = await editor.elementHandle();
   await page.evaluate(()=>{
     const target=document.getElementById('viewer').contentWindow;
-    target.postMessage({source:'obsidian-csvzall',type:'theme',version:1,mode:'dark',variables:{'--background-primary':'#223344','--background-secondary':'#192a38','--background-modifier-hover':'#30475b','--background-modifier-border':'#445566','--text-normal':'#eeeeee','--text-muted':'#bfcad6','--interactive-accent':'#ff9900'}},'*');
+    target.postMessage({source:'obsidian-csvzall',type:'theme',version:1,mode:'dark',variables:{'--background-primary':'#223344','--background-secondary':'#192a38','--background-modifier-hover':'#30475b','--background-modifier-border':'#445566','--text-normal':'#eeeeee','--text-muted':'#bfcad6','--interactive-accent':'#ff9900','--font-text-size':'16px','--font-preferred-size':'52px'}},'*');
     target.postMessage({source:'obsidian-csvzall',type:'viewport-resized'},'*');
   });
   await page.waitForTimeout(200);
+  assert.equal(await hostedFirstName.evaluate(el => getComputedStyle(el).fontSize), '52px');
+  const firstRow = await hosted.locator('.ag-center-cols-container .ag-row[row-index="0"]').boundingBox();
+  const secondRow = await hosted.locator('.ag-center-cols-container .ag-row[row-index="1"]').boundingBox();
+  assert.ok(firstRow.height >= 52);
+  assert.equal(secondRow.y - firstRow.y, firstRow.height);
   assert.equal(await inputHandle.evaluate(el=>el===document.activeElement),true);
   assert.equal(await editor.inputValue(),'Hosted updated');
   assert.deepEqual(await hosted.locator('#grid').boundingBox(),gridBefore);
