@@ -52,6 +52,7 @@ This file is the canonical AI reference for this repository.
 
 ## Design rules
 
+- Open CSVs directly into the table in native and WASM viewers. Keep the initial file read, engine initialization, and indexing free of loading screens, modal progress dialogs, and grid loading overlays. Measure startup through the first frame containing CSV values.
 - Target C++23 and prefer modern language features.
 - Use `std::string_view` at API boundaries where lifetimes are safe.
 - Never store `std::string_view` in persistent data structures; store `std::string` instead.
@@ -106,6 +107,12 @@ This file is the canonical AI reference for this repository.
 - Before manually running `cmake -S ... -B ...`, inspect the target build directory's existing `CMakeCache.txt` or use a fresh build directory to avoid generator mismatches.
 - On Windows with MSVC + Ninja, run configure/build from a Visual Studio developer environment, preferably through the Visual Studio-bundled CMake. Bare sandboxed shells can hang during CMake's compiler/linker probe.
 
+## CSV viewer responsiveness
+
+- Request the initial viewport as soon as its range is known. Apply scroll debouncing only while the viewport is changing. Reuse an in-flight first page when its range, sort, and data are still current.
+- Keep work before the first populated frame limited to what the viewer needs to render the initial viewport correctly. Defer independent toolbar work until those rows have had a chance to paint. Measure the startup cost of any new full-file pass, per-row allocation, or copy with a representative large CSV.
+- When changing paging or scheduling, check both opening and rapid scrolling. Measure open to first populated frame, look for long frame gaps during scrolling, and time the final scroll event to populated cells in the target viewport. In regression tests, verify the first fetch bypasses the scroll delay and obsolete responses cannot replace the current rows.
+
 ## Viewer development mode
 
 - The production `view` command serves embedded first-party viewer assets plus embedded AG Grid and Popright assets.
@@ -116,6 +123,8 @@ This file is the canonical AI reference for this repository.
 - Keep the viewer framework-free. Prefer small vanilla JS modules/helpers for modals, context menus, grid adapters, and API calls.
 
 ## Viewer theme design
+
+- Define shared typography, spacing and palette defaults in `src/viewer/modules/viewer-theme.css`. Use the same content size for CSV grid cells and JSON code, including standalone mode. Use the host text, interface and monospace font roles for their respective content. Check computed text sizes in real AG Grid and CodeMirror views after a live host font-size change.
 
 - `view --obsidian` is an explicit plugin-supplied mode: the host owns automatic chart regeneration after CSV saves. Keep standalone automation, manual chart actions, and CLI JSON storage unchanged. Do not discover Obsidian vaults/profiles or access plugin data/Sync settings upstream.
 - Native startup JSON `obsidianMode.version` is the host chart-automation protocol version (currently 1), independent of the three source release markers. Keep its host acknowledgment contract and tests synchronized with obsidian-csvzall.

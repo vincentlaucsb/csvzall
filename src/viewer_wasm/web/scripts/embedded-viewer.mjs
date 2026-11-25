@@ -1,19 +1,28 @@
-import { fileURLToPath } from 'node:url';
+// The host rewrites relative HTML references to plugin-owned Blob URLs. Let
+// every iframe construct its own worker from the same hosted script URL.
+const workerAsset = /^assets\/csv-worker-[\w-]+\.js$/;
 
-// Obsidian desktop does not serve executable vault resources. The embedded
-// build includes its worker and WASM bytes in the entry bundle, which a host
-// can load directly from the installed plugin. Standalone releases stay split.
 export function embeddedViewerConfig(mode) {
   if (mode !== 'embedded') return {};
   return {
     // Electron can expose process inside browser workers. This is a web-only
     // WASM build, so remove Node detection at source compilation time.
     define: { process: 'undefined', 'globalThis.process': 'undefined' },
-    resolve: {
-      alias: [{
-        find: /^\.\/csv-worker\.js\?worker$/,
-        replacement: fileURLToPath(new URL('../src/csv-worker.js', import.meta.url)) + '?worker&inline',
-      }],
+    experimental: {
+      renderBuiltUrl(filename, { hostType }) {
+        if (hostType === 'js' && workerAsset.test(filename)) {
+          return { runtime: 'document.querySelector(\'link[rel="csvzall-worker"]\').href' };
+        }
+      },
     },
   };
+}
+
+export function embeddedAssetTags(_html, { bundle }) {
+  const worker = Object.keys(bundle).find(name => workerAsset.test(name));
+  if (!worker) throw new Error('Missing embedded CSV worker asset');
+  return [
+    { tag: 'meta', attrs: { name: 'csvzall-embedded-assets', content: 'v2' } },
+    { tag: 'link', attrs: { rel: 'csvzall-worker', href: './' + worker } },
+  ];
 }

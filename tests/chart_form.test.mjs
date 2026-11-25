@@ -9,6 +9,7 @@ class Element {
   }
   append(...children) { children.forEach(child => this.appendChild(child)); }
   appendChild(child) { if (child.parentElement) child.parentElement.children = child.parentElement.children.filter(node => node !== child); child.parentElement = this; this.children.push(child); return child; }
+  insertBefore(child, before) { this.appendChild(child); this.children.splice(this.children.indexOf(child), 1); this.children.splice(this.children.indexOf(before), 0, child); }
   replaceChildren(...children) { this.children = []; this.append(...children); }
   setAttribute(key, value) { this[key] = value; }
   removeAttribute(key) { delete this[key]; }
@@ -128,4 +129,43 @@ test('preview failures keep the chart form open and allow retry', async () => {
   await f.fire(f.field('preview-chart'), 'click');
   assert.equal(f.field('chart-preview').children[0].textContent, '| data |');
   assert.equal(f.field('chart-error').hidden, true);
+});
+
+
+test('SQL chart aliases and all value columns survive reopen and can be removed', async () => {
+  const chart = { id: 'workouts', type: 'line', output: 'workouts.svg', options: {
+    sql: 'SELECT date, a, b, c FROM data', x: 'date', values: [{ column: 'a' }, { column: 'b' }, { column: 'c' }],
+  } };
+  const f = fixture({ fetchJson: async () => ({ charts: [chart] }) });
+  await f.form.open();
+  assert.equal(f.field('chart-sql').value, chart.options.sql);
+  assert.equal(f.field('chart-date-column').value, 'date');
+  const extra = f.field('chart-column-grid').querySelectorAll('select').at(-1);
+  assert.equal(extra.value, 'c');
+  await f.fire(f.field('heatmap-chart-form'), 'submit');
+  assert.deepEqual(f.requests[0].body.values, ['a', 'b', 'c']);
+  f.field('chart-column-grid').querySelectorAll('select').at(-1).value = '';
+  f.field('chart-sql').value = '';
+  await f.fire(f.field('heatmap-chart-form'), 'submit');
+  assert.deepEqual(f.requests[1].body.values, ['a', 'b']);
+  assert.equal(f.requests[1].body.sql, '');
+  assert.equal(f.requests[1].body.clearSql, true);
+});
+
+test('SQL result columns load on request and ignore stale query results', async () => {
+  let finish;
+  const queries = [];
+  const f = fixture({ loadQueryColumns: sql => { queries.push(sql); return new Promise(resolve => { finish = resolve; }); } });
+  await f.form.open();
+  f.field('chart-sql').value = 'SELECT date, exercise, weight * (1 + reps / 30.0) AS estimated_1rm FROM data';
+  const pending = f.fire(f.field('chart-load-query-columns'), 'click');
+  assert.equal(queries.length, 1);
+  f.field('chart-sql').value = 'SELECT amount FROM data';
+  await f.fire(f.field('chart-sql'), 'input');
+  finish(['date', 'exercise', 'estimated_1rm']); await pending;
+  assert.equal(f.field('chart-date-column').children.some(option => option.value === 'estimated_1rm'), false);
+  const current = f.fire(f.field('chart-load-query-columns'), 'click');
+  finish(['training_date', 'exercise', 'estimated_1rm']); await current;
+  assert.deepEqual(f.field('chart-date-column').children.map(option => option.value), ['training_date', 'exercise', 'estimated_1rm']);
+  assert.equal(f.requests.length, 0);
 });

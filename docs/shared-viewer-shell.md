@@ -31,6 +31,11 @@ explicit input interpretation. Schemas include `csvOptions` with delimiter, quot
 hasHeaders, and BOM values alongside `columns`, `rowCount`, optional `file`, and `editable`.
 Pages contain `offset`, `totalRows`, and arrays of cell values. The shell assigns
 absolute source row identities independently of displayed row positions.
+For a column sort, `readRows` also receives `sortColumn` and `sortDirection`,
+and returns `rowIds` for the requested sorted page. The shared engine caches
+the view order and refreshes it when the sort key or row layout changes. Edits
+use those logical row IDs, and saves continue to traverse the CSV in source
+order. The shell disables row insertion while the sort is active.
 
 See [CSV options](csv-options.md) for dialect preservation, headerless editing,
 explicit conversion and input overrides. The source bridge advertises

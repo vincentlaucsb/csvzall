@@ -1,28 +1,27 @@
+import { createViewerToolbar } from './viewer-toolbar.mjs';
+
 // Shared by native and WASM. Feature controls are mounted by their modules.
 export const shellMarkup = `
   <div class="app-shell">
-    <header class="topbar">
-      <div class="file-meta">
-        <h1 id="file-name">Loading…</h1>
-        <span id="summary" class="summary" aria-hidden="true"></span>
-      </div>
+    <header>
+      <span id="summary" class="summary" aria-hidden="true"></span>
       <div id="file-tools" class="file-tools" hidden>
         <button id="install-app" type="button" hidden>Install app</button>
         <label class="file-picker"><span>Open CSV/TSV</span><input id="file-input" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values"></label>
       </div>
-      <div class="toolbar-actions">
       <div id="viewer-tools" class="feature-toolbar" role="group" aria-label="CSV tools">
       </div>
-      <div id="edit-toolbar" class="edit-toolbar">
+      <template id="csv-edit-actions">
         <button id="csv-options" type="button" disabled>Options</button>
         <span class="toolbar-divider" aria-hidden="true"></span>
         <button id="insert-menu" type="button">Insert</button>
         <button id="delete-menu" type="button">Delete</button>
-        <button id="reset" type="button" disabled>Reset</button>
-        <button id="save" type="button" disabled>Save</button>
-      </div>
+      </template>
+      <template id="csv-save-actions">
+        <button id="reload-external" type="button" hidden>Reload CSV</button>
+        <button id="download-recovery" type="button" hidden>Save edits copy</button>
+      </template>
       <div class="overflow-toolbar"><button id="more-actions" type="button" aria-label="More actions" aria-haspopup="menu" hidden>…</button></div>
-      </div>
     </header>
     <div id="feature-panels" style="display: contents"></div>
     <main class="grid-wrap">
@@ -30,9 +29,21 @@ export const shellMarkup = `
     </main>
     <footer class="footer">
       <span id="status">Connecting…</span>
+      <span id="csv-conflict" role="alert" hidden></span>
       <span id="record-count"></span>
     </footer>
   </div>
+  <dialog id="discard-edits-dialog" class="csvzall-dialog"
+      aria-labelledby="discard-edits-title" aria-describedby="discard-edits-description">
+    <div class="dialog-form">
+      <h2 id="discard-edits-title"></h2>
+      <p id="discard-edits-description"></p>
+      <div class="dialog-actions">
+        <button id="discard-edits-cancel" type="button" autofocus>Cancel</button>
+        <button id="discard-edits-confirm" type="button"></button>
+      </div>
+    </div>
+  </dialog>
   <dialog id="csv-options-dialog" class="csvzall-dialog" aria-labelledby="csv-options-title">
     <form id="csv-options-form" class="dialog-form">
       <h2 id="csv-options-title">CSV options</h2>
@@ -69,9 +80,9 @@ export const shellMarkup = `
       </div>
     </form>
   </dialog>
-  <dialog id="insert-column-dialog" class="csvzall-dialog">
+  <dialog id="insert-column-dialog" class="csvzall-dialog" aria-labelledby="insert-column-title">
     <form id="insert-column-form" class="dialog-form">
-      <h2>Insert column</h2>
+      <h2 id="insert-column-title">Insert column</h2>
       <label>
         <span>Column name</span>
         <input id="insert-column-name" type="text" autocomplete="off" required>
@@ -83,9 +94,9 @@ export const shellMarkup = `
       </div>
     </form>
   </dialog>
-  <dialog id="rename-column-dialog" class="csvzall-dialog">
+  <dialog id="rename-column-dialog" class="csvzall-dialog" aria-labelledby="rename-column-title">
     <form id="rename-column-form" class="dialog-form">
-      <h2>Rename column</h2>
+      <h2 id="rename-column-title">Rename column</h2>
       <label>
         <span>Column name</span>
         <input id="rename-column-name" type="text" autocomplete="off" required>
@@ -116,5 +127,14 @@ export const shellMarkup = `
 export function mountViewerShell(root = document.body) {
   const template = root.ownerDocument.createElement('template');
   template.innerHTML = shellMarkup;
-  root.append(template.content.cloneNode(true));
+  const content = template.content;
+  const bar = createViewerToolbar(root.ownerDocument);
+  bar.meta.append(content.querySelector('#summary'));
+  bar.actions.before(content.querySelector('#file-tools'));
+  bar.actions.prepend(content.querySelector('#viewer-tools'));
+  bar.reset.before(content.querySelector('#csv-edit-actions').content);
+  bar.edits.append(content.querySelector('#csv-save-actions').content);
+  bar.actions.append(content.querySelector('.overflow-toolbar'));
+  content.querySelector('header').replaceWith(bar.header);
+  root.append(content);
 }

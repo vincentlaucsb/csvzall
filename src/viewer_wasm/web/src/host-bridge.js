@@ -11,6 +11,7 @@ export const HOST_CAPABILITIES = Object.freeze([
   'csvzall-obsidian-keyboard-lifecycle-v2',
   'csvzall-obsidian-viewport-resize-v2',
   'csvzall-host-save-request-v1',
+  'csvzall-host-csv-autosave-v1',
 ]);
 
 function isArrayBuffer(value) {
@@ -27,6 +28,7 @@ function cloneOpenFileMessage(data) {
   return {
     name: data.name || 'input.csv',
     buffer: data.buffer,
+    revision: data.revision,
     hostUi: { mobile: data.hostUi?.version === 1 && data.hostUi.mobile === true },
   };
 }
@@ -54,6 +56,12 @@ export function createHostBridge({
   const pendingSaves = new Map();
   let nextSaveId = 0;
   let savingFromHost = false;
+  let revision;
+
+  async function openFile(file) {
+    await onOpenFile(file);
+    revision = file.revision;
+  }
 
   function post(message, transfer = []) {
     if (!targetWindow) {
@@ -76,13 +84,13 @@ export function createHostBridge({
       queuedOpenFiles.push(file);
       return;
     }
-    runningOpen = runningOpen.then(() => onOpenFile(file));
+    runningOpen = runningOpen.then(() => openFile(file));
   }
 
   async function flushQueuedOpenFiles() {
     while (queuedOpenFiles.length > 0) {
       const file = queuedOpenFiles.shift();
-      await onOpenFile(file);
+      await openFile(file);
     }
   }
 
@@ -108,8 +116,14 @@ export function createHostBridge({
       const pending = pendingSaves.get(data.requestId);
       if (pending && typeof data.success === 'boolean') {
         pendingSaves.delete(data.requestId);
-        if (data.success) pending.resolve(true);
-        else pending.reject(new Error(data.error || 'Save failed'));
+        if (data.success) {
+          if (Number.isSafeInteger(data.revision)) revision = data.revision;
+          pending.resolve(true);
+        } else {
+          const error = new Error(data.error || 'Save failed');
+          error.conflict = data.conflict === true;
+          pending.reject(error);
+        }
       }
       return;
     }
@@ -151,6 +165,9 @@ export function createHostBridge({
       post({ type: 'dirty-state', dirty });
     },
 
+    acceptRevision(next) { revision = next; },
+    isCurrentRevision(candidate) { return revision !== undefined && candidate <= revision; },
+
     async saveFile({ name, result }) {
       if (!hostMode) {
         return false;
@@ -161,7 +178,7 @@ export function createHostBridge({
         pendingSaves.set(requestId, { resolve, reject });
         try {
           post({
-            type: 'save-file', requestId, name, buffer,
+            type: 'save-file', requestId, name, buffer, revision,
             byteOffset: result.byteOffset ?? 0,
             byteLength: result.byteLength ?? buffer.byteLength,
           }, [buffer]);

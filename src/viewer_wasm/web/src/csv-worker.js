@@ -4,6 +4,16 @@ import wasmUrl from './generated/csvzall_viewer_wasm.wasm?url';
 let moduleInstance = null;
 let view = null;
 let activePath = '';
+const preparedSavePath = '/pending-save.csv';
+let nextSaveId = 0;
+let preparedSaveId = 0;
+
+function discardPreparedSave() {
+  preparedSaveId = 0;
+  if (moduleInstance.FS.analyzePath(preparedSavePath).exists) {
+    moduleInstance.FS.unlink(preparedSavePath);
+  }
+}
 
 function vectorToArray(vector) {
   const values = [];
@@ -102,29 +112,46 @@ const handlers = {
 
   open({ name, buffer }) {
     ensureReady();
+    const nextPath = `/working/${activePath.startsWith('/working/0-') ? 1 : 0}-${safeFileName(name)}`;
+    moduleInstance.FS.writeFile(nextPath, new Uint8Array(buffer));
+    let next;
+    try {
+      next = moduleInstance.CsvViewData.open(nextPath);
+    } catch (error) {
+      moduleInstance.FS.unlink(nextPath);
+      throw error;
+    }
     view?.delete?.();
-    view = null;
-    activePath = `/working/${safeFileName(name)}`;
-    moduleInstance.FS.writeFile(activePath, new Uint8Array(buffer));
-    view = moduleInstance.CsvViewData.open(activePath);
+    if (activePath) moduleInstance.FS.unlink(activePath);
+    activePath = nextPath;
+    view = next;
     return schema();
   },
 
-  readRows({ offset, limit }) {
+  readRows({ offset, limit, sortColumn, sortDirection }) {
     ensureView();
     const start = Number.isFinite(offset) ? Math.max(0, Math.trunc(offset)) : 0;
     const count = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 1;
+    if (sortColumn !== undefined || sortDirection !== undefined) {
+      if (typeof sortColumn !== 'string' || !['asc', 'desc'].includes(sortDirection)) {
+        throw new Error('Invalid row sort.');
+      }
+      const page = view.readSortedRows(start, count, sortColumn, sortDirection === 'desc');
+      return { offset: start, rowIds: vectorToArray(page.rowIds),
+        rows: rowsVectorToArrays(page.rows), changes: page.changes, totalRows: view.rowCount() };
+    }
+    const rows = rowsVectorToArrays(view.readRows(start, count));
     return {
       offset: start,
-      rows: rowsVectorToArrays(view.readRows(start, count)),
+      rows,
+      changes: view.readRowChanges(start, rows.length),
       totalRows: view.rowCount(),
     };
   },
 
   editCell({ rowIndex, column, value }) {
     ensureView();
-    view.editCell(rowIndex, column, value ?? '');
-    return { ok: true };
+    return { ok: true, edited: view.editCell(rowIndex, column, value ?? '') };
   },
 
   insertRow({ row, values }) {
@@ -186,12 +213,28 @@ const handlers = {
     return schema();
   },
 
-  save() {
+  prepareSave() {
     ensureView();
-    view.save();
-    const bytes = moduleInstance.FS.readFile(activePath);
-    const copy = bytes.slice();
-    return { buffer: copy.buffer, byteOffset: copy.byteOffset, byteLength: copy.byteLength, schema: schema() };
+    try {
+      view.writeSaveFile(preparedSavePath);
+      const bytes = moduleInstance.FS.readFile(preparedSavePath);
+      preparedSaveId = ++nextSaveId;
+      return { buffer: bytes.buffer, byteOffset: bytes.byteOffset, byteLength: bytes.byteLength, saveId: preparedSaveId };
+    } catch (error) {
+      discardPreparedSave();
+      throw error;
+    }
+  },
+
+  finishSave({ saveId, commit }) {
+    if (!preparedSaveId || saveId !== preparedSaveId) return null;
+    try {
+      if (!commit) return null;
+      view.commitSaveFile(preparedSavePath);
+      return schema();
+    } finally {
+      discardPreparedSave();
+    }
   },
 };
 
@@ -207,6 +250,8 @@ self.addEventListener('message', (event) => {
       if (!handler) {
         throw new Error(`Unknown worker request: ${type}`);
       }
+      // A newer document or edit supersedes the snapshot while the host writes.
+      if (preparedSaveId && type !== 'readRows' && type !== 'finishSave') discardPreparedSave();
       return handler(payload ?? {});
     })
     .then((result) => {

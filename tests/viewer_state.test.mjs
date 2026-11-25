@@ -7,7 +7,7 @@ import {
   installUnsavedChangesBeforeUnload,
   postDirtyState,
 } from '../src/viewer/modules/dirty-state.mjs';
-import { currentGridColumns, installColumnContextMenu, rowInsertionIndex, rowsToObjects } from '../src/viewer/modules/grid.mjs';
+import { currentGridColumns, installColumnContextMenu, rowInsertionIndex, rowsToObjects, sourceRowId } from '../src/viewer/modules/grid.mjs';
 import { rowsToMarkdownTable } from '../src/viewer/modules/markdown.mjs';
 
 test('Markdown cells keep HTML comments, backslashes and formatting characters literal', () => {
@@ -560,8 +560,16 @@ test('rowsToObjects assigns absolute source row ids for paged rows', () => {
     ['Ada', '10'],
     ['Ben'],
   ], 500), [
-    { _csvzallRowId: 500, name: 'Ada', value: '10' },
-    { _csvzallRowId: 501, name: 'Ben', value: '' },
+    { [sourceRowId]: 500, name: 'Ada', value: '10' },
+    { [sourceRowId]: 501, name: 'Ben', value: '' },
+  ]);
+});
+
+test('sorted rows keep explicit source ids even when a CSV header matches the metadata name', () => {
+  const rows = rowsToObjects(['_csvzallRowId'], [['first'], ['second']], 500, [19, 721]);
+  assert.deepEqual(rows, [
+    { [sourceRowId]: 19, _csvzallRowId: 'first' },
+    { [sourceRowId]: 721, _csvzallRowId: 'second' },
   ]);
 });
 

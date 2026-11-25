@@ -1,11 +1,12 @@
+import { createAutosave } from './autosave.mjs';
 import { applyCsvOptionsHostUi, updateHeaderToggle } from './csv-options.mjs';
 import { applyHostGridTheme } from './host-theme.mjs';
-import './dialog-dismiss.mjs';
+import { createDialog } from './dialog.mjs';
 import { mountViewerShell } from './shell-markup.mjs';
 import { createHostGridAdapter } from './host-grid.mjs';
 import { createSaveState } from './save-state.mjs';
 import { createMutationTracker } from './save.mjs';
-import { currentGridColumns, rowsToObjects, rowInsertionIndex } from './grid.mjs';
+import { createPagedDatasource, currentGridColumns, editedColumns, entryRow, extendEntryRowBlock, insertedRow, makeEntryRow, rowsToObjects, rowInsertionIndex, sourceRowId } from './grid.mjs';
 import { createTablerIcon as createIcon, decorateButton, decorateIconButton, decorateMenuButton } from './icons.mjs';
 import { readLocalFile } from './local-file.mjs';
 import { installUnsavedChangesBeforeUnload } from './dirty-state.mjs';
@@ -13,6 +14,8 @@ import { createCompactLayout } from './compact-layout.mjs';
 
 /** Backend: capabilities, request, save, persist, destroy. Features: {id, mount(shell)}. */
 export function createViewerShell({ backend, createGrid, createContextMenu, createDropdownMenu, features = [] }) {
+  const cacheBlockSize = 500;
+  backend.prefetchFirstPage?.(cacheBlockSize);
   mountViewerShell();
   applyHostGridTheme(document.getElementById('grid'), document.documentElement.dataset.csvzallHostTheme);
   const columnFeatures = [];
@@ -26,9 +29,20 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const statusNode = document.getElementById('status');
   const recordCountNode = document.getElementById('record-count');
   const saveButton = document.getElementById('save');
+  const autoSaveControl = document.getElementById('autosave-control');
+  const autoSaveSwitch = document.getElementById('autosave');
+  const autoSaveValue = document.getElementById('autosave-value');
+  const reloadExternalButton = document.getElementById('reload-external');
+  const discardEditsDialog = createDialog(document.getElementById('discard-edits-dialog'));
+  const discardEditsTitle = document.getElementById('discard-edits-title');
+  const discardEditsDescription = document.getElementById('discard-edits-description');
+  const discardEditsCancel = document.getElementById('discard-edits-cancel');
+  const discardEditsConfirm = document.getElementById('discard-edits-confirm');
+  const recoveryButton = document.getElementById('download-recovery');
+  const conflictNotice = document.getElementById('csv-conflict');
   const resetButton = document.getElementById('reset');
   const csvOptionsButton = document.getElementById('csv-options');
-  const csvOptionsDialog = document.getElementById('csv-options-dialog');
+  const csvOptionsDialog = createDialog(document.getElementById('csv-options-dialog'));
   const csvOptionsForm = document.getElementById('csv-options-form');
   const csvDelimiter = document.getElementById('csv-options-delimiter');
   const csvQuote = document.getElementById('csv-options-quote');
@@ -42,38 +56,61 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const insertMenuButton = document.getElementById('insert-menu');
   const deleteMenuButton = document.getElementById('delete-menu');
   const gridElement = document.getElementById('grid');
-  const loadingDialog = document.getElementById('loading-dialog');
+  const loadingDialog = createDialog(document.getElementById('loading-dialog'), { dismissible: false });
   const loadingTitleNode = document.getElementById('loading-title');
   const loadingDetailNode = document.getElementById('loading-detail');
-  const insertColumnDialog = document.getElementById('insert-column-dialog');
+  const insertColumnDialog = createDialog(document.getElementById('insert-column-dialog'));
   const insertColumnForm = document.getElementById('insert-column-form');
   const insertColumnName = document.getElementById('insert-column-name');
   const insertColumnError = document.getElementById('insert-column-error');
   const cancelInsertColumn = document.getElementById('cancel-insert-column');
-  const renameColumnDialog = document.getElementById('rename-column-dialog');
+  const renameColumnDialog = createDialog(document.getElementById('rename-column-dialog'));
   const renameColumnForm = document.getElementById('rename-column-form');
   const renameColumnName = document.getElementById('rename-column-name');
   const renameColumnError = document.getElementById('rename-column-error');
   const cancelRenameColumn = document.getElementById('cancel-rename-column');
 
   const pendingCellEdits = new Set();
+  let saveEditDrain = null;
+  const pendingCellFields = new WeakMap();
+  const pendingEntryRows = new WeakMap();
   let viewOpen = false;
   let editable = true;
-  let restoringCell = false;
+  let changingStructure = false;
+  let pendingRowFocus = null;
   let resultMode = false;
   let activeName = '';
   let activeColumns = [];
   let csvOptions = null;
   let readingCsv = false;
   let rowCount = 0;
+  let rowRevision = 0;
+  let waitingForInitialCount = false;
   let viewGeneration = 0;
+  let datasource;
   let dirty = false;
   let dataDirty = false;
+  let columnOrderDirty = false;
+  let pendingEntryCount = 0;
   let pendingInsertColumn = 0;
   let pendingRenameColumn = '';
   let hostBridge = null;
   let engineReady = false;
   let pendingOpenFile = null;
+  let confirmingDiscard = false;
+  let externalTimer;
+  let pendingExternal;
+  let externalConflict = false;
+  let refreshingExternal = false;
+  let saveBarrier;
+  let requestRecovery;
+  const recovery = [];
+  const autoSave = createAutosave({ control: autoSaveControl, input: autoSaveSwitch, value: autoSaveValue }, {
+    win: window,
+    canSave: () => dirty && !externalConflict && !pendingExternal,
+    save: () => saveCurrentChanges({ automatic: true }),
+  });
+  const scheduleAutoSave = autoSave.schedule;
   const saveState = createSaveState();
   const csvMutations = createMutationTracker(() => setDirty(true));
   const mutationTypes = new Set(['editCell', 'insertColumn', 'insertRow', 'deleteRow', 'swapRows', 'deleteColumn', 'renameColumn', 'reset', 'csvOptions']);
@@ -93,33 +130,45 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   function showLoading(title, detail = '') {
     loadingTitleNode.textContent = title;
     loadingDetailNode.textContent = detail;
-    if (!loadingDialog.open) {
-      if (typeof loadingDialog.showModal === 'function') {
-        loadingDialog.showModal();
-      } else {
-        loadingDialog.setAttribute('open', '');
-      }
-    }
+    loadingDialog.show();
   }
 
   function hideLoading() {
-    if (loadingDialog.open) {
-      loadingDialog.close();
-    }
+    loadingDialog.close();
   }
 
-  function showDialog(dialog, focusTarget) {
-    if (typeof dialog.showModal === 'function') {
-      dialog.showModal();
-    } else {
-      dialog.setAttribute('open', '');
-    }
-    focusTarget?.focus();
+  function queueMutation(type, payload, generation, notify) {
+    const barrier = saveBarrier;
+    if (hostBridge?.isHostMode() && type !== 'reset') recovery.push({ type, ...payload });
+    return csvMutations.run(async () => {
+      await barrier;
+      if (!viewOpen || generation !== viewGeneration) throw new Error('The open CSV changed.');
+      if (externalConflict) throw new Error('The CSV changed on disk. Save a copy of your edits or reload.');
+      try {
+        return await sendRequest(type, payload, []);
+      } catch (error) {
+        if (error?.conflict) externalChange({});
+        throw error;
+      }
+    }, notify);
   }
 
-  function request(type, payload = {}, transfer = []) {
-    if ((mutationTypes.has(type) || type === 'readCsvOptions') && (!editable || !viewOpen)) return Promise.reject(new Error('This CSV is read-only.'));
-    return mutationTypes.has(type) ? csvMutations.run(() => sendRequest(type, payload, transfer)) : sendRequest(type, payload, transfer);
+  async function request(type, payload = {}, transfer = []) {
+    if ((mutationTypes.has(type) || type === 'readCsvOptions') && (!editable || !viewOpen)) throw new Error('This CSV is read-only.');
+    if (type === 'swapRows' && activeSort()) throw new Error('Clear the sort to move rows.');
+    if (!mutationTypes.has(type)) return sendRequest(type, payload, transfer);
+    const generation = viewGeneration;
+    if (type === 'editCell') return queueMutation(type, payload, generation);
+    if (changingStructure) throw new Error('Wait for the current table change to finish.');
+    changingStructure = true;
+    try {
+      await finishEditing();
+      return await queueMutation(type, payload, generation);
+    } finally {
+      changingStructure = false;
+      scheduleExternal();
+      scheduleAutoSave();
+    }
   }
 
   function sendRequest(type, payload, transfer) {
@@ -127,7 +176,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   function updateRecordCount(nextRowCount = rowCount) {
-    if (resultMode) return;
+    if (resultMode || waitingForInitialCount) return;
     recordCountNode.textContent =
       `${nextRowCount.toLocaleString()} rows, ${activeColumns.length.toLocaleString()} columns`;
   }
@@ -142,11 +191,20 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
 
   function setDirty(nextDirty, { force = false, columnOrder = false } = {}) {
     if (nextDirty || columnOrder) saveState.changed();
-    if (!columnOrder) dataDirty = nextDirty;
-    if (columnOrder) nextDirty = dataDirty || nextDirty;
+    if (columnOrder) columnOrderDirty = nextDirty;
+    else {
+      dataDirty = nextDirty;
+      if (!nextDirty) columnOrderDirty = false;
+    }
+    refreshDirtyState(force);
+  }
+
+  function refreshDirtyState(force = false) {
+    const nextDirty = dataDirty || columnOrderDirty || pendingEntryCount > 0;
     const changed = dirty !== nextDirty;
     dirty = nextDirty;
     refreshActionState();
+    autoSave.edited();
     if (changed || force) {
       hostBridge?.emitDirtyState(dirty);
     }
@@ -156,7 +214,15 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     activeColumns = schema.columns;
     csvOptions = schema.csvOptions ?? null;
     rowCount = schema.rowCount;
-    updateRecordCount(rowCount);
+    updateRecordCount();
+  }
+
+  function activeSort() {
+    return gridApi.getColumnState().find(column => column.sort === 'asc' || column.sort === 'desc');
+  }
+
+  function displayedRowCount() {
+    return rowCount + Number(editable);
   }
 
   function markDataDirty(message = `Unsaved changes in ${activeName}.`) {
@@ -164,8 +230,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     setStatus(message, 'Unsaved changes.');
   }
 
-  function downloadBytes(name, bytes) {
-    const blob = new Blob([bytes], { type: 'text/csv;charset=utf-8' });
+  function downloadBytes(name, bytes, type = 'text/csv;charset=utf-8') {
+    const blob = new Blob([bytes], { type });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -186,26 +252,58 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     compactLayout?.refresh();
   }
 
+  const canEditCell = ({ data, colDef }) =>
+    editable && Boolean(data) && !refreshingExternal && !externalConflict && !changingStructure && !pendingCellFields.get(data)?.has(colDef.field);
+  // The infinite row model needs a numeric height to reposition cached rows.
+  const rowMeasure = document.createElement('span');
+  rowMeasure.className = 'csvzall-row-measure';
+  gridElement.append(rowMeasure);
+  function syncRowHeight() {
+    const height = rowMeasure.offsetHeight;
+    if (datasource && height > 0 && gridApi.getGridOption('rowHeight') !== height) {
+      gridApi.setGridOption('rowHeight', height);
+    }
+  }
   const gridOptions = {
+    loading: false,
+    onGridStylesChanged(event) {
+      if (event.rowHeightChanged) syncRowHeight();
+    },
     columnDefs: [],
+    readOnlyEdit: true,
     defaultColDef: {
-      editable: () => editable,
+      editable: canEditCell,
       resizable: true,
-      sortable: false,
+      sortable: true,
+      unSortIcon: true,
       filter: false,
       minWidth: 140,
       flex: 1,
+      valueFormatter: ({ data, value, column, api }) =>
+        data?.[entryRow] && api.getAllDisplayedColumns()[0] === column ? 'Add row…' : value,
+      cellClassRules: {
+        'csvzall-edited-cell': ({ data, colDef }) => data?.[editedColumns]?.has(colDef.field) ?? false,
+      },
+    },
+    rowClassRules: {
+      'csvzall-entry-row': ({ data }) => data?.[entryRow] === true,
+      'csvzall-inserted-row': ({ data }) => data?.[insertedRow] === true,
     },
     rowModelType: 'infinite',
+    suppressMultiSort: true,
+    suppressFieldDotNotation: true,
     rowSelection: {
       mode: 'singleRow',
       checkboxes: false,
       headerCheckbox: false,
       enableClickSelection: true,
+      isRowSelectable: ({ data }) => Number.isInteger(data?.[sourceRowId]),
     },
-    cacheBlockSize: 500,
+    cacheBlockSize,
     maxBlocksInCache: 8,
-    blockLoadDebounceMillis: 40,
+    onBodyScroll(event) {
+      if (event.direction === 'vertical') datasource?.onVerticalScroll();
+    },
     animateRows: false,
     suppressColumnVirtualisation: false,
     suppressMovableColumns: !backend.capabilities.columnOrder,
@@ -213,17 +311,42 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       if (editable && viewOpen && event.finished && backend.capabilities.columnOrder) {
         const columns = currentGridColumns(gridApi, activeColumns);
         setDirty(!columns.every((column, index) => column === activeColumns[index]), { columnOrder: true });
+        const entry = gridApi.getRenderedNodes().find(node => node.data?.[entryRow]);
+        if (entry) gridApi.refreshCells({ rowNodes: [entry], force: true });
       }
     },
     onCellEditingStarted(event) { compactLayout?.onCellEditingStarted(); hostGrid.onCellEditingStarted(event); },
-    onCellEditingStopped(event) { compactLayout?.onCellEditingStopped(); hostGrid.onCellEditingStopped(event); },
-    onCellValueChanged(event) {
-      if (restoringCell || !editable || !viewOpen || !event.colDef.field || event.colDef.field === '_csvzallRowId') {
+    onCellEditingStopped(event) {
+      compactLayout?.onCellEditingStopped();
+      hostGrid.onCellEditingStopped(event);
+      scheduleExternal();
+      scheduleAutoSave();
+    },
+    onSortChanged() { pendingRowFocus = null; },
+    onCellEditRequest(event) {
+      const data = event.data;
+      if (!editable || !viewOpen || typeof event.colDef.field !== 'string' ||
+          (!data?.[entryRow] && !Number.isInteger(data?.[sourceRowId])) ||
+          (data?.[entryRow] && (event.newValue ?? '') === '')) {
         return;
       }
-      const pending = commitCellEdit(event);
+      let fields = pendingCellFields.get(data);
+      if (!fields) {
+        fields = new Set();
+        pendingCellFields.set(data, fields);
+      }
+      const field = event.colDef.field;
+      if (fields.has(field)) return;
+      fields.add(field);
+      const pending = commitCellEdit(event, viewGeneration);
       pendingCellEdits.add(pending);
-      void pending.finally(() => pendingCellEdits.delete(pending));
+      saveEditDrain?.add(pending);
+      void pending.finally(() => {
+        fields.delete(field);
+        pendingCellEdits.delete(pending);
+        scheduleExternal();
+        scheduleAutoSave();
+      });
     },
   };
 
@@ -237,18 +360,22 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     gridApi.setGridOption('columnDefs', columns.map((column) => ({
       headerName: column,
       field: column,
-      editable: () => editable,
+      editable: canEditCell,
       resizable: true,
       minWidth: 140,
       flex: 1,
     })));
   }
 
-  function setDatasource(datasource) {
+  function setDatasource({ getRows }) {
+    datasource = createPagedDatasource(getRows, startRow =>
+      Boolean(gridApi.getCacheBlockState()[startRow / gridOptions.cacheBlockSize]));
     gridApi.setGridOption('datasource', datasource);
+    syncRowHeight();
   }
 
   function refreshRows() {
+    pendingRowFocus = null;
     if (typeof gridApi.purgeInfiniteCache === 'function') {
       gridApi.purgeInfiniteCache();
     } else if (typeof gridApi.refreshInfiniteCache === 'function') {
@@ -257,17 +384,14 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   function selectedSourceRow() {
+    const focused = gridApi.getFocusedCell();
+    const focusedData = focused && gridApi.getDisplayedRowAtIndex(focused.rowIndex)?.data;
+    if (focusedData?.[entryRow]) return rowCount;
     const selected = gridApi.getSelectedRows ? gridApi.getSelectedRows() : [];
-    if (Number.isInteger(selected[0]?._csvzallRowId)) {
-      return selected[0]._csvzallRowId;
+    if (Number.isInteger(selected[0]?.[sourceRowId])) {
+      return selected[0][sourceRowId];
     }
-    const focused = gridApi.getFocusedCell ? gridApi.getFocusedCell() : null;
-    if (focused && Number.isInteger(focused.rowIndex) && typeof gridApi.getDisplayedRowAtIndex === 'function') {
-      const focusedNode = gridApi.getDisplayedRowAtIndex(focused.rowIndex);
-      if (Number.isInteger(focusedNode?.data?._csvzallRowId)) {
-        return focusedNode.data._csvzallRowId;
-      }
-    }
+    if (Number.isInteger(focusedData?.[sourceRowId])) return focusedData[sourceRowId];
     return rowCount;
   }
 
@@ -304,51 +428,144 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     return menu;
   }
 
-  async function commitCellEdit(event) {
+  async function commitCellEdit(event, generation) {
+    const column = event.colDef.field;
+    const value = event.newValue ?? '';
+    const data = event.data;
     try {
-      await request('editCell', {
-        rowIndex: event.data._csvzallRowId,
-        column: event.colDef.field,
-        value: event.newValue ?? '',
+      if (data[entryRow]) {
+        const existing = pendingEntryRows.get(data);
+        if (!existing) {
+          const pending = appendEntryRow(event.node, data, column, value, generation);
+          pendingEntryRows.set(data, pending);
+          try { await pending; }
+          finally { pendingEntryRows.delete(data); }
+          return;
+        }
+        await existing;
+        if (generation !== viewGeneration || !viewOpen) return;
+      }
+      const { edited } = await request('editCell', {
+        rowIndex: data[sourceRowId],
+        column,
+        value,
       });
+      if (!viewOpen || generation !== viewGeneration) return;
       markDataDirty();
+      if (event.node.data !== data) return;
+      data[column] = value;
+      const columns = data[editedColumns] ??= new Set();
+      if (edited) columns.add(column);
+      else columns.delete(column);
+      gridApi.refreshCells({ rowNodes: [event.node], columns: [event.column] });
     } catch (error) {
-      restoringCell = true;
-      try { event.node.setDataValue(event.colDef.field, event.oldValue ?? ''); }
-      finally { restoringCell = false; }
-      setStatus(error instanceof Error ? error.message : 'Edit failed');
+      if (!viewOpen || generation !== viewGeneration) return;
+      const failure = error instanceof Error ? error : new Error('Edit failed');
+      setStatus(failure.message);
+      return failure;
     }
   }
 
-  function loadView(schema, name) {
+  async function appendEntryRow(node, data, column, value, generation) {
+    const values = activeColumns.map(field => field === column ? value : '');
+    // Tab can start editing the next cell before the append is acknowledged.
+    // Queue the append like a cell edit, without stopping the next editor.
+    pendingEntryCount += 1;
+    refreshDirtyState();
+    let schema;
+    try {
+      schema = await queueMutation('insertRow', { values }, generation, () => saveState.changed());
+      if (schema && generation === viewGeneration) markDataDirty();
+    } finally {
+      if (generation === viewGeneration) {
+        pendingEntryCount -= 1;
+        refreshDirtyState();
+      }
+    }
+    if (!viewOpen || generation !== viewGeneration) return;
+    applySchema(schema);
+    rowRevision += 1;
+    delete data[entryRow];
+    data[sourceRowId] = rowCount - 1;
+    data[insertedRow] = true;
+    data[column] = value;
+    extendEntryRowBlock(gridApi, node, data, rowCount, cacheBlockSize, activeColumns);
+  }
+
+  function loadView(schema, name, { deferInitialCount = false } = {}) {
+    pendingRowFocus = null;
+    pendingEntryCount = 0;
     viewOpen = true;
     activeName = name;
     document.getElementById('file-name').textContent = name;
+    recovery.length = 0;
     document.getElementById('summary').textContent = '';
     editable = schema.editable !== false;
     document.getElementById('edit-toolbar').hidden = !editable;
+    waitingForInitialCount = deferInitialCount && schema.rowCount > 0;
     applySchema(schema);
     viewGeneration += 1;
     const generation = viewGeneration;
+    function showInitialCount() {
+      if (generation !== viewGeneration || !waitingForInitialCount) return;
+      waitingForInitialCount = false;
+      updateRecordCount();
+    }
+    gridApi.applyColumnState({ defaultState: { sort: null } });
     setGridColumnDefs(activeColumns);
     setDatasource({
       async getRows(params) {
         try {
           const offset = params.startRow;
           const limit = Math.max(params.endRow - params.startRow, 1);
-          const page = await request('readRows', { offset, limit });
-          if (generation !== viewGeneration) {
-            params.failCallback();
-            return;
+          const [sort] = params.sortModel;
+          const payload = { offset, limit };
+          if (sort) {
+            Object.assign(payload, { sortColumn: sort.colId, sortDirection: sort.sort });
           }
+          let page;
+          let revision;
+          do {
+            if (pendingCellEdits.size) await Promise.all([...pendingCellEdits]);
+            if (generation !== viewGeneration) return params.failCallback();
+            revision = rowRevision;
+            page = await request('readRows', payload);
+            if (pendingEntryCount > 0) await Promise.all([...pendingCellEdits]);
+            if (generation !== viewGeneration) return params.failCallback();
+          } while (revision !== rowRevision);
+          if (sort && (!Array.isArray(page.rowIds) || page.rowIds.length !== page.rows.length ||
+              !page.rowIds.every(Number.isInteger))) {
+            throw new Error('Sorted rows could not be matched to the CSV.');
+          }
+          const countChanged = rowCount !== page.totalRows;
           rowCount = page.totalRows;
-          params.successCallback(
-            rowsToObjects(activeColumns, page.rows, page.offset),
-            page.totalRows);
-          updateRecordCount(page.totalRows);
+          const rows = rowsToObjects(activeColumns, page.rows, page.offset, page.rowIds, page.changes);
+          if (editable && offset + rows.length === rowCount && rows.length < limit) {
+            rows.push(makeEntryRow(activeColumns));
+          }
+          params.successCallback(rows, displayedRowCount());
+          const focus = pendingRowFocus;
+          if (focus && focus.index >= offset && focus.index < offset + page.rows.length) {
+            requestAnimationFrame(() => {
+              if (pendingRowFocus !== focus) return;
+              const row = gridApi.getDisplayedRowAtIndex(focus.index);
+              if (row?.data?.[sourceRowId] !== focus.index || !row.data[insertedRow]) return;
+              pendingRowFocus = null;
+              const [column] = gridApi.getAllDisplayedColumns();
+              if (column) gridApi.setFocusedCell(focus.index, column);
+            });
+          }
+          if (waitingForInitialCount) {
+            // Give the delivered rows a frame to paint before initializing locale formatting.
+            requestAnimationFrame(() => requestAnimationFrame(showInitialCount));
+          } else if (countChanged) {
+            updateRecordCount();
+          }
         } catch (error) {
           params.failCallback();
-          setStatus(error instanceof Error ? error.message : 'Row load failed');
+          showInitialCount();
+          if (error?.conflict) externalChange({});
+          else setStatus(error instanceof Error ? error.message : 'Row load failed');
         }
       },
     });
@@ -356,22 +573,27 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     setStatus(`Loaded ${name}.`, 'Loaded.');
   }
 
-  async function openBuffer(name, buffer, sourceLabel) {
+  async function openBuffer(name, buffer) {
     saveState.changed();
+    const generation = ++viewGeneration;
+    discardEditsDialog.close();
+    pendingEntryCount = 0;
     viewOpen = false;
     rowCount = 0;
     activeColumns = [];
     setDirty(false);
     refreshActionState();
-    showLoading('Opening CSV', `${sourceLabel || name} is being indexed in the background.`);
     setStatus(`Opening ${name}...`);
     try {
       const schema = await request('open', { name, buffer }, [buffer]);
-      loadView(schema, name);
+      if (generation === viewGeneration) {
+        loadView(schema, name);
+        scheduleExternal();
+      }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Open failed');
-    } finally {
-      hideLoading();
+      if (generation === viewGeneration) {
+        setStatus(error instanceof Error ? error.message : 'Open failed');
+      }
     }
   }
 
@@ -379,13 +601,11 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     try {
       const { name, buffer } = await readLocalFile(file, {
         onStart(name) {
-          showLoading('Opening CSV', `${name} is being read from your device.`);
           setStatus(`Opening ${name}...`);
         },
       });
-      await openBuffer(name, buffer, name);
+      await openBuffer(name, buffer);
     } catch (error) {
-      hideLoading();
       setStatus(error instanceof Error ? error.message : 'Could not read the selected file.');
     }
   }
@@ -399,16 +619,17 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   async function requestOpenFile(file) {
-    if (dirty && !window.confirm(
-      `Open ${file.name}? Unsaved changes to ${activeName || 'the current file'} will be lost.`,
-    )) {
-      return;
-    }
+    if (confirmingDiscard) return;
+    if (hasLocalChanges() && !await confirmDiscardEdits(
+      `Open ${file.name}?`,
+      `Opening this file discards unsaved edits to ${activeName}.`,
+      'Discard edits and open',
+    )) return;
     await openFileWhenReady(file);
   }
 
   async function openHostFile(file) {
-    await openBuffer(file.name || 'input.csv', file.buffer, 'Host file');
+    await openBuffer(file.name || 'input.csv', file.buffer);
   }
 
   function columnIndexFor(column) {
@@ -445,11 +666,17 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   }
 
   async function insertRowAt(row) {
+    const append = row === undefined || Boolean(activeSort());
     const values = activeColumns.map(() => '');
     try {
-      const schema = await request('insertRow', { row, values });
+      const schema = await request('insertRow', append ? { values } : { row, values });
       applySchema(schema);
       refreshRows();
+      if (append) {
+        pendingRowFocus = { index: schema.rowCount - 1 };
+        gridApi.setRowCount(displayedRowCount(), true);
+        gridApi.ensureIndexVisible(pendingRowFocus.index, 'bottom');
+      }
       markDataDirty();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Insert failed');
@@ -526,7 +753,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     }
     insertColumnName.value = '';
     clearColumnError();
-    showDialog(insertColumnDialog, insertColumnName);
+    insertColumnDialog.show(insertColumnName);
   }
 
   function showRenameColumnDialog(column) {
@@ -541,7 +768,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     pendingRenameColumn = column;
     renameColumnName.value = column;
     clearRenameColumnError();
-    showDialog(renameColumnDialog, renameColumnName);
+    renameColumnDialog.show(renameColumnName);
     renameColumnName.select();
   }
 
@@ -550,12 +777,12 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     theme: 'system',
     items: ({ data }) => {
       const row = data?.row;
+      const sorted = Boolean(activeSort());
       return [
-        { id: 'move-up', label: 'Move Up', icon: () => createIcon('arrow-up'), disabled: !Number.isInteger(row) || row <= 0 },
-        { id: 'move-down', label: 'Move Down', icon: () => createIcon('arrow-down'), disabled: !Number.isInteger(row) || row >= rowCount - 1 },
+        { id: 'move-up', label: 'Move Up', icon: () => createIcon('arrow-up'), disabled: sorted || !Number.isInteger(row) || row <= 0 },
+        { id: 'move-down', label: 'Move Down', icon: () => createIcon('arrow-down'), disabled: sorted || !Number.isInteger(row) || row >= rowCount - 1 },
         { type: 'separator' },
-        { id: 'insert-row-before', label: 'Insert Row Before', icon: () => createIcon('row-insert-bottom') },
-        { id: 'insert-row-after', label: 'Insert Row After', icon: () => createIcon('row-insert-bottom') },
+        ...rowInsertItems('Insert row '),
         { type: 'separator' },
         { id: 'delete-row', label: 'Delete Row', icon: () => createIcon('trash'), variant: 'danger' },
         { id: 'delete-column', label: 'Delete Column', icon: () => createIcon('column-remove'), variant: 'danger' },
@@ -570,6 +797,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       if (event.id === 'move-down' && Number.isInteger(row)) {
         void moveRowBy(row, 1);
       }
+      if (event.id === 'add-row') void insertRowAt();
       if (event.id === 'insert-row-before' && Number.isInteger(row)) {
         void insertRowAt(rowInsertionIndex(row, rowCount, 0));
       }
@@ -588,7 +816,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   const columnMenu = createContextMenu({
     trigger: 'manual',
     theme: 'system',
-    items: () => [
+    items: ({ data }) => [
+      ...(data?.column && activeSort()?.colId === data.column ? [{ id: 'clear-sort', label: 'Clear sort' }, { type: 'separator' }] : []),
       ...columnFeatures.map(feature => ({ id: feature.id, label: feature.label, icon: () => createIcon(feature.icon) })),
       ...(editable ? [
       { id: 'rename-column', label: 'Rename Column', icon: () => createIcon('pencil'), disabled: csvOptions?.hasHeaders === false },
@@ -598,6 +827,11 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     ],
     onSelect(event) {
       const column = event.context.data?.column;
+      if (event.id === 'clear-sort' && activeSort()?.colId === column) {
+        gridApi.stopEditing();
+        gridApi.applyColumnState({ defaultState: { sort: null } });
+        return;
+      }
       const feature = columnFeatures.find(item => item.id === event.id);
       if (feature) { event.close(); feature.run(column); return; }
       if (event.id === 'rename-column' && typeof column === 'string') {
@@ -612,7 +846,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   gridOptions.onCellContextMenu = (event) => {
     if (!editable || resultMode) return;
     const nativeEvent = event.event;
-    const row = event.data?._csvzallRowId;
+    const row = event.data?.[sourceRowId];
     const column = event.colDef?.field;
     if (!nativeEvent || !Number.isInteger(row)) {
       return;
@@ -636,7 +870,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       return;
     }
     event.preventDefault();
-    if (!editable && !columnFeatures.length) return;
+    if (!editable && !columnFeatures.length && activeSort()?.colId !== column) return;
     columnMenu.open({
       x: event.clientX,
       y: event.clientY,
@@ -646,13 +880,25 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     });
   });
 
-  createToolbarDropdown(insertMenuButton, [
-    { id: 'insert-row-before', label: 'Row Before', icon: () => createIcon('row-insert-bottom') },
-    { id: 'insert-row-after', label: 'Row After', icon: () => createIcon('row-insert-bottom') },
+  function rowInsertItems(prefix, includeAppend = false) {
+    const icon = () => createIcon('row-insert-bottom');
+    const addRow = { id: 'add-row', label: 'Add row', icon };
+    return activeSort()
+      ? [addRow]
+      : [
+          ...(includeAppend ? [addRow] : []),
+          { id: 'insert-row-before', label: `${prefix}before`, icon },
+          { id: 'insert-row-after', label: `${prefix}after`, icon },
+        ];
+  }
+
+  createToolbarDropdown(insertMenuButton, () => [
+    ...rowInsertItems('Row ', true),
     { type: 'separator' },
     { id: 'insert-column-before', label: 'Column Before', icon: () => createIcon('column-insert-right') },
     { id: 'insert-column-after', label: 'Column After', icon: () => createIcon('column-insert-right') },
   ], (event) => {
+    if (event.id === 'add-row') void insertRowAt();
     if (event.id === 'insert-row-before') {
       void insertRowRelativeToSelection(0);
     }
@@ -752,7 +998,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     document.getElementById('csv-options-headers').textContent =
       `${csvOptions.hasHeaders ? 'Headers' : 'Display labels'}: ${activeColumns.join(', ')}`;
     csvOptionsError.hidden = true;
-    showDialog(csvOptionsDialog, csvHasHeaders.disabled ? csvDelimiter : csvHasHeaders);
+    csvOptionsDialog.show(csvHasHeaders.disabled ? csvDelimiter : csvHasHeaders);
   });
   csvInputRead.addEventListener('click', async () => {
     if (dirty || saving || readingCsv) return;
@@ -772,7 +1018,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     } catch (error) {
       csvOptionsError.textContent = error instanceof Error ? error.message : 'Could not read this dialect.';
       csvOptionsError.hidden = false;
-    } finally { readingCsv = false; csvInputRead.disabled = dirty; apply.disabled = false; }
+    } finally { readingCsv = false; csvInputRead.disabled = dirty; apply.disabled = false; scheduleExternal(); scheduleAutoSave(); }
   });
   document.getElementById('csv-options-standard').addEventListener('click', () => {
     csvDelimiter.value = ',';
@@ -800,7 +1046,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     } catch (error) {
       csvOptionsError.textContent = error instanceof Error ? error.message : 'Could not apply CSV options.';
       csvOptionsError.hidden = false;
-    } finally { apply.disabled = false; }
+    } finally { apply.disabled = false; scheduleExternal(); scheduleAutoSave(); }
   });
 
   fileInput.addEventListener('change', () => {
@@ -811,23 +1057,176 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     }
   });
 
+  function showExternalConflict() {
+    externalConflict = true;
+    if (!dirty && gridApi.getEditingCells().length) setDirty(true);
+    reloadExternalButton.hidden = false;
+    recoveryButton.hidden = false;
+    conflictNotice.textContent = 'The CSV changed on disk. Save a copy of your edits before reloading if you want to keep them.';
+    conflictNotice.hidden = false;
+    statusNode.hidden = true;
+  }
+
+  function scheduleExternal() {
+    window.clearTimeout(externalTimer);
+    if (!pendingExternal || externalConflict) return;
+    externalTimer = window.setTimeout(() => { void refreshExternal(); }, 0);
+  }
+
+  function externalChange(change) {
+    if (change.revision !== undefined &&
+        (hostBridge?.isCurrentRevision?.(change.revision) || change.revision <= (pendingExternal?.revision ?? 0))) return;
+    pendingExternal = change;
+    scheduleExternal();
+  }
+
+  function hasLocalChanges() {
+    return dirty || gridApi.getEditingCells().length > 0 || pendingCellEdits.size > 0 || changingStructure;
+  }
+
+  async function refreshExternal({ discard = false } = {}) {
+    const change = pendingExternal;
+    if (!change || !viewOpen || saving || refreshingExternal || readingCsv) return;
+    if (change.revision !== undefined && hostBridge?.isCurrentRevision?.(change.revision)) {
+      pendingExternal = undefined;
+      scheduleAutoSave();
+      return;
+    }
+    if (discard && change.buffer === undefined && !backend.reload) return;
+    if (!discard && hasLocalChanges()) {
+      const changed = !backend.reload || await backend.externalChanged().catch(() => true);
+      if (pendingExternal !== change) return;
+      if (!changed) {
+        pendingExternal = undefined;
+        scheduleAutoSave();
+        return;
+      }
+      if (hasLocalChanges()) {
+        showExternalConflict();
+        return;
+      }
+      scheduleExternal();
+      return;
+    }
+    refreshingExternal = true;
+    const wasInert = document.body.inert;
+    document.body.inert = true;
+    try {
+      if (discard) {
+        gridApi.stopEditing(true);
+        await Promise.allSettled([...pendingCellEdits]);
+        await csvMutations.settle().catch(() => {});
+      }
+      const buffer = change.buffer?.slice(0);
+      const schema = backend.reload
+        ? await backend.reload()
+        : await request('open', { name: activeName, buffer }, [buffer]);
+      if (schema) {
+        const layout = gridApi.getColumnState();
+        const row = gridApi.getFirstDisplayedRowIndex();
+        const focused = gridApi.getFocusedCell();
+        loadView(schema, activeName);
+        gridApi.applyColumnState({ state: layout, applyOrder: true });
+        if (row >= 0 && row < rowCount) gridApi.ensureIndexVisible(row, 'top');
+        if (focused && focused.rowIndex < rowCount && activeColumns.includes(focused.column.getColId())) {
+          gridApi.setFocusedCell(focused.rowIndex, focused.column.getColId());
+        }
+        if (change.revision !== undefined) hostBridge?.acceptRevision?.(change.revision);
+        setStatus(`Loaded new changes ${new Date().toLocaleString()}`);
+      }
+      if (pendingExternal === change) pendingExternal = undefined;
+      externalConflict = false;
+      reloadExternalButton.hidden = true;
+      recoveryButton.hidden = true;
+      conflictNotice.hidden = true;
+      statusNode.hidden = false;
+    } catch (error) {
+      externalConflict = true;
+      reloadExternalButton.hidden = false;
+      conflictNotice.textContent = error instanceof Error ? error.message : 'Could not reload the CSV.';
+      conflictNotice.hidden = false;
+      statusNode.hidden = true;
+    } finally {
+      document.body.inert = wasInert;
+      refreshingExternal = false;
+      scheduleExternal();
+      scheduleAutoSave();
+    }
+  }
+
+  recoveryButton.addEventListener('click', () => {
+    void (async () => {
+      await finishEditing();
+      await csvMutations.settle().catch(() => {});
+      const columnOrder = currentGridColumns(gridApi, activeColumns);
+      const edits = JSON.stringify({ file: activeName, columnOrder, edits: recovery }, null, 2);
+      requestRecovery(edits);
+    })();
+  });
+
+  function recoveryResult({ success, path, error }) {
+    if (!externalConflict) return;
+    conflictNotice.textContent = success ? `Saved a copy of your edits to ${path}.` :
+      (error || 'Could not save a copy of your edits.');
+  }
+
+  async function confirmDiscardEdits(title, description, actionLabel) {
+    if (confirmingDiscard) return false;
+    const generation = viewGeneration;
+    confirmingDiscard = true;
+    discardEditsTitle.textContent = title;
+    discardEditsDescription.textContent = description;
+    discardEditsConfirm.textContent = actionLabel;
+    try {
+      const result = await discardEditsDialog.showForResult(discardEditsCancel);
+      return result === 'discard' && generation === viewGeneration;
+    } finally {
+      confirmingDiscard = false;
+    }
+  }
+
+  async function requestExternalReload() {
+    if (!pendingExternal || saving || refreshingExternal || confirmingDiscard) return;
+    if (hasLocalChanges() && !await confirmDiscardEdits(
+      'Discard edits and reload CSV?',
+      'Reloading opens the latest file from disk and discards your unsaved edits.',
+      'Discard edits and reload',
+    )) return;
+    await refreshExternal({ discard: true });
+  }
+
+  reloadExternalButton.addEventListener('click', () => { void requestExternalReload(); });
+  discardEditsCancel.addEventListener('click', () => discardEditsDialog.close());
+  discardEditsConfirm.addEventListener('click', () => discardEditsDialog.close('discard'));
+
   let saving = false;
-  async function saveCurrentChanges() {
+  async function saveCurrentChanges({ automatic = false } = {}) {
     if (!editable) throw new Error('This CSV is read-only.');
     if (!viewOpen) {
       throw new Error('No CSV is open.');
     }
-    if (saving) throw new Error('A save is already in progress.');
+    if (automatic && (!autoSave.enabled || !dirty || externalConflict || pendingExternal ||
+      saving || readingCsv || refreshingExternal || gridApi.getEditingCells().length)) return;
+    if (externalConflict) throw new Error('The CSV changed on disk. Reload CSV before saving.');
+    if (saving || refreshingExternal) throw new Error('A CSV update is already in progress.');
     if (readingCsv) throw new Error('The input dialect is being applied.');
     saving = true;
+    autoSave.cancel();
     const wasInert = document.body.inert;
-    document.body.inert = true;
+    if (!automatic) document.body.inert = true;
+    let releaseWrites;
     try {
-      gridApi.stopEditing();
-      await new Promise(resolve => window.setTimeout(resolve, 0));
-      await Promise.all([...pendingCellEdits]);
+      if (!automatic) await finishEditing({ requireSuccess: true });
+      else {
+        const results = await Promise.all([...pendingCellEdits]);
+        const failure = results.find(result => result instanceof Error);
+        if (failure) throw failure;
+      }
       await csvMutations.settle();
-      showLoading('Saving CSV', `${activeName} is being rewritten with your edits.`);
+      if (!dirty || (automatic && (!autoSave.enabled || pendingExternal || gridApi.getEditingCells().length))) return;
+      const savedEditCount = recovery.length;
+      saveBarrier = new Promise(resolve => { releaseWrites = resolve; });
+      if (!automatic) showLoading('Saving CSV', `${activeName} is being rewritten with your edits.`);
       const name = activeName;
       let savedResult;
       await saveState.save({
@@ -846,22 +1245,36 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
           refreshRows();
         },
       });
+      recovery.splice(0, savedEditCount);
       setStatus(savedResult.chartError ? 'Saved. Chart generation failed: ' + savedResult.chartError : 'Saved ' + name + '.',
         savedResult.chartError ? 'Saved. Chart generation failed: ' + savedResult.chartError : 'Saved.');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Download failed');
+      autoSave.failed();
+      if (error?.conflict) {
+        if (backend.reload) pendingExternal ??= {};
+        showExternalConflict();
+      } else {
+        setStatus(error instanceof Error ? error.message : 'Save failed');
+      }
       throw error;
     } finally {
-      hideLoading();
-      document.body.inert = wasInert;
+      saveBarrier = undefined;
+      releaseWrites?.();
+      if (!automatic) {
+        hideLoading();
+        document.body.inert = wasInert;
+      }
       saving = false;
+      scheduleExternal();
+      scheduleAutoSave();
     }
   }
 
   saveButton.addEventListener('click', () => { void saveCurrentChanges().catch(() => {}); });
 
   async function resetCurrentChanges() {
-    if (!viewOpen) return;
+    if (!viewOpen || saving || refreshingExternal) return;
+    if (pendingExternal || externalConflict) { await requestExternalReload(); return; }
     await finishEditing();
     await csvMutations.settle();
     showLoading('Resetting CSV', `${activeName} is being restored from the original bytes.`);
@@ -872,6 +1285,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       setGridColumnDefs(activeColumns);
       setDirty(false);
       refreshRows();
+      recovery.length = 0;
       setStatus(`Reset ${activeName}.`, 'Reset.');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Reset failed');
@@ -882,16 +1296,25 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
   resetButton.addEventListener('click', () => { void resetCurrentChanges(); });
 
 
-  async function finishEditing() {
-    gridApi.stopEditing();
-    await new Promise(resolve => window.setTimeout(resolve, 0));
-    await Promise.all([...pendingCellEdits]);
+  async function finishEditing({ requireSuccess = false } = {}) {
+    const pending = new Set(pendingCellEdits);
+    if (requireSuccess) saveEditDrain = pending;
+    try {
+      gridApi.stopEditing();
+      await new Promise(resolve => window.setTimeout(resolve, 0));
+      for (const edit of pendingCellEdits) pending.add(edit);
+      const results = await Promise.all(pending);
+      if (requireSuccess) {
+        const failure = results.find(result => result instanceof Error);
+        if (failure) throw failure;
+      }
+    } finally {
+      if (saveEditDrain === pending) saveEditDrain = null;
+    }
   }
   decorateMenuButton(insertMenuButton, 'plus', 'Insert');
   decorateMenuButton(deleteMenuButton, 'trash', 'Delete');
-  decorateButton(resetButton, 'restore', 'Reset');
   decorateButton(csvOptionsButton, 'settings', 'Options');
-  decorateButton(saveButton, 'device-floppy', 'Save');
   decorateIconButton(document.getElementById('more-actions'), 'dots', 'More actions');
   compactLayout = createCompactLayout({ toolbar: document.querySelector('.toolbar-actions'),
     moreButton: document.getElementById('more-actions'), createMenu: createToolbarDropdown, dropdowns, onChange: renderStatus });
@@ -903,7 +1326,8 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
     get saving() { return saving; },
     finishEditing: async () => { await finishEditing(); await csvMutations.settle(); },
     save: saveCurrentChanges, reset: resetCurrentChanges, openBuffer, requestOpenFile,
-    setStatus, refreshRows,
+    setStatus, refreshRows, setAutoSave: autoSave.setPolicy, externalChange, recoveryResult,
+    connectRecovery(callback) { requestRecovery = callback; },
     restoreTable() { resultMode = false; updateRecordCount(); setStatus(dirty ? 'Unsaved changes.' : 'Ready.'); },
     setResultMode(value) { resultMode = value; },
     addColumnAction(action) { columnFeatures.push(action); },
@@ -913,7 +1337,7 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
       try {
         const initial = await backend.request('init');
         engineReady = true;
-        if (initial?.columns) loadView(initial, initial.file);
+        if (initial?.columns) loadView(initial, initial.file, { deferInitialCount: true });
         if (pendingOpenFile) { const file = pendingOpenFile; pendingOpenFile = null; await openFile(file); }
         fileInput.disabled = !backend.capabilities.localFiles || hostBridge?.isHostMode();
         for (const feature of features) {
@@ -921,11 +1345,17 @@ export function createViewerShell({ backend, createGrid, createContextMenu, crea
           const mounted = feature.mount(shell);
           if (mounted?.destroy) featureDisposers.push(() => mounted.destroy());
         }
+        scheduleExternal();
         if (!viewOpen) { document.getElementById('file-name').textContent = 'csvzall'; setStatus('Open a local CSV file to begin.'); }
       } catch (error) { setStatus(error.message); throw error; }
     },
     destroy() {
+      autoSave.dispose();
+      window.clearTimeout(externalTimer);
+      viewGeneration += 1;
+      pendingRowFocus = null;
       for (const dispose of featureDisposers.reverse()) dispose();
+      for (const dialog of [discardEditsDialog, csvOptionsDialog, insertColumnDialog, renameColumnDialog, loadingDialog]) dialog.destroy();
       for (const menu of [...menus, rowMenu, columnMenu]) menu?.destroy?.();
       compactLayout.destroy(); removeBeforeUnload?.(); hostGrid.destroy(); gridApi.destroy(); backend.destroy?.();
     },

@@ -21,7 +21,7 @@ unsupported protocol versions, modes, and malformed values, and ignores
 unrecognized properties. Each valid message replaces the previous snapshot;
 omitted properties are removed. It never accepts a stylesheet or resource URL.
 
-Host colors feed the existing csvzall design tokens. Explicit light/dark grid
+The shared `modules/viewer-theme.css` maps host colors, fonts, UI spacing and input height to standalone defaults. CSV cells and JSON code use the same `--font-preferred-size` (falling back to `--font-text-size`); toolbar and status text follow the UI sizes. Explicit light/dark grid
 classes and `color-scheme` override system mode only after a valid message.
 The receiver does not recreate the grid or touch file state, editor focus,
 scroll position, or keyboard layout. A standalone viewer installs no receiver
@@ -34,10 +34,8 @@ a separate module script until they are refreshed from a new WASM release.
 
 ## Dialog dismissal
 
-Both viewers also import `modules/dialog-dismiss.mjs`. A primary pointer press
-and click on the backdrop of a `dialog.csvzall-dialog` dispatches a cancelable
-`cancel` event, then closes with return value `cancel`. Existing close handlers
-still run, including the unsaved-changes prompt's resolution. Clicks within the
-dialog bounds, drags starting inside, canceled pointers, and secondary clicks
-do not dismiss. Loading/progress dialogs are excluded. This behavior also works
-when the viewer runs standalone.
+The native and WASM viewers use `modules/dialog.mjs` for both the shared shell
+and dialogs created by individual features. Escape and a primary click that
+starts and finishes on the backdrop close an ordinary dialog as Cancel.
+Backdrop clicks respect cancel handlers. Loading and save progress stay open
+until their operation finishes.

@@ -8,6 +8,15 @@ if(NOT DEFINED VIEWER_SOURCE_DIR OR NOT DEFINED AG_GRID_SOURCE_DIR OR NOT DEFINE
 endif()
 
 set(_assets
+  "/assets/modules/autosave.mjs|${VIEWER_SOURCE_DIR}/modules/autosave.mjs|application/javascript|viewer_autosave"
+  "/assets/modules/viewer-theme.css|${VIEWER_SOURCE_DIR}/modules/viewer-theme.css|text/css|viewer_theme_css"
+  "/assets/modules/editor-toolbar.mjs|${VIEWER_SOURCE_DIR}/modules/editor-toolbar.mjs|application/javascript|editor_toolbar"
+  "/assets/modules/viewer-toolbar.mjs|${VIEWER_SOURCE_DIR}/modules/viewer-toolbar.mjs|application/javascript|viewer_toolbar"
+  "/json-editor.html|${VIEWER_SOURCE_DIR}/modules/json-editor.html|text/html|json_editor_0"
+  "/assets/modules/json-editor.css|${VIEWER_SOURCE_DIR}/modules/json-editor.css|text/css|json_editor_1"
+  "/assets/modules/json-editor.mjs|${VIEWER_SOURCE_DIR}/modules/json-editor.mjs|application/javascript|json_editor_2"
+  "/assets/modules/json-document.mjs|${VIEWER_SOURCE_DIR}/modules/json-document.mjs|application/javascript|json_editor_3"
+  "/assets/modules/codemirror-json.mjs|${VIEWER_SOURCE_DIR}/modules/codemirror-json.mjs|application/javascript|json_editor_4"
   "/assets/modules/features/style.mjs|${VIEWER_SOURCE_DIR}/modules/features/style.mjs|application/javascript|viewer_feature_style_mjs"
   "/assets/modules/features/charts.css|${VIEWER_SOURCE_DIR}/modules/features/charts.css|text/css|viewer_feature_charts_css"
   "/assets/modules/features/sql.css|${VIEWER_SOURCE_DIR}/modules/features/sql.css|text/css|viewer_feature_sql_css"
@@ -26,7 +35,7 @@ set(_assets
   "/assets/viewer.js|${VIEWER_SOURCE_DIR}/viewer.js|application/javascript|viewer_js"
   "/assets/modules/dirty-state.mjs|${VIEWER_SOURCE_DIR}/modules/dirty-state.mjs|application/javascript|viewer_module_dirty_state_mjs"
   "/assets/modules/host-theme.mjs|${VIEWER_SOURCE_DIR}/modules/host-theme.mjs|application/javascript|viewer_module_host_theme_mjs"
-  "/assets/modules/dialog-dismiss.mjs|${VIEWER_SOURCE_DIR}/modules/dialog-dismiss.mjs|application/javascript|viewer_module_dialog_dismiss_mjs"
+  "/assets/modules/dialog.mjs|${VIEWER_SOURCE_DIR}/modules/dialog.mjs|application/javascript|viewer_module_dialog_mjs"
   "/assets/modules/fallback-menu.mjs|${VIEWER_SOURCE_DIR}/modules/fallback-menu.mjs|application/javascript|viewer_module_fallback_menu_mjs"
   "/assets/modules/grid.mjs|${VIEWER_SOURCE_DIR}/modules/grid.mjs|application/javascript|viewer_module_grid_mjs"
   "/assets/modules/icons.mjs|${VIEWER_SOURCE_DIR}/modules/icons.mjs|application/javascript|viewer_module_icons_mjs"
@@ -37,7 +46,7 @@ set(_assets
   "/assets/modules/sql.mjs|${VIEWER_SOURCE_DIR}/modules/sql.mjs|application/javascript|viewer_module_sql_mjs"
   "/assets/modules/note-export.mjs|${VIEWER_SOURCE_DIR}/modules/note-export.mjs|application/javascript|viewer_module_note_export_mjs"
   "/assets/modules/state.mjs|${VIEWER_SOURCE_DIR}/modules/state.mjs|application/javascript|viewer_module_state_mjs"
-  "/assets/ag-grid-community.min.js|${AG_GRID_SOURCE_DIR}/ag-grid-community.min.js|application/javascript|ag_grid_js"
+  "/assets/ag-grid-community.min.js|${AG_GRID_SOURCE_DIR}/ag-grid-community.min.noStyle.js|application/javascript|ag_grid_js"
   "/assets/ag-grid.css|${AG_GRID_SOURCE_DIR}/ag-grid.css|text/css|ag_grid_css"
   "/assets/ag-theme-alpine.css|${AG_GRID_SOURCE_DIR}/ag-theme-alpine.css|text/css|ag_theme_css"
   "/assets/popright/styles.css|${POPRIGHT_SOURCE_DIR}/styles.css|text/css|popright_styles_css"
@@ -63,6 +72,14 @@ set(_assets
 # the cache. Only successful generation publishes the new fingerprint.
 file(SHA256 "${CMAKE_CURRENT_LIST_FILE}" _generator_hash)
 set(_fingerprint "${_generator_hash}")
+if(ESBUILD)
+  execute_process(COMMAND "${ESBUILD}" viewer.js --bundle --format=esm --minify
+    "--alias:popright=${POPRIGHT_SOURCE_DIR}/index.js"
+    WORKING_DIRECTORY "${VIEWER_SOURCE_DIR}" OUTPUT_VARIABLE _viewer_bundle
+    ENCODING UTF-8 COMMAND_ERROR_IS_FATAL ANY)
+  string(SHA256 _bundle_hash "${_viewer_bundle}")
+  string(APPEND _fingerprint "|bundle:${_bundle_hash}")
+endif()
 foreach(_asset IN LISTS _assets)
   string(REPLACE "|" ";" _parts "${_asset}")
   list(GET _parts 1 _path)
@@ -99,7 +116,11 @@ foreach(_asset IN LISTS _assets)
     message(FATAL_ERROR "viewer asset not found: ${_path}")
   endif()
 
-  file(READ "${_path}" _content)
+  if(_symbol STREQUAL "viewer_js" AND ESBUILD)
+    set(_content "${_viewer_bundle}")
+  else()
+    file(READ "${_path}" _content)
+  endif()
   string(LENGTH "${_content}" _content_len)
   set(_offset 0)
   set(_chunk_index 0)

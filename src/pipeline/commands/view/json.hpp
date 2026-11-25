@@ -14,12 +14,14 @@ std::string BuildSchemaJson(const CsvViewData& data, bool editable);
 std::string BuildRowsJson(const CsvViewData& data,
                           std::uint64_t offset,
                           std::uint64_t limit,
-                          const std::vector<std::vector<std::string>>& rows);
+                          const std::vector<std::vector<std::string>>& rows,
+                          const std::vector<std::uint64_t>* row_ids = nullptr);
 std::string BuildHealthJson();
 std::string BuildStartupJson(const std::string& url);
 std::string SaveResultJson(std::size_t charts_generated, std::string_view chart_error = {});
 
 std::uint64_t JsonUintField(std::string_view body, std::string_view field);
+std::uint64_t JsonUintFieldOr(std::string_view body, std::string_view field, std::uint64_t fallback);
 std::string JsonStringField(std::string_view body, std::string_view field);
 std::vector<std::string> JsonStringArrayField(std::string_view body, std::string_view field);
 bool JsonBoolField(std::string_view body, std::string_view field);

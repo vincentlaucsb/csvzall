@@ -2,10 +2,12 @@ import { createGrid } from 'ag-grid-community';
 import { createContextMenu, createDropdownMenu } from 'popright';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-alpine.css';
+import '../../../viewer/modules/viewer-theme.css';
 import '../../../viewer/viewer.css';
 import { createViewerShell } from '../../../viewer/modules/shell.mjs';
 import { createWasmAdapter } from './wasm-adapter.js';
-import { createHostBridge } from './host-bridge.js';
+import { installHostCsvUpdates } from '../../../viewer/modules/save.mjs';
+import { createHostBridge, VIEWER_SOURCE } from './host-bridge.js';
 import { setupFileDrop } from './file-drop.js';
 import { setupPwa } from './pwa.js';
 import CsvWorker from './csv-worker.js?worker';
@@ -16,7 +18,7 @@ const shell = createViewerShell({
   createGrid, createContextMenu, createDropdownMenu, features: [],
 });
 const host = createHostBridge({
-  onOpenFile: file => shell.openBuffer(file.name || 'input.csv', file.buffer, 'Host file'),
+  onOpenFile: file => shell.openBuffer(file.name || 'input.csv', file.buffer),
   onHostModeChange: shell.setHostMode,
   onViewportResize: shell.onViewportResize,
   onSaveRequested: shell.save,
@@ -24,11 +26,12 @@ const host = createHostBridge({
 });
 shell.connectHost(host);
 host.start();
+const removeUpdates = installHostCsvUpdates({ shell, source: VIEWER_SOURCE });
 setupFileDrop({
   overlay: document.getElementById('drop-overlay'),
   enabled: () => !host.isHostMode(),
   onFile: shell.requestOpenFile, onStatus: shell.setStatus,
 });
 setupPwa({ installButton: document.getElementById('install-app'), onLaunchFile: shell.requestOpenFile });
-window.addEventListener('pagehide', () => { host.destroy(); shell.destroy(); }, { once: true });
+window.addEventListener('pagehide', () => { removeUpdates(); host.destroy(); shell.destroy(); }, { once: true });
 shell.start().then(() => host.markReady()).catch(error => shell.setStatus(error.message));

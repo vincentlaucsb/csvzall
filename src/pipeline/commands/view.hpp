@@ -76,15 +76,21 @@ class CsvViewData {
   [[nodiscard]] std::vector<std::vector<std::string>> read_rows(
       std::uint64_t offset,
       std::uint64_t limit) const;
+  [[nodiscard]] ::csvzall::viewer::CsvSortedPage read_sorted_rows(
+      std::uint64_t offset, std::uint64_t limit, const std::string& column, bool descending) const;
 
-  void edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
+  [[nodiscard]] ::csvzall::viewer::CsvRowChanges row_changes(std::uint64_t row) const;
+  bool edit_cell(std::uint64_t row, const std::string& column, const std::string& value);
   void delete_row(std::uint64_t row);
   void insert_row(std::uint64_t row, const std::vector<std::string>& values);
   void swap_rows(std::uint64_t first, std::uint64_t second);
   void insert_column(std::uint64_t column, const std::string& name, const std::string& value);
   void rename_column(const std::string& column, const std::string& name);
   void delete_column(const std::string& column);
+  void keep_original_path();
   bool recover_renamed_source();
+  [[nodiscard]] bool source_changed() const;
+  bool reload_if_changed();
   void reset();
   void save(const std::vector<std::string>& columns = {});
 
@@ -106,6 +112,7 @@ struct ViewServerOptions {
 class ViewServer {
  public:
   ViewServer(const CsvViewData& data, const LoggerCallbacks& logger);
+  ViewServer(const std::string& json_path, const LoggerCallbacks& logger);
   ~ViewServer();
 
   ViewServer(const ViewServer&) = delete;
@@ -120,11 +127,13 @@ class ViewServer {
   [[nodiscard]] std::string viewer_url() const;
 
  private:
+  void RegisterCsvRoutes();
+  void RegisterJsonRoutes();
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
 
-std::string FormatViewStartupOutput(const std::string& url, bool startup_json, bool obsidian = false);
+std::string FormatViewStartupOutput(const std::string& url, bool startup_json, bool obsidian = false, bool json_editor = false);
 
 int RunView(const std::string& input_path,
             std::ostream& output,

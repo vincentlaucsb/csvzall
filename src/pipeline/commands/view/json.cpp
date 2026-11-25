@@ -68,7 +68,8 @@ std::string BuildSchemaJson(const CsvViewData& data, bool editable) {
 std::string BuildRowsJson(const CsvViewData& data,
                           std::uint64_t offset,
                           std::uint64_t limit,
-                          const std::vector<std::vector<std::string>>& rows) {
+                          const std::vector<std::vector<std::string>>& rows,
+                          const std::vector<std::uint64_t>* row_ids) {
   Json row_values = Json::array();
   for (const auto& row : rows) {
     Json cells = Json::array();
@@ -83,6 +84,16 @@ std::string BuildRowsJson(const CsvViewData& data,
   json["limit"] = limit;
   json["totalRows"] = data.row_count();
   json["rows"] = std::move(row_values);
+  if (row_ids) json["rowIds"] = *row_ids;
+  Json changes = Json::array();
+  for (std::size_t i = 0; i < rows.size(); ++i) {
+    const auto row_id = row_ids ? (*row_ids)[i] : offset + i;
+    const auto row = data.row_changes(row_id);
+    if (row.inserted || !row.columns.empty()) {
+      changes.push_back({{"rowId", row_id}, {"inserted", row.inserted}, {"columns", row.columns}});
+    }
+  }
+  if (!changes.empty()) json["changes"] = std::move(changes);
   return json.dump();
 }
 
@@ -112,6 +123,15 @@ std::uint64_t JsonUintField(std::string_view body, std::string_view field) {
     }
   }
   throw std::runtime_error("expected JSON integer");
+}
+
+std::uint64_t JsonUintFieldOr(std::string_view body, std::string_view field, std::uint64_t fallback) {
+  try {
+    return JsonUintField(body, field);
+  } catch (const std::exception& ex) {
+    if (IsMissingFieldError(ex, field)) return fallback;
+    throw;
+  }
 }
 
 std::string JsonStringField(std::string_view body, std::string_view field) {

@@ -9,12 +9,81 @@ export function currentGridColumns(api, columns) {
   return columnIds.filter((column) => knownColumns.has(column));
 }
 
-export function rowsToObjects(columns, rows, offset = 0) {
+export const sourceRowId = Symbol('_csvzallRowId');
+export const insertedRow = Symbol('csvzallInsertedRow');
+export const editedColumns = Symbol('csvzallEditedColumns');
+export const entryRow = Symbol('csvzallEntryRow');
+
+export function makeEntryRow(columns) {
+  return { ...Object.fromEntries(columns.map(column => [column, ''])), [entryRow]: true };
+}
+
+export function extendEntryRowBlock(api, node, data, rowCount, blockSize, columns) {
+  const index = rowCount - 1;
+  const cached = node.data === data && node.rowIndex === index;
+  if (cached) node.updateData(data);
+  api.setRowCount(rowCount + 1, true);
+  if (!cached) {
+    api.refreshInfiniteCache();
+  } else if (rowCount % blockSize !== 0) {
+    // Initialize the unused slot the same way AG Grid's InfiniteBlock does.
+    // updateData alone leaves the slot without an ID when it becomes a real row.
+    const next = api.getDisplayedRowAtIndex(rowCount);
+    if (next?.setDataAndId) next.setDataAndId(makeEntryRow(columns), String(rowCount));
+    else api.refreshInfiniteCache();
+  }
+  // At a block boundary the datasource supplies the new entry on demand.
+}
+
+// AG Grid's built-in block debounce also delays the initial viewport. Schedule
+// at the datasource instead so only the first request for a new file bypasses it.
+export function createPagedDatasource(readRows, isBlockCached) {
+  let firstRequest = true;
+  let closed = false;
+  let pending = [];
+  let timer;
+
+  function debounce() {
+    if (!pending.length) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const batch = pending;
+      pending = [];
+      for (const params of batch) {
+        if (isBlockCached(params.startRow)) readRows(params);
+        else params.failCallback();
+      }
+    }, 40);
+  }
+
+  return {
+    getRows(params) {
+      if (closed) return params.failCallback();
+      const immediate = firstRequest && params.startRow === 0;
+      firstRequest = false;
+      if (immediate) return readRows(params);
+      pending.push(params);
+      debounce();
+    },
+    onVerticalScroll: debounce,
+    destroy() {
+      closed = true;
+      clearTimeout(timer);
+      const batch = pending;
+      pending = [];
+      for (const params of batch) params.failCallback();
+    },
+  };
+}
+
+export function rowsToObjects(columns, rows, offset = 0, rowIds, changes) {
+  const changesById = changes?.length ? new Map(changes.map(change => [change.rowId, change])) : null;
   return rows.map((values, index) => {
-    const row = { _csvzallRowId: offset + index };
-    columns.forEach((column, columnIndex) => {
-      row[column] = values[columnIndex] ?? '';
-    });
+    const row = Object.fromEntries(columns.map((column, columnIndex) => [column, values[columnIndex] ?? '']));
+    row[sourceRowId] = rowIds ? rowIds[index] : offset + index;
+    const change = changesById?.get(row[sourceRowId]);
+    if (change?.inserted) row[insertedRow] = true;
+    if (change?.columns.length) row[editedColumns] = new Set(change.columns);
     return row;
   });
 }

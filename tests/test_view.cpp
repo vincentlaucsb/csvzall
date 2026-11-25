@@ -8,6 +8,13 @@
 #include <string>
 #include <thread>
 
+#if defined(__linux__) || defined(__APPLE__)
+#include <cerrno>
+#include <sys/xattr.h>
+#include <nlohmann/json.hpp>
+#include "../src/pipeline/commands/view/json_file.hpp"
+#endif
+
 #include "../vendor/httplib/httplib.h"
 
 #include "../src/pipeline/commands/view.hpp"
@@ -89,6 +96,37 @@ std::string ReadTextFile(const std::filesystem::path& path) {
 }
 
 }  // namespace
+
+#if defined(__linux__) || defined(__APPLE__)
+TEST_CASE("view JSON: save preserves user file attributes") {
+  const auto dir = TempDir("csvzall_json_attribute");
+  const auto path = dir / "source.json";
+  std::ofstream(path) << "{}";
+  constexpr char attribute[] = "user.csvzall-test";
+  constexpr char tag[] = "work";
+#ifdef __APPLE__
+  const auto result = setxattr(path.c_str(), attribute, tag, sizeof(tag), 0, 0);
+#else
+  const auto result = setxattr(path.c_str(), attribute, tag, sizeof(tag), 0);
+#endif
+  if (result < 0 && errno == ENOTSUP) {
+    std::filesystem::remove_all(dir);
+    SKIP("Temporary filesystem has no extended attributes");
+  }
+  REQUIRE(result == 0);
+  pipeline::commands::view_internal::JsonFile file(path);
+  const auto document = nlohmann::json::parse(file.Document(true));
+  file.Save(document.at("revision").get<std::string>(), "[]");
+  char value[sizeof(tag)]{};
+#ifdef __APPLE__
+  REQUIRE(getxattr(path.c_str(), attribute, value, sizeof(value), 0, 0) == sizeof(tag));
+#else
+  REQUIRE(getxattr(path.c_str(), attribute, value, sizeof(value)) == sizeof(tag));
+#endif
+  REQUIRE(std::string(value, sizeof(value)) == std::string(tag, sizeof(tag)));
+  std::filesystem::remove_all(dir);
+}
+#endif
 
 TEST_CASE("view: loads CSV rows with shared parser behavior") {
   const auto csv = tests::MakeTestCsv(
@@ -319,13 +357,13 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   }
   const auto shell = client.Get("/assets/modules/shell.mjs");
   REQUIRE(shell->body.find("createViewerShell") != std::string::npos);
-  REQUIRE(shell->body.find("_csvzallRowId") != std::string::npos);
+  REQUIRE(shell->body.find("sourceRowId") != std::string::npos);
   REQUIRE(shell->body.find("/api/sql-query") == std::string::npos);
   REQUIRE(shell->body.find("mountChartForm") == std::string::npos);
   const auto viewer_js = client.Get("/assets/viewer.js");
   REQUIRE(viewer_js);
   REQUIRE(viewer_js->status == 200);
-  REQUIRE(viewer_js->body.find("features: [sqlFeature, chartsFeature]") != std::string::npos);
+  REQUIRE(viewer_js->body.find("createContextMenu") != std::string::npos);
 
   const auto sql_module = client.Get("/assets/modules/sql.mjs");
   REQUIRE(sql_module);
@@ -394,6 +432,16 @@ TEST_CASE("view: serves token-gated schema and row pages over localhost") {
   const auto invalid_rows = client.Get("/api/rows?offset=-1&limit=1", headers);
   REQUIRE(invalid_rows);
   REQUIRE(invalid_rows->status == 400);
+
+  const auto sorted = client.Get("/api/rows?offset=1&limit=2&sortColumn=value&sortDirection=desc", headers);
+  REQUIRE(sorted);
+  REQUIRE(sorted->status == 200);
+  CHECK(sorted->body.find("\"rows\":[[\"bob\",\"20\"],[\"alice\",\"10\"]]") != std::string::npos);
+  CHECK(sorted->body.find("\"rowIds\":[1,0]") != std::string::npos);
+
+  const auto invalid_sort = client.Get("/api/rows?sortColumn=missing&sortDirection=asc", headers);
+  REQUIRE(invalid_sort);
+  CHECK(invalid_sort->status == 400);
 
   const auto sql = client.Post(
       "/api/sql-query",
@@ -646,7 +694,7 @@ TEST_CASE("view: Add chart endpoint keeps config-only sql when the form omits it
   {
     std::ofstream config(dir / ".csvzall" / "charts.json", std::ios::binary);
     config << R"({"charts":[{"id":"monthly","type":"bar","input":"rides.csv","output":"charts/monthly.svg",)"
-           << R"("options":{"sql":"SELECT substr(day,1,7) AS month, SUM(miles) AS miles FROM data GROUP BY month","label":"month","value":"miles"}}]})";
+           << R"("options":{"sql":"SELECT substr(day,1,7) AS month, SUM(miles) AS miles FROM data GROUP BY month","label":"month","values":[{"column":"miles","label":"Distance","color":"#123456"}],"xLabel":"Month","yLabel":"Miles"}}]})";
   }
 
   pipeline::RunOptions options;
@@ -671,7 +719,6 @@ TEST_CASE("view: Add chart endpoint keeps config-only sql when the form omits it
       "application/json");
   REQUIRE(response);
   REQUIRE(response->status == 200);
-  server.Stop();
 
   const auto config_text = ReadTextFile(dir / ".csvzall" / "charts.json");
   CHECK(config_text.find("GROUP BY month") != std::string::npos);
@@ -679,6 +726,29 @@ TEST_CASE("view: Add chart endpoint keeps config-only sql when the form omits it
   const auto svg = ReadTextFile(dir / "charts" / "monthly.svg");
   CHECK(svg.find(">2026-01</text>") != std::string::npos);
   CHECK(svg.find(">2026-01-15</text>") == std::string::npos);
+  CHECK(config_text.find("Distance") != std::string::npos);
+  CHECK(config_text.find("#123456") != std::string::npos);
+  CHECK(config_text.find("Month") != std::string::npos);
+  const auto legacy = client.Post(
+      "/api/chart-config/heatmap", headers,
+      R"({"type":"bar","id":"monthly","sql":"","label":"month","value":"miles","output":"charts/monthly.svg"})",
+      "application/json");
+  REQUIRE(legacy);
+  REQUIRE(legacy->status == 200);
+  CHECK(ReadTextFile(dir / ".csvzall" / "charts.json").find("GROUP BY month") != std::string::npos);
+  const auto cleared = client.Post(
+      "/api/chart-config/heatmap", headers,
+      R"({"type":"bar","id":"monthly","sql":"","clearSql":true,"label":"day","value":"miles","xLabel":"Training day","yLabel":"Distance ridden","output":"charts/monthly.svg","runOnSave":false})",
+      "application/json");
+  REQUIRE(cleared);
+  REQUIRE(cleared->status == 200);
+  const auto cleared_text = ReadTextFile(dir / ".csvzall" / "charts.json");
+  CHECK(cleared_text.find("GROUP BY month") == std::string::npos);
+  CHECK(cleared_text.find("Distance") != std::string::npos);
+  CHECK(cleared_text.find("#123456") != std::string::npos);
+  CHECK(cleared_text.find("Training day") != std::string::npos);
+  CHECK(cleared_text.find("Distance ridden") != std::string::npos);
+  server.Stop();
 
   std::filesystem::remove_all(dir);
 }

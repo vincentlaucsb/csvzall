@@ -8,6 +8,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -76,11 +77,46 @@ CsvRows ReadRows(const CsvViewData& data, const double offset, const double limi
   return data.read_rows(ToRowIndex(offset), ToRowIndex(limit));
 }
 
-void EditCell(CsvViewData& data,
+template <typename RowId>
+emscripten::val ReadChanges(const CsvViewData& data, std::uint64_t count, RowId row_id_at) {
+  auto changes = emscripten::val::array();
+  unsigned slot = 0;
+  for (std::uint64_t i = 0; i < count; ++i) {
+    const auto row_id = row_id_at(i);
+    const auto row = data.row_changes(row_id);
+    if (!row.inserted && row.columns.empty()) continue;
+    auto change = emscripten::val::object();
+    change.set("rowId", static_cast<double>(row_id));
+    change.set("inserted", row.inserted);
+    change.set("columns", emscripten::val::array(row.columns));
+    changes.set(slot++, change);
+  }
+  return changes;
+}
+
+emscripten::val ReadRowChanges(const CsvViewData& data, double offset, double count) {
+  const auto start = ToRowIndex(offset);
+  return ReadChanges(data, ToRowIndex(count), [start](auto i) { return start + i; });
+}
+
+struct SortedRows {
+  std::vector<double> row_ids;
+  CsvRows rows;
+  emscripten::val changes;
+};
+
+SortedRows ReadSortedRows(const CsvViewData& data, const double offset, const double limit,
+                          const std::string& column, bool descending) {
+  auto page = data.read_sorted_rows(ToRowIndex(offset), ToRowIndex(limit), column, descending);
+  auto changes = ReadChanges(data, page.row_ids.size(), [&](auto i) { return page.row_ids[i]; });
+  return {{page.row_ids.begin(), page.row_ids.end()}, std::move(page.rows), std::move(changes)};
+}
+
+bool EditCell(CsvViewData& data,
               const double row,
               const std::string& column,
               const std::string& value) {
-  data.edit_cell(ToRowIndex(row), column, value);
+  return data.edit_cell(ToRowIndex(row), column, value);
 }
 
 void DeleteRow(CsvViewData& data, const double row) {
@@ -116,6 +152,11 @@ EMSCRIPTEN_BINDINGS(csvzall_viewer_wasm) {
   emscripten::register_vector<std::string>("StringList");
   emscripten::register_vector<CsvRow>("CsvRow");
   emscripten::register_vector<CsvRows>("CsvRows");
+  emscripten::register_vector<double>("RowIds");
+  emscripten::value_object<SortedRows>("SortedRows")
+      .field("rowIds", &SortedRows::row_ids)
+      .field("rows", &SortedRows::rows)
+      .field("changes", &SortedRows::changes);
 
   emscripten::class_<CsvViewData>("CsvViewData")
       .class_function("open", &OpenCsvViewData)
@@ -133,6 +174,8 @@ EMSCRIPTEN_BINDINGS(csvzall_viewer_wasm) {
       .function("rowCount", &RowCount)
       .function("fileSize", &FileSize)
       .function("readRows", &ReadRows)
+      .function("readRowChanges", &ReadRowChanges)
+      .function("readSortedRows", &ReadSortedRows)
       .function("editCell", &EditCell)
       .function("deleteRow", &DeleteRow)
       .function("insertRow", &InsertRow)
@@ -141,6 +184,8 @@ EMSCRIPTEN_BINDINGS(csvzall_viewer_wasm) {
       .function("renameColumn", &CsvViewData::rename_column)
       .function("deleteColumn", &CsvViewData::delete_column)
       .function("reset", &CsvViewData::reset)
+      .function("writeSaveFile", &CsvViewData::write_save_file)
+      .function("commitSaveFile", &CsvViewData::commit_save_file)
       .function("save", &Save)
       .function("saveWithColumns", &SaveWithColumns);
 }

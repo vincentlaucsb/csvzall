@@ -30,15 +30,253 @@ async function nativeUrl(editable) {
     child.on('exit',code=>{clearTimeout(timeout);reject(new Error('native exited '+code+' '+stdout));});
   });
 }
-async function edit(page,value) {
-  await page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]').dblclick();
+async function edit(page, cell, value) {
+  await cell.dblclick();
   await page.locator('#grid .ag-cell-inline-editing input').fill(value);
   await page.keyboard.press('Enter');
   await page.waitForFunction(()=>!document.getElementById('save').disabled);
 }
+async function editWhileSorted(page, value, useContextMenu = false) {
+  const titleHeader = page.locator('#grid .ag-header-cell[col-id="title"]');
+  const firstTitle = page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]');
+  assert.equal(await titleHeader.locator('.ag-sort-none-icon').isVisible(), true);
+  await titleHeader.click();
+  await titleHeader.click();
+  await firstTitle.filter({ hasText: 'world' }).waitFor();
+  assert.equal(await page.locator('#sort-notice').count(), 0);
+  assert.equal(await page.locator('#save').isDisabled(), true);
+  const emptyRow = page.locator('#grid .csvzall-entry-row[row-index="2"]');
+  await emptyRow.getByText('Add row…').dblclick();
+  const emptyEditor = emptyRow.locator('.ag-cell-inline-editing input');
+  assert.equal(await emptyEditor.inputValue(), '');
+  await page.keyboard.press('Enter');
+  await emptyRow.getByText('Add row…').waitFor();
+  assert.equal(await page.locator('#save').isDisabled(), true);
+  assert.match(await page.locator('#record-count').innerText(), /^2 rows/);
+
+  await page.locator('#insert-menu').click();
+  assert.equal(await page.getByRole('menuitem', { name: 'Add row' }).isEnabled(), true);
+  await page.keyboard.press('Escape');
+  await firstTitle.click({ button: 'right' });
+  assert.equal(await page.getByRole('menuitem', { name: 'Move Up', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('menuitem', { name: 'Move Down', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('menuitem', { name: 'Add row' }).isEnabled(), true);
+  await page.keyboard.press('Escape');
+
+  await firstTitle.dblclick();
+  await page.locator('#grid .ag-cell-inline-editing input').fill('aardvark');
+  await page.keyboard.press('Shift+Tab');
+  await page.locator('#status').filter({ hasText: 'Unsaved changes' }).waitFor();
+  await page.locator('#grid .ag-cell-inline-editing[col-id="id"] input').fill('22');
+  await page.keyboard.press('Enter');
+  await firstTitle.and(page.locator('.csvzall-edited-cell')).filter({ hasText: 'aardvark' }).waitFor();
+  const secondTitle = page.locator('#grid .ag-row[row-index="1"] .ag-cell[col-id="title"]');
+  assert.equal(await secondTitle.innerText(), 'hello');
+  await edit(page, secondTitle, value);
+
+  if (useContextMenu) await firstTitle.click({ button: 'right' });
+  else await page.locator('#insert-menu').click();
+  await page.getByRole('menuitem', { name: 'Add row' }).click();
+  const newRow = page.locator('#grid .ag-row.csvzall-inserted-row[row-index="2"]');
+  await newRow.locator('.ag-cell.ag-cell-focus[col-id="id"]').waitFor();
+  await page.keyboard.type('3');
+  await page.keyboard.press('Enter');
+  await newRow.locator('.csvzall-edited-cell[col-id="id"]').filter({ hasText: '3' }).waitFor();
+  await edit(page, newRow.locator('.ag-cell[col-id="title"]'), 'zenith');
+  await newRow.locator('.csvzall-edited-cell[col-id="title"]').filter({ hasText: 'zenith' }).waitFor();
+  assert.equal(await firstTitle.innerText(), 'aardvark');
+
+  let releaseAppend;
+  if (useContextMenu) {
+    const holdAppend = new Promise(resolve => { releaseAppend = resolve; });
+    await page.route('**/api/insert-row', async route => {
+      await holdAppend;
+      await route.continue();
+    }, { times: 1 });
+  }
+  const entry = page.locator('#grid .csvzall-entry-row[row-index="3"]');
+  const added = page.locator('#grid .csvzall-inserted-row[row-index="3"]');
+  try {
+    await entry.locator('.ag-cell[col-id="title"]').dblclick();
+    await entry.locator('input').fill('0');
+    await page.keyboard.press('Shift+Tab');
+    const firstEditor = page.locator('#grid .ag-row[row-index="3"] .ag-cell-inline-editing[col-id="id"] input');
+    await firstEditor.fill('4');
+    await page.keyboard.press('Enter');
+  } finally {
+    releaseAppend?.();
+  }
+  await added.locator('.ag-cell[col-id="id"]').filter({ hasText: '4' }).waitFor();
+  assert.equal(await added.locator('.ag-cell[col-id="title"]').innerText(), '0');
+  await page.locator('#grid .csvzall-entry-row[row-index="4"]').getByText('Add row…').waitFor();
+  assert.match(await page.locator('#record-count').innerText(), /^4 rows/);
+}
+
+async function checkSavedSort(page) {
+  const firstTitle = page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]');
+  await firstTitle.filter({ hasText: 'zenith' }).waitFor();
+  assert.equal(await page.locator('#grid .csvzall-edited-cell, #grid .csvzall-inserted-row').count(), 0);
+  await page.locator('#grid .csvzall-entry-row[row-index="4"]').getByText('Add row…').waitFor();
+}
+
+async function checkAppendAcrossPages(page) {
+  const rows = Array.from({ length: 515 }, (_, index) => `${index + 1},row`);
+  await page.locator('#file-input').setInputFiles({
+    name: 'paged.csv', mimeType: 'text/csv', buffer: Buffer.from(`id,title\n${rows.join('\n')}\n`),
+  });
+  await page.locator('#record-count').filter({ hasText: '515 rows' }).waitFor();
+  await page.locator('#grid .ag-header-cell[col-id="id"]').click();
+  await page.locator('#insert-menu').click();
+  await page.getByRole('menuitem', { name: 'Add row' }).click();
+  await page.locator('#grid .ag-row.csvzall-inserted-row[row-index="515"] .ag-cell.ag-cell-focus[col-id="id"]').waitFor();
+  await page.locator('#reset').click();
+  await page.locator('#record-count').filter({ hasText: '515 rows' }).waitFor();
+}
+
+async function checkPendingEdit(page) {
+  const target = page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]');
+  let releaseEdit;
+  const holdEdit = new Promise(resolve => { releaseEdit = resolve; });
+  await page.route('**/api/edit-cell', async route => {
+    await holdEdit;
+    await route.continue();
+  }, { times: 1 });
+  const dispatched = page.waitForRequest('**/api/edit-cell');
+  await edit(page, target, 'pending');
+  await dispatched;
+  try {
+    await target.dblclick();
+    assert.equal(await page.locator('#grid .ag-cell-inline-editing').count(), 0);
+    assert.equal(await target.innerText(), 'hello');
+  } finally {
+    releaseEdit();
+  }
+  await target.and(page.locator('.csvzall-edited-cell')).filter({ hasText: 'pending' }).waitFor();
+  await edit(page, target, 'hello');
+  await target.and(page.locator(':not(.csvzall-edited-cell)')).filter({ hasText: 'hello' }).waitFor();
+  await page.locator('#reset').click();
+  await page.locator('#save:disabled').waitFor();
+}
+
+async function checkRejectedAppend(page) {
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/insert-row', async route => {
+    await held;
+    await route.fulfill({ status: 400, contentType: 'text/plain', body: 'Append temporarily rejected.' });
+  }, { times: 1 });
+  let saves = 0;
+  const countSave = request => { if (new URL(request.url()).pathname === '/api/save') saves += 1; };
+  page.on('request', countSave);
+  const entry = page.locator('#grid .csvzall-entry-row[row-index="2"]');
+  try {
+    const dispatched = page.waitForRequest('**/api/insert-row');
+    await edit(page, entry.locator('.ag-cell[col-id="id"]'), '3');
+    await dispatched;
+    await page.locator('#save').click();
+    await page.locator('body[inert]').waitFor();
+    release();
+    await page.locator('#status').filter({ hasText: 'Append temporarily rejected' }).waitFor();
+    await page.locator('body:not([inert])').waitFor();
+    assert.equal(saves, 0);
+    assert.equal(await page.locator('#save').isDisabled(), true);
+    await entry.getByText('Add row…').waitFor();
+    assert.equal(fs.readFileSync(fixture, 'utf8'), source);
+  } finally {
+    release();
+    page.off('request', countSave);
+  }
+}
+
+async function clearSortAndInsert(page, firstValue) {
+  await page.locator('#grid .ag-header-cell[col-id="title"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Clear sort' }).click();
+  await page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]').filter({ hasText: firstValue }).waitFor();
+  await page.locator('#insert-menu').click();
+  await page.getByText('Row after', { exact: true }).click();
+  await page.locator('#record-count').filter({ hasText: '5 rows' }).waitFor();
+  await page.locator('#reset').click();
+  await page.locator('#record-count').filter({ hasText: '4 rows' }).waitFor();
+}
+
+async function clickBackdrop(page) {
+  const viewport = page.viewportSize();
+  await page.mouse.click(viewport.width - 3, viewport.height - 3);
+}
+
+async function checkDialogDismissal(page, selector, open) {
+  const dialog = page.locator(`${selector}[open]`);
+  for (const dismiss of [() => page.keyboard.press('Escape'), () => clickBackdrop(page)]) {
+    await open();
+    await dialog.waitFor();
+    await dialog.evaluate(el => {
+      el.removeAttribute('data-smoke-closed');
+      el.addEventListener('close', () => el.setAttribute('data-smoke-closed', ''), { once: true });
+    });
+    await dismiss();
+    await page.locator(`${selector}[data-smoke-closed]:not([open])`).waitFor({ state: 'attached' });
+  }
+}
+
+async function checkEditorDialogs(page) {
+  await checkDialogDismissal(page, '#csv-options-dialog', () => page.locator('#csv-options').click());
+  await checkDialogDismissal(page, '#insert-column-dialog', async () => {
+    await page.locator('#insert-menu').click();
+    await page.getByRole('menuitem', { name: 'Column After', exact: true }).click();
+  });
+  await checkDialogDismissal(page, '#rename-column-dialog', async () => {
+    await page.locator('#grid .ag-header-cell[col-id="title"]').click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Rename Column', exact: true }).click();
+  });
+  assert.equal(await page.locator('#save').isDisabled(), true);
+}
+
+async function checkChartDialogs(page) {
+  const openCharts = () => page.locator('#add-chart').click();
+  await checkDialogDismissal(page, '#heatmap-chart-dialog', async () => {
+    await openCharts();
+    await page.waitForFunction(() => document.activeElement?.id === 'chart-date-column');
+  });
+  const firstTitle = page.locator('#grid .ag-row[row-index="0"] [col-id="title"]');
+  await edit(page, firstTitle, 'discard this draft');
+  await openCharts();
+  await page.locator('#discard-chart-dirty').click();
+  await page.waitForFunction(() => document.activeElement?.id === 'chart-date-column');
+  await page.keyboard.press('Escape');
+  await edit(page, firstTitle, 'keep this draft');
+  await checkDialogDismissal(page, '#chart-dirty-dialog', openCharts);
+  assert.equal(await firstTitle.innerText(), 'keep this draft');
+  await page.locator('#reset').click();
+  await firstTitle.filter({ hasText: 'hello' }).waitFor();
+}
+
+async function checkConflictAndProgressDialogs(page) {
+  const firstTitle = page.locator('#grid .ag-row[row-index="0"] [col-id="title"]');
+  await edit(page, firstTitle, 'keep this conflicting draft');
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await page.route('**/api/save', async route => {
+    await held;
+    await route.fulfill({ status: 409, body: 'source file changed externally' });
+  }, { times: 1 });
+  try {
+    await page.locator('#save').click();
+    const loading = page.locator('#loading-dialog[open]');
+    await loading.waitFor();
+    await page.keyboard.press('Escape');
+    await clickBackdrop(page);
+    assert.equal(await loading.isVisible(), true);
+  } finally {
+    release();
+  }
+  await checkDialogDismissal(page, '#discard-edits-dialog', () => page.locator('#reload-external').click());
+  assert.equal(await firstTitle.innerText(), 'keep this conflicting draft');
+  assert.equal(fs.readFileSync(fixture, 'utf8'), source);
+}
+
 async function commonActions(page) {
   await page.locator('#insert-menu').click();
-  await page.getByText('Row After',{exact:true}).click();
+  await page.getByText('Row after',{exact:true}).click();
   await page.waitForFunction(()=>document.getElementById('record-count').textContent.startsWith('3 rows'));
   await page.locator('#reset').click();
   await page.waitForFunction(()=>document.getElementById('record-count').textContent.startsWith('2 rows'));
@@ -63,14 +301,25 @@ async function commonActions(page) {
   await page.locator('#file-input').setInputFiles({name:'smoke.csv',mimeType:'text/csv',buffer:Buffer.from(source)});
   await page.locator('#grid .ag-cell').filter({hasText:'hello'}).waitFor();
   assert.equal(await page.locator('#open-sql-query,#add-chart').count(),0);
+  await checkEditorDialogs(page);
+  const firstWasmTitle = page.locator('#grid .ag-row[row-index="0"] [col-id="title"]');
+  await edit(page, firstWasmTitle, 'keep this draft');
+  await checkDialogDismissal(page, '#discard-edits-dialog', () =>
+    page.locator('#file-input').setInputFiles({ name: 'different.csv', mimeType: 'text/csv', buffer: Buffer.from(source) }));
+  assert.equal(await firstWasmTitle.innerText(), 'keep this draft');
+  await page.locator('#reset').click();
+  await firstWasmTitle.filter({ hasText: 'hello' }).waitFor();
   await commonActions(page);
-  await edit(page,'WASM updated');
+  await editWhileSorted(page, 'WASM updated');
   const downloaded=page.waitForEvent('download');await page.locator('#save').click();
   const stream=await (await downloaded).createReadStream();let text='';for await(const chunk of stream)text+=chunk;
-  assert.match(text,/WASM updated/);
+  assert.equal(text, 'id,title\n1,WASM updated\n22,aardvark\n3,zenith\n4,0\n');
   await page.waitForFunction(()=>document.getElementById('save').disabled);
+  await checkSavedSort(page);
+  await clearSortAndInsert(page, 'WASM updated');
   await page.screenshot({path:path.join(output,'wasm-shell.png')});
   const wasmSelected = await page.locator('#grid').evaluate(el=>getComputedStyle(el).getPropertyValue('--ag-selected-row-background-color'));
+  await checkAppendAcrossPages(page);
   console.log('WASM: real engine open, insert/reset, rename/reset, edit/download, clean state passed');
   await page.setViewportSize({width:390,height:844});
   await page.goto(wasmUrl + '/host-harness.html');
@@ -78,35 +327,57 @@ async function commonActions(page) {
   const hosted = page.frameLocator('#viewer');
   await hosted.locator('#grid .ag-cell').filter({hasText:'Ada'}).waitFor();
   assert.equal(await hosted.locator('#file-tools').isVisible(),false);
-  await hosted.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="name"]').dblclick();
+  const hostedNameHeader = hosted.locator('#grid .ag-header-cell[col-id="name"]');
+  await hostedNameHeader.click();
+  await hostedNameHeader.click();
+  const hostedFirstName = hosted.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="name"]');
+  await hostedFirstName.filter({ hasText: 'Grace' }).waitFor();
+  await hosted.locator('#grid .ag-row[row-index="1"] .ag-cell[col-id="name"]').dblclick();
   const editor = hosted.locator('#grid .ag-cell-inline-editing input');
   await editor.fill('Hosted updated');
   const gridBefore = await hosted.locator('#grid').boundingBox();
   const inputHandle = await editor.elementHandle();
   await page.evaluate(()=>{
     const target=document.getElementById('viewer').contentWindow;
-    target.postMessage({source:'obsidian-csvzall',type:'theme',version:1,mode:'dark',variables:{'--background-primary':'#223344','--background-secondary':'#192a38','--background-modifier-hover':'#30475b','--background-modifier-border':'#445566','--text-normal':'#eeeeee','--text-muted':'#bfcad6','--interactive-accent':'#ff9900'}},'*');
+    target.postMessage({source:'obsidian-csvzall',type:'theme',version:1,mode:'dark',variables:{'--background-primary':'#223344','--background-secondary':'#192a38','--background-modifier-hover':'#30475b','--background-modifier-border':'#445566','--text-normal':'#eeeeee','--text-muted':'#bfcad6','--interactive-accent':'#ff9900','--font-text-size':'16px','--font-preferred-size':'52px'}},'*');
     target.postMessage({source:'obsidian-csvzall',type:'viewport-resized'},'*');
   });
   await page.waitForTimeout(200);
+  assert.equal(await hostedFirstName.evaluate(el => getComputedStyle(el).fontSize), '52px');
+  const firstRow = await hosted.locator('.ag-center-cols-container .ag-row[row-index="0"]').boundingBox();
+  const secondRow = await hosted.locator('.ag-center-cols-container .ag-row[row-index="1"]').boundingBox();
+  assert.ok(firstRow.height >= 52);
+  assert.equal(secondRow.y - firstRow.y, firstRow.height);
   assert.equal(await inputHandle.evaluate(el=>el===document.activeElement),true);
   assert.equal(await editor.inputValue(),'Hosted updated');
   assert.deepEqual(await hosted.locator('#grid').boundingBox(),gridBefore);
   assert.ok(gridBefore.x>=0 && gridBefore.width<=390);
   await page.keyboard.press('Enter');
+  await page.evaluate(() => window.csvzallHostHarness.rejectNextSave());
+  await hosted.locator('#save').click();
+  await hosted.locator('#status').filter({ hasText: 'Host rejected save' }).waitFor();
+  assert.equal(await hosted.locator('#save').isEnabled(), true);
+  await hostedNameHeader.click(); // clear
+  await hostedNameHeader.click(); // ascending
+  await hostedFirstName.and(hosted.locator('.csvzall-edited-cell')).filter({ hasText: 'Hosted updated' }).waitFor();
   await hosted.locator('#save').click();
   await page.locator('#saved').filter({hasText:'Last save:'}).waitFor();
   assert.match(await page.evaluate(()=>new TextDecoder().decode(window.csvzallHostHarness.savedBytes())),/Hosted updated/);
   await hosted.locator('#save:disabled').waitFor();
-  await hosted.locator('#grid .ag-cell').filter({hasText:'Hosted updated'}).waitFor();
+  await hosted.locator('#grid .ag-row[row-index="1"] .ag-cell[col-id="name"]').filter({hasText:'Hosted updated'}).waitFor();
+  assert.equal(await hosted.locator('#grid .csvzall-edited-cell').count(), 0);
   await page.screenshot({path:path.join(output,'hosted-mobile-shell.png')});
   console.log('Hosted WASM: early file queue, mobile layout, live theme with active editor, stable grid size, acknowledged save passed');
   await page.setViewportSize({width:1200,height:700});
   await page.goto(await nativeUrl(true));
   await page.locator('#grid .ag-cell').filter({hasText:'hello'}).waitFor();
   await page.locator('#open-sql-query').waitFor();await page.locator('#add-chart').waitFor();
+  await checkEditorDialogs(page);
+  await checkChartDialogs(page);
   await commonActions(page);
-  await edit(page,'native updated');
+  await checkPendingEdit(page);
+  await checkRejectedAppend(page);
+  await editWhileSorted(page, 'native updated', true);
   await page.locator('#open-sql-query').click();
   await page.locator('#sql-query').fill('SELECT title FROM data WHERE id = 1');
   await page.locator('#run-sql').click();
@@ -120,7 +391,9 @@ async function commonActions(page) {
   await page.locator('#exit-sql-query').click();
   await page.locator('#save').click();
   await page.waitForFunction(()=>document.getElementById('save').disabled);
-  assert.match(fs.readFileSync(fixture,'utf8'),/native updated/);
+  assert.equal(fs.readFileSync(fixture,'utf8'), 'id,title\n1,native updated\n22,aardvark\n3,zenith\n4,0\n');
+  await checkSavedSort(page);
+  await clearSortAndInsert(page, 'native updated');
   await page.locator('#add-chart').click();
   await page.locator('#heatmap-chart-dialog[open] #chart-id').waitFor();
   await page.locator('#cancel-chart').click();
@@ -138,10 +411,20 @@ async function commonActions(page) {
   await page.goto(await nativeUrl(false));
   await page.locator('#grid .ag-cell').filter({hasText:'hello'}).waitFor();
   assert.equal(await page.locator('#edit-toolbar').isVisible(),false);
-  await page.locator('#grid .ag-header-cell[col-id="title"]').click({button:'right'});
+  assert.equal(await page.locator('#grid .csvzall-entry-row').count(), 0);
+  const readOnlyTitle = page.locator('#grid .ag-header-cell[col-id="title"]');
+  await readOnlyTitle.click();
+  await readOnlyTitle.click();
+  await readOnlyTitle.click({button:'right'});
   await page.getByText('Query column',{exact:true}).waitFor();
   assert.equal(await page.getByText('Rename Column',{exact:true}).count(),0);
+  await page.getByRole('menuitem', { name: 'Clear sort' }).click();
+  await page.locator('#grid .ag-row[row-index="0"] .ag-cell[col-id="title"]').filter({ hasText: 'hello' }).waitFor();
   console.log('Native read-only: edit controls absent; query-only column menu passed');
+  await page.goto(await nativeUrl(true));
+  await page.locator('#grid .ag-cell').filter({hasText:'hello'}).waitFor();
+  await checkConflictAndProgressDialogs(page);
+  console.log('Shared dialog dismissal passed, including Charts, file replacement and conflict confirmation');
   assert.deepEqual(errors,[]);
  } catch (error) { for (const p of browser.contexts().flatMap(c=>c.pages())) { console.log(await p.locator('body').innerText()); await p.screenshot({path:path.join(output,'smoke-failure.png')}); } console.log('Page errors:',errors); throw error; }
  finally {await browser.close();for(const child of processes)child.kill();}

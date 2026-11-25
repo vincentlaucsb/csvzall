@@ -168,10 +168,19 @@ std::vector<std::vector<std::string>> CsvViewData::read_rows(
   return data_.read_rows(offset, limit);
 }
 
-void CsvViewData::edit_cell(const std::uint64_t row,
+::csvzall::viewer::CsvSortedPage CsvViewData::read_sorted_rows(
+    std::uint64_t offset, std::uint64_t limit, const std::string& column, bool descending) const {
+  return data_.read_sorted_rows(offset, limit, column, descending);
+}
+
+::csvzall::viewer::CsvRowChanges CsvViewData::row_changes(std::uint64_t row) const {
+  return data_.row_changes(row);
+}
+
+bool CsvViewData::edit_cell(const std::uint64_t row,
                             const std::string& column,
                             const std::string& value) {
-  data_.edit_cell(row, column, value);
+  return data_.edit_cell(row, column, value);
 }
 
 void CsvViewData::delete_row(const std::uint64_t row) {
@@ -198,6 +207,18 @@ void CsvViewData::rename_column(const std::string& column, const std::string& na
 
 void CsvViewData::delete_column(const std::string& column) {
   data_.delete_column(column);
+}
+
+void CsvViewData::keep_original_path() {
+  data_.keep_original_path();
+}
+
+bool CsvViewData::source_changed() const {
+  return data_.source_changed();
+}
+
+bool CsvViewData::reload_if_changed() {
+  return data_.reload_if_changed();
 }
 
 bool CsvViewData::recover_renamed_source() {

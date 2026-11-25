@@ -30,11 +30,18 @@ export function createWasmAdapter(worker) {
   };
   return {
     capabilities: { localFiles: true, columnOrder: false }, request,
-    save: () => request('save'),
+    save: () => request('prepareSave'),
     async persist(result, { name, hostBridge, downloadBytes }) {
-      if (await hostBridge?.saveFile({ name, result })) return true;
-      downloadBytes(name, new Uint8Array(result.buffer, result.byteOffset, result.byteLength));
-      return false;
+      let handled;
+      try {
+        handled = await hostBridge?.saveFile({ name, result });
+        if (!handled) downloadBytes(name, new Uint8Array(result.buffer, result.byteOffset, result.byteLength));
+      } catch (error) {
+        await request('finishSave', { saveId: result.saveId, commit: false }).catch(() => {});
+        throw error;
+      }
+      result.schema = await request('finishSave', { saveId: result.saveId, commit: true });
+      return Boolean(handled);
     },
     destroy() {
       rejectAll(new Error('Viewer closed'));

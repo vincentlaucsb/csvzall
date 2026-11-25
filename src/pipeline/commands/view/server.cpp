@@ -2,6 +2,9 @@
 
 #include "assets.hpp"
 #include "charts.hpp"
+#include "json_file.hpp"
+#include <nlohmann/json.hpp>
+#include <optional>
 #include "json.hpp"
 #include "sql.hpp"
 #include "support.hpp"
@@ -12,9 +15,11 @@
 #include <cctype>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "../../../../vendor/httplib/httplib.h"
 
@@ -36,6 +41,7 @@ using view_internal::JsonStringArrayFieldOr;
 using view_internal::JsonStringField;
 using view_internal::JsonStringFieldOr;
 using view_internal::JsonUintField;
+using view_internal::JsonUintFieldOr;
 using view_internal::RenderRunOnSaveChartsForCurrentCsv;
 using view_internal::ResolveDevViewerAssetDir;
 using view_internal::SaveResultJson;
@@ -74,7 +80,12 @@ struct ViewServer::Impl {
   explicit Impl(const CsvViewData& source_data, const LoggerCallbacks& source_logger)
       : data(source_data), logger(source_logger) {}
 
-  CsvViewData data;
+  Impl(const std::string& path, const LoggerCallbacks& callbacks)
+      : json_file(std::in_place, std::filesystem::u8path(path)), logger(callbacks) {}
+
+  std::optional<CsvViewData> data;
+  std::optional<view_internal::JsonFile> json_file;
+  std::mutex data_mutex;
   LoggerCallbacks logger;
   httplib::Server server;
   std::thread thread;
@@ -119,10 +130,20 @@ struct ViewServer::Impl {
     response.set_content("viewer is read-only\n", "text/plain; charset=utf-8");
     return false;
   }
+
+  httplib::Server::Handler WithDataLock(httplib::Server::Handler handler) {
+    return [this, handler = std::move(handler)](const httplib::Request& request, httplib::Response& response) {
+      const std::scoped_lock lock(data_mutex);
+      handler(request, response);
+    };
+  }
 };
 
 ViewServer::ViewServer(const CsvViewData& data, const LoggerCallbacks& logger)
     : impl_(std::make_unique<Impl>(data, logger)) {}
+
+ViewServer::ViewServer(const std::string& path, const LoggerCallbacks& logger)
+    : impl_(std::make_unique<Impl>(path, logger)) {}
 
 ViewServer::~ViewServer() {
   Stop();
@@ -132,6 +153,7 @@ int ViewServer::Start(const ViewServerOptions& options) {
   impl_->serve_once = options.serve_once;
   impl_->editable = options.editable;
   impl_->obsidian = options.obsidian;
+  if (impl_->obsidian && impl_->data) impl_->data->keep_original_path();
   impl_->stop_requested = false;
   impl_->token = options.session_token.empty() ? GenerateSessionToken() : options.session_token;
   try {
@@ -149,7 +171,7 @@ int ViewServer::Start(const ViewServerOptions& options) {
       return;
     }
     try {
-      if (!ServeViewerAsset(impl_->viewer_asset_dir, "/", response)) {
+      if (!ServeViewerAsset(impl_->viewer_asset_dir, impl_->json_file ? "/json-editor.html" : "/", response)) {
         response.status = 500;
         response.set_content("viewer asset missing\n", "text/plain; charset=utf-8");
       }
@@ -230,354 +252,8 @@ int ViewServer::Start(const ViewServerOptions& options) {
                       }
                     });
 
-  impl_->server.Get("/api/schema",
-                    [this](const httplib::Request& request, httplib::Response& response) {
-                      if (!impl_->HasValidToken(request)) {
-                        impl_->RejectUnauthorized(response);
-                        return;
-                      }
-                      try {
-                        impl_->data.recover_renamed_source();
-                        response.set_content(BuildSchemaJson(impl_->data, impl_->editable),
-                                             "application/json; charset=utf-8");
-                      } catch (const std::exception& ex) {
-                        response.status = 409;
-                        response.set_content(std::string(ex.what()) + "\n",
-                                             "text/plain; charset=utf-8");
-                      }
-                      impl_->MaybeStopAfterRequest();
-                    });
-
-  impl_->server.Get("/api/rows",
-                    [this](const httplib::Request& request, httplib::Response& response) {
-                      if (!impl_->HasValidToken(request)) {
-                        impl_->RejectUnauthorized(response);
-                        return;
-                      }
-
-                      std::uint64_t offset = 0;
-                      std::uint64_t limit = kDefaultRowsPerPage;
-                      if (!ParseUint64Param(request, "offset", 0, offset) ||
-                          !ParseUint64Param(request, "limit", kDefaultRowsPerPage, limit) ||
-                          limit == 0) {
-                        BadRequest(response, "offset and limit must be non-negative integers; limit must be greater than 0");
-                        return;
-                      }
-                      if (impl_->data.mode() == CsvViewDataMode::Paged && !impl_->editable) {
-                        limit = std::min<std::uint64_t>(limit, kMaxRowsPerPage);
-                      }
-                      if (offset < impl_->data.row_count()) {
-                        limit = std::min<std::uint64_t>(limit, impl_->data.row_count() - offset);
-                      }
-
-                      try {
-                        const auto rows = impl_->data.read_rows(offset, limit);
-                        response.set_content(BuildRowsJson(impl_->data, offset, limit, rows),
-                                             "application/json; charset=utf-8");
-                      } catch (const std::exception& ex) {
-                        if (impl_->logger.error) {
-                          impl_->logger.error(std::string("view: ") + ex.what());
-                        }
-                        response.status = 500;
-                        response.set_content("failed to read rows\n", "text/plain; charset=utf-8");
-                      }
-                      impl_->MaybeStopAfterRequest();
-                    });
-
-  impl_->server.Post("/api/sql-query",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       try {
-                         response.set_content(
-                             BuildSqlQueryResultJson(
-                                 impl_->data,
-                                 JsonStringFieldOr(request.body, "sql", "")),
-                             "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
-
-  impl_->server.Post("/api/edit-cell",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       if (!impl_->RequireEditable(response)) {
-                         return;
-                       }
-                       try {
-                         impl_->data.edit_cell(
-                             JsonUintField(request.body, "row"),
-                             JsonStringField(request.body, "column"),
-                             JsonStringField(request.body, "value"));
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
-
-  impl_->server.Post("/api/delete-row",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       if (!impl_->RequireEditable(response)) {
-                         return;
-                       }
-                       try {
-                         impl_->data.delete_row(JsonUintField(request.body, "row"));
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
-
-  impl_->server.Post("/api/insert-row",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       if (!impl_->RequireEditable(response)) {
-                         return;
-                       }
-                       try {
-                         impl_->data.insert_row(
-                             JsonUintField(request.body, "row"),
-                             JsonStringArrayField(request.body, "values"));
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
-
-  impl_->server.Post("/api/swap-rows",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       if (!impl_->RequireEditable(response)) {
-                         return;
-                       }
-                       try {
-                         impl_->data.swap_rows(
-                             JsonUintField(request.body, "first"),
-                             JsonUintField(request.body, "second"));
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
-
-  impl_->server.Post("/api/insert-column",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       if (!impl_->RequireEditable(response)) {
-                         return;
-                       }
-                       try {
-                         impl_->data.insert_column(
-                             JsonUintField(request.body, "column"),
-                             JsonStringField(request.body, "name"),
-                             JsonStringField(request.body, "value"));
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
-
-  impl_->server.Post("/api/delete-column",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       if (!impl_->RequireEditable(response)) {
-                         return;
-                       }
-                       try {
-                         impl_->data.delete_column(JsonStringField(request.body, "column"));
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
-
-  impl_->server.Post("/api/rename-column",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       if (!impl_->RequireEditable(response)) {
-                         return;
-                       }
-                       try {
-                         impl_->data.rename_column(
-                             JsonStringField(request.body, "column"),
-                             JsonStringField(request.body, "name"));
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
-
-  impl_->server.Post("/api/csv-options",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       if (!impl_->RequireEditable(response)) return;
-                       try {
-                         impl_->data.set_csv_options(
-                             JsonStringField(request.body, "delimiter"),
-                             JsonStringField(request.body, "quote"),
-                             view_internal::JsonBoolField(request.body, "hasHeaders"));
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
-
-  impl_->server.Post("/api/read-csv-options",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       if (!impl_->RequireEditable(response)) return;
-                       try {
-                         impl_->data.read_csv_options(
-                             JsonStringField(request.body, "delimiter"),
-                             JsonStringField(request.body, "quote"),
-                             view_internal::JsonBoolField(request.body, "hasHeaders"));
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
-
-  impl_->server.Post("/api/reset",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       if (!impl_->RequireEditable(response)) {
-                         return;
-                       }
-                       try {
-                         impl_->data.reset();
-                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         response.status = 409;
-                         response.set_content(std::string(ex.what()) + "\n",
-                                              "text/plain; charset=utf-8");
-                       }
-                     });
-
-  impl_->server.Post("/api/save",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       if (!impl_->RequireEditable(response)) {
-                         return;
-                       }
-                       try {
-                         impl_->data.save(
-                             JsonStringArrayFieldOr(request.body, "columns", {}));
-                         std::size_t charts_generated = 0;
-                         std::string chart_error;
-                         try {
-                           if (!impl_->obsidian) {
-                             charts_generated = RenderRunOnSaveChartsForCurrentCsv(
-                                 impl_->data, impl_->logger);
-                           }
-                         } catch (const std::exception& ex) {
-                           chart_error = ex.what();
-                           if (impl_->logger.error) {
-                             impl_->logger.error(chart_error);
-                           }
-                         }
-                         response.set_content(SaveResultJson(charts_generated, chart_error),
-                                              "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         response.status = 409;
-                         response.set_content(std::string(ex.what()) + "\n",
-                                              "text/plain; charset=utf-8");
-                       }
-                     });
-
-  impl_->server.Post("/api/chart-config/preview",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       try {
-                         response.set_content(PreviewCurrentCsvChart(impl_->data, request.body, impl_->logger),
-                                              "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
-
-  impl_->server.Post("/api/chart-config/heatmap",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       try {
-                         response.set_content(AppendHeatmapChartConfig(
-                                                  impl_->data, request.body, impl_->logger),
-                                              "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
-
-  impl_->server.Get("/api/chart-config",
-                    [this](const httplib::Request& request, httplib::Response& response) {
-                      if (!impl_->HasValidToken(request)) {
-                        impl_->RejectUnauthorized(response);
-                        return;
-                      }
-                      try {
-                        response.set_content(BuildChartConfigListJson(impl_->data),
-                                             "application/json; charset=utf-8");
-                      } catch (const std::exception& ex) {
-                        BadRequest(response, ex.what());
-                      }
-                    });
-
-  impl_->server.Post("/api/chart-config/generate",
-                     [this](const httplib::Request& request, httplib::Response& response) {
-                       if (!impl_->HasValidToken(request)) {
-                         impl_->RejectUnauthorized(response);
-                         return;
-                       }
-                       try {
-                         response.set_content(GenerateCurrentCsvChart(
-                                                  impl_->data, request.body, impl_->logger),
-                                              "application/json; charset=utf-8");
-                       } catch (const std::exception& ex) {
-                         BadRequest(response, ex.what());
-                       }
-                     });
+  if (impl_->json_file) RegisterJsonRoutes();
+  else RegisterCsvRoutes();
 
   impl_->server.Get("/api/health",
                     [this](const httplib::Request& request, httplib::Response& response) {
@@ -612,6 +288,428 @@ int ViewServer::Start(const ViewServerOptions& options) {
   });
   impl_->server.wait_until_ready();
   return 0;
+}
+
+void ViewServer::RegisterJsonRoutes() {
+  impl_->server.Get("/api/document", impl_->WithDataLock([this](const httplib::Request& req, httplib::Response& res) {
+    if (!impl_->HasValidToken(req)) return impl_->RejectUnauthorized(res);
+    try {
+      res.set_header("Cache-Control", "no-store");
+      res.set_content(impl_->json_file->Document(impl_->editable), "application/json; charset=utf-8");
+    } catch (const std::exception& error) {
+      res.status = 409;
+      res.set_content(error.what(), "text/plain; charset=utf-8");
+    }
+    impl_->MaybeStopAfterRequest();
+  }));
+  impl_->server.Post("/api/document", impl_->WithDataLock([this](const httplib::Request& req, httplib::Response& res) {
+    if (!impl_->HasValidToken(req)) return impl_->RejectUnauthorized(res);
+    if (!impl_->RequireEditable(res)) return;
+    const auto revision = req.get_header_value("If-Match");
+    if (revision.empty()) return BadRequest(res, "Missing document revision");
+    try {
+      res.set_content(impl_->json_file->Save(revision, req.body), "application/json; charset=utf-8");
+    } catch (const std::exception& error) {
+      res.status = 409;
+      res.set_content(error.what(), "text/plain; charset=utf-8");
+    }
+  }));
+}
+
+void ViewServer::RegisterCsvRoutes() {
+  impl_->server.Get("/api/schema",
+                    impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                      if (!impl_->HasValidToken(request)) {
+                        impl_->RejectUnauthorized(response);
+                        return;
+                      }
+                      try {
+                        impl_->data->recover_renamed_source();
+                        response.set_content(BuildSchemaJson(*impl_->data, impl_->editable),
+                                             "application/json; charset=utf-8");
+                      } catch (const std::exception& ex) {
+                        response.status = 409;
+                        response.set_content(std::string(ex.what()) + "\n",
+                                             "text/plain; charset=utf-8");
+                      }
+                      impl_->MaybeStopAfterRequest();
+                    }));
+
+  impl_->server.Get("/api/rows",
+                    impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                      if (!impl_->HasValidToken(request)) {
+                        impl_->RejectUnauthorized(response);
+                        return;
+                      }
+
+                      std::uint64_t offset = 0;
+                      std::uint64_t limit = kDefaultRowsPerPage;
+                      if (!ParseUint64Param(request, "offset", 0, offset) ||
+                          !ParseUint64Param(request, "limit", kDefaultRowsPerPage, limit) ||
+                          limit == 0) {
+                        BadRequest(response, "offset and limit must be non-negative integers; limit must be greater than 0");
+                        return;
+                      }
+                      if (impl_->data->mode() == CsvViewDataMode::Paged && !impl_->editable) {
+                        limit = std::min<std::uint64_t>(limit, kMaxRowsPerPage);
+                      }
+                      if (offset < impl_->data->row_count()) {
+                        limit = std::min<std::uint64_t>(limit, impl_->data->row_count() - offset);
+                      }
+
+                      const auto direction = request.get_param_value("sortDirection");
+                      const auto column = request.get_param_value("sortColumn");
+                      if ((request.has_param("sortColumn") || request.has_param("sortDirection")) &&
+                          ((direction != "asc" && direction != "desc") ||
+                           std::ranges::find(impl_->data->headers(), column) == impl_->data->headers().end())) {
+                        BadRequest(response, "invalid row sort");
+                        return;
+                      }
+                      try {
+                        if (impl_->obsidian && impl_->data->source_changed()) {
+                          response.status = 409;
+                          response.set_content("source file changed externally; reload before reading\n",
+                                               "text/plain; charset=utf-8");
+                          return;
+                        }
+                        std::string page_json;
+                        if (direction.empty()) {
+                          page_json = BuildRowsJson(*impl_->data, offset, limit, impl_->data->read_rows(offset, limit));
+                        } else {
+                          const auto page = impl_->data->read_sorted_rows(offset, limit, column, direction == "desc");
+                          page_json = BuildRowsJson(*impl_->data, offset, limit, page.rows, &page.row_ids);
+                        }
+                        response.set_content(std::move(page_json), "application/json; charset=utf-8");
+                      } catch (const std::exception& ex) {
+                        if (impl_->logger.error) {
+                          impl_->logger.error(std::string("view: ") + ex.what());
+                        }
+                        response.status = 500;
+                        response.set_content("failed to read rows\n", "text/plain; charset=utf-8");
+                      }
+                      impl_->MaybeStopAfterRequest();
+                    }));
+
+  impl_->server.Post("/api/sql-query",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       try {
+                         response.set_content(
+                             BuildSqlQueryResultJson(
+                                 *impl_->data,
+                                 JsonStringFieldOr(request.body, "sql", "")),
+                             "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/edit-cell",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         if (impl_->obsidian && impl_->data->source_changed()) {
+                           response.status = 409;
+                           response.set_content("source file changed externally; reload before editing\n",
+                                                "text/plain; charset=utf-8");
+                           return;
+                         }
+                         const bool edited = impl_->data->edit_cell(
+                             JsonUintField(request.body, "row"),
+                             JsonStringField(request.body, "column"),
+                             JsonStringField(request.body, "value"));
+                         response.set_content(edited ? "{\"ok\":true,\"edited\":true}" : "{\"ok\":true,\"edited\":false}",
+                                              "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/delete-row",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data->delete_row(JsonUintField(request.body, "row"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/insert-row",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data->insert_row(
+                             JsonUintFieldOr(request.body, "row", impl_->data->row_count()),
+                             JsonStringArrayField(request.body, "values"));
+                         response.set_content("{\"ok\":true,\"totalRows\":" +
+                                              std::to_string(impl_->data->row_count()) + "}",
+                                              "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/swap-rows",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data->swap_rows(
+                             JsonUintField(request.body, "first"),
+                             JsonUintField(request.body, "second"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/insert-column",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data->insert_column(
+                             JsonUintField(request.body, "column"),
+                             JsonStringField(request.body, "name"),
+                             JsonStringField(request.body, "value"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/delete-column",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data->delete_column(JsonStringField(request.body, "column"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/rename-column",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data->rename_column(
+                             JsonStringField(request.body, "column"),
+                             JsonStringField(request.body, "name"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/csv-options",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) return;
+                       try {
+                         impl_->data->set_csv_options(
+                             JsonStringField(request.body, "delimiter"),
+                             JsonStringField(request.body, "quote"),
+                             view_internal::JsonBoolField(request.body, "hasHeaders"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/read-csv-options",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) return;
+                       try {
+                         impl_->data->read_csv_options(
+                             JsonStringField(request.body, "delimiter"),
+                             JsonStringField(request.body, "quote"),
+                             view_internal::JsonBoolField(request.body, "hasHeaders"));
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/reload",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       try {
+                         const bool changed = view_internal::JsonBoolFieldOr(request.body, "checkOnly", false)
+                           ? impl_->data->source_changed()
+                           : impl_->data->reload_if_changed();
+                         response.set_content(changed ? "{\"changed\":true}" : "{\"changed\":false}",
+                                              "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/reset",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data->reset();
+                         response.set_content("{\"ok\":true}", "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         response.status = 409;
+                         response.set_content(std::string(ex.what()) + "\n",
+                                              "text/plain; charset=utf-8");
+                       }
+                     }));
+
+  impl_->server.Post("/api/save",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       if (!impl_->RequireEditable(response)) {
+                         return;
+                       }
+                       try {
+                         impl_->data->save(
+                             JsonStringArrayFieldOr(request.body, "columns", {}));
+                         std::size_t charts_generated = 0;
+                         std::string chart_error;
+                         try {
+                           if (!impl_->obsidian) {
+                             charts_generated = RenderRunOnSaveChartsForCurrentCsv(
+                                 *impl_->data, impl_->logger);
+                           }
+                         } catch (const std::exception& ex) {
+                           chart_error = ex.what();
+                           if (impl_->logger.error) {
+                             impl_->logger.error(chart_error);
+                           }
+                         }
+                         response.set_content(SaveResultJson(charts_generated, chart_error),
+                                              "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         response.status = 409;
+                         response.set_content(std::string(ex.what()) + "\n",
+                                              "text/plain; charset=utf-8");
+                       }
+                     }));
+
+  impl_->server.Post("/api/chart-config/preview",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       try {
+                         response.set_content(PreviewCurrentCsvChart(*impl_->data, request.body, impl_->logger),
+                                              "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Post("/api/chart-config/heatmap",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       try {
+                         response.set_content(AppendHeatmapChartConfig(
+                                                  *impl_->data, request.body, impl_->logger),
+                                              "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
+
+  impl_->server.Get("/api/chart-config",
+                    impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                      if (!impl_->HasValidToken(request)) {
+                        impl_->RejectUnauthorized(response);
+                        return;
+                      }
+                      try {
+                        response.set_content(BuildChartConfigListJson(*impl_->data),
+                                             "application/json; charset=utf-8");
+                      } catch (const std::exception& ex) {
+                        BadRequest(response, ex.what());
+                      }
+                    }));
+
+  impl_->server.Post("/api/chart-config/generate",
+                     impl_->WithDataLock([this](const httplib::Request& request, httplib::Response& response) {
+                       if (!impl_->HasValidToken(request)) {
+                         impl_->RejectUnauthorized(response);
+                         return;
+                       }
+                       try {
+                         response.set_content(GenerateCurrentCsvChart(
+                                                  *impl_->data, request.body, impl_->logger),
+                                              "application/json; charset=utf-8");
+                       } catch (const std::exception& ex) {
+                         BadRequest(response, ex.what());
+                       }
+                     }));
 }
 
 void ViewServer::Stop() {

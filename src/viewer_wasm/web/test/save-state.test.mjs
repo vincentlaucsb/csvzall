@@ -23,6 +23,24 @@ test('pending mutation dispatch invalidates a save before its worker response ar
 
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 
+test('queued edits dispatch before structural changes even when an earlier edit fails', async () => {
+  const tracker = createMutationTracker(() => {});
+  const firstEdit = deferred();
+  const dispatched = [];
+  const first = tracker.run(() => {
+    dispatched.push('first edit');
+    return firstEdit.promise;
+  });
+  const second = tracker.run(() => dispatched.push('second edit'));
+  const insert = tracker.run(() => dispatched.push('insert'));
+  await Promise.resolve();
+  assert.deepEqual(dispatched, ['first edit']);
+  firstEdit.reject(new Error('Rejected edit'));
+  await assert.rejects(first, /Rejected edit/);
+  await Promise.all([second, insert]);
+  assert.deepEqual(dispatched, ['first edit', 'second edit', 'insert']);
+});
+
 test('save stays dirty until acknowledged and never clears edits made during preparation or writing', async () => {
   for (const phase of ['prepare', 'persist', 'none']) {
     const state = createSaveState();

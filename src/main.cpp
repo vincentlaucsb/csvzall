@@ -455,7 +455,7 @@ ThroughputStats FinishStats(const csvzall::pipeline::RunStats& ps,
 }  // namespace
 
 int main(int argc, char** argv) {
-  argparse::ArgumentParser program("csvzall", "0.10.0");
+  argparse::ArgumentParser program("csvzall", "1.0.0");
 #ifndef CSVZALL_OBSIDIAN_BUILD
   program.add_description("csvzall: high-performance CSV ETL and reporting CLI");
   program.add_epilog(R"(Intent groups:
@@ -651,10 +651,10 @@ Rerunnable import (first run creates the store, later runs merge into it):
 
   argparse::ArgumentParser view_cmd("view");
   view_cmd.add_description(
-      "Start a local browser table viewer for one plain CSV file.");
+      "View a local CSV table or open a JSON file in the text editor.");
 #ifndef CSVZALL_OBSIDIAN_BUILD
   view_cmd.add_epilog(R"(Input shape:
-  A plain local CSV file path is required. stdin, gzip (.gz), and zip (.zip)
+  A plain local CSV or JSON file path is required. stdin, gzip (.gz), and zip (.zip)
   inputs are intentionally not supported by the viewer in this pass.
 
 Output shape:
@@ -666,7 +666,8 @@ Output shape:
   --startup-json prints {"url":"http://127.0.0.1:..."} for host integrations.
   --obsidian leaves automatic chart regeneration after CSV saves to the host.
   Explicit chart actions still work; standard JSON config files are unchanged.
-  The viewer is read-only unless --edit is provided.
+  JSON opens in an editable, syntax-highlighted text view. Compact JSON expands
+  for reading and saves compactly. CSV viewing is read-only unless --edit is provided.
   Pass --edit to enable explicit editable mode. Editable mode uses the same
   row-offset index as read-only viewing, keeps unsaved edits in an overlay,
   supports cell edits plus row/column insert/delete, exposes row deletion from
@@ -684,6 +685,7 @@ Output shape:
 
 Examples:
   csvzall view activities.csv
+  csvzall view settings.json
   csvzall view activities.csv --edit
   csvzall view activities.csv --no-open --port 43117
   csvzall view activities.csv --no-open --startup-json
@@ -693,7 +695,9 @@ Related:
   Use head for terminal previews and sql query --format markdown for note-ready summaries.
 )");
 #else
-  view_cmd.add_epilog(R"(Input: one plain local CSV file. Output: a token-protected HTTP viewer on
+  view_cmd.add_epilog(R"(Input: one local CSV or JSON file. JSON opens in a syntax-highlighted editor.
+Example: csvzall view settings.json
+Output: a token-protected HTTP viewer on
 127.0.0.1; --startup-json emits its URL for the host.
 Use --edit for editing and --obsidian for host-owned automatic charts.
 Explicit chart actions remain available. Theme changes arrive from the host.
@@ -701,7 +705,7 @@ Example: csvzall view data.csv --edit --no-open --startup-json --obsidian
 Related: sql query --format markdown produces note-ready summaries.)");
 #endif
   view_cmd.add_argument("input")
-      .help("Input CSV file path")
+      .help("Input CSV or JSON file path")
       .required();
   view_cmd.add_argument("--verbose")
       .help("Print diagnostic logs to stderr")

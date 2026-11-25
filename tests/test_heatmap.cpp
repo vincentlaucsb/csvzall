@@ -3,9 +3,11 @@
 
 #include "../src/transform_pipeline.hpp"
 #include "../src/charts/csv_chart.hpp"
+#include "../src/charts/line_time.hpp"
 #include "../src/pipeline/common/chart_spec.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -1016,5 +1018,54 @@ TEST_CASE("charts config parser reports malformed config shapes") {
   for (const auto& [name, json] : cases) {
     WriteText(root / name, json);
     CHECK_THROWS(csvzall::pipeline::common::LoadChartConfig(root / name));
+  }
+}
+
+TEST_CASE("line charts accept ISO workout dates with numeric-equivalent spacing") {
+  using namespace csvzall::charts;
+  const std::string dates = "date,estimated_1rm,exercise\n2026-11-16,120,Squat\n2026-11-01,110,Squat\n2026-11-08,80,Bench\n2026-11-16,160,Deadlift\n";
+  const std::string numbers = "date,estimated_1rm,exercise\n15,120,Squat\n0,110,Squat\n7,80,Bench\n15,160,Deadlift\n";
+  ChartReader dated(dates), numeric(numbers);
+  LineSpec spec;
+  spec.x_column = "date";
+  spec.y_column = "estimated_1rm";
+  spec.series_column = "exercise";
+  const auto result = RenderLineCsv(dated.reader, dated.headers, spec, {});
+  CHECK(result.rows_processed == 4);
+  CHECK(result.svg.find("date (days since 2026-11-01 UTC)") != std::string::npos);
+  CHECK(result.svg.find("Deadlift") != std::string::npos);
+  spec.x_label = "date (days since 2026-11-01 UTC)";
+  CHECK(result.svg == RenderLineCsv(numeric.reader, numeric.headers, spec, {}).svg);
+}
+
+TEST_CASE("line chart dates support wide values and reject mixed X types") {
+  using namespace csvzall::charts;
+  LineSpec spec;
+  spec.x_column = "date";
+  spec.values = {{"squat", "Squat", ""}, {"bench", "Bench", ""}, {"deadlift", "Deadlift", ""}};
+  ChartReader data("date,squat,bench,deadlift\n2026-11-01,100,80,140\n2026-11-16,110,85,150\n");
+  CHECK(RenderLineCsv(data.reader, data.headers, spec, {}).svg.find("days since 2026-11-01 UTC") != std::string::npos);
+  for (const auto& rows : {"2026-11-01,100,80,140\n2,110,85,150\n", "2,100,80,140\n2026-11-01,110,85,150\n"}) {
+    ChartReader mixed(std::string("date,squat,bench,deadlift\n") + rows);
+    CHECK_THROWS_WITH(RenderLineCsv(mixed.reader, mixed.headers, spec, {}),
+                      Catch::Matchers::ContainsSubstring("only ISO dates/timestamps"));
+  }
+}
+
+TEST_CASE("line timestamps preserve time and normalize timezone offsets") {
+  using csvzall::charts::ParseLineDate;
+  const auto midnight = ParseLineDate("2026-11-01");
+  REQUIRE(midnight);
+  CHECK(ParseLineDate("2026-11-01T00:00:00Z") == midnight);
+  CHECK(ParseLineDate("2026-11-01T02:00:00+02:00") == midnight);
+  CHECK(ParseLineDate("2026-10-31T17:00:00-07:00") == midnight);
+  const auto noon = ParseLineDate("2026-11-01 12:00");
+  REQUIRE(noon);
+  CHECK(*noon - *midnight == 0.5);
+  const auto fraction = ParseLineDate("2026-11-01T00:00:00.500Z");
+  REQUIRE(fraction);
+  CHECK(std::abs((*fraction - *midnight) * 86400 - 0.5) < 0.000001);
+  for (const auto text : {"2026-02-30", "2026-11-01T24:00", "2026-11-01T12:60", "2026-11-01T12:00:60", "2026-11-01T12:00:00.Z", "2026-11-01T12:00+25:00", "2026-11-01garbage", "11/01/2026", "2026"}) {
+    CHECK_FALSE(ParseLineDate(text));
   }
 }

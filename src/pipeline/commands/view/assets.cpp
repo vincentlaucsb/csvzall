@@ -107,6 +107,7 @@ std::optional<std::filesystem::path> DevViewerAssetPath(
   if (asset_dir.empty()) {
     return std::nullopt;
   }
+  if (route == "/json-editor.html") return asset_dir / "modules" / "json-editor.html";
   if (route == "/") {
     return asset_dir / "index.html";
   }
@@ -128,7 +129,7 @@ std::optional<std::filesystem::path> DevViewerAssetPath(
 }
 
 std::string_view ViewerAssetContentType(std::string_view route) {
-  if (route == "/" || route == "/index.html") {
+  if (route == "/" || route == "/index.html" || route == "/json-editor.html") {
     return "text/html";
   }
   if (route.ends_with(".css")) {
