@@ -3,6 +3,8 @@ export const HOST_THEME_VARIABLES = [
   '--background-primary', '--background-secondary', '--background-modifier-hover',
   '--background-modifier-border', '--text-normal', '--text-muted', '--text-faint',
   '--text-error', '--text-on-accent', '--interactive-accent', '--font-interface',
+  '--font-text', '--font-monospace', '--font-text-size', '--font-ui-medium', '--font-ui-smaller',
+  '--size-4-1', '--size-4-2', '--size-4-3', '--size-4-4', '--input-height',
 ];
 
 export function parseHostTheme(data) {

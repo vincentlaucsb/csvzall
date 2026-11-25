@@ -1,0 +1,40 @@
+:root {
+  color-scheme: light;
+  --csvzall-font-family: var(--font-interface, ui-sans-serif), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --csvzall-content-size: var(--font-text-size, 14px);
+  --csvzall-content-font: var(--font-text, var(--csvzall-font-family));
+  --csvzall-code-font: var(--font-monospace, ui-monospace, monospace);
+  --csvzall-ui-size: var(--font-ui-medium, 0.95rem);
+  --csvzall-caption-size: var(--font-ui-smaller, 0.78rem);
+  --csvzall-space-1: var(--size-4-1, 0.25rem);
+  --csvzall-space-2: var(--size-4-2, 0.5rem);
+  --csvzall-space-3: var(--size-4-3, 0.75rem);
+  --csvzall-space-4: var(--size-4-4, 1rem);
+  --csvzall-background-primary: var(--background-primary, #ffffff);
+  --csvzall-background-secondary: var(--background-secondary, #f6f7f8);
+  --csvzall-background-hover: var(--background-modifier-hover, #f2f3f5);
+  --csvzall-border: var(--background-modifier-border, #d6d6d6);
+  --csvzall-text-normal: var(--text-normal, #2e3338);
+  --csvzall-text-muted: var(--text-muted, #6f7680);
+  --csvzall-accent: var(--interactive-accent, #7c3aed);
+  --popright-bg: var(--csvzall-background-primary);
+  --popright-color: var(--csvzall-text-normal);
+  --popright-border: var(--csvzall-border);
+  --popright-active-bg: var(--csvzall-background-hover);
+  --popright-danger-color: var(--text-error, #dc2626);
+  --popright-shadow: 0 10px 28px color-mix(in srgb, #000 24%, transparent);
+  --popright-z-index: 20;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --csvzall-background-primary: var(--background-primary, #111317);
+    --csvzall-background-secondary: var(--background-secondary, #191c22);
+    --csvzall-background-hover: var(--background-modifier-hover, #252a33);
+    --csvzall-border: var(--background-modifier-border, #343a46);
+    --csvzall-text-normal: var(--text-normal, #e6e9ef);
+    --csvzall-text-muted: var(--text-muted, #a6adbb);
+    --csvzall-accent: var(--interactive-accent, #9b8cff);
+  }
+}

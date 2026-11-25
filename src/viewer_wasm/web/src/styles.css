@@ -1,2 +1,3 @@
 /* Compatibility entry: all viewer styling lives in the shared shell. */
+@import '../../../viewer/modules/viewer-theme.css';
 @import '../../../viewer/viewer.css';

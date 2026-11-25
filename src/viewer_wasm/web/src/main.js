@@ -2,6 +2,7 @@ import { createGrid } from 'ag-grid-community';
 import { createContextMenu, createDropdownMenu } from 'popright';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-alpine.css';
+import '../../../viewer/modules/viewer-theme.css';
 import '../../../viewer/viewer.css';
 import { createViewerShell } from '../../../viewer/modules/shell.mjs';
 import { createWasmAdapter } from './wasm-adapter.js';
