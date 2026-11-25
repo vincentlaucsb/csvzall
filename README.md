@@ -2,8 +2,9 @@
 
 <img src="https://raw.githubusercontent.com/vincentlaucsb/csvzall/master/assets/csvzall-logo-theme-safe.png" alt="csvzall logo: a reciprocating saw cutting through a spreadsheet" width="760">
 
-A fast, single-binary CSV transformation CLI for Unix-style pipelines. Pipe CSVs through `filter`, `derive`, `summarize`, and `head` — each command reads stdin, writes stdout, logs to stderr.
+A fast, single-binary CSV transformation CLI for Unix-style pipelines. Pipe CSVs through `filter`, `derive`, `summarize`, and `head` â€” each command reads stdin, writes stdout, logs to stderr.
 For local inspection workflows, `csvzall view <file.csv>` starts a read-only browser table view backed by the same CSV parser.
+Run `csvzall view settings.json` to open the offline JSON editor. Compact files expand for reading and save compactly. Use **Save** or Ctrl+S (Cmd+S on macOS).
 
 Useful links:
 
@@ -221,6 +222,10 @@ the same numeric and deterministic text comparison behavior.
 ```sh
 csvzall min todoist_activities.csv --column completed_at
 ```
+
+### View and edit JSON
+
+`csvzall view settings.json` opens a syntax-highlighted JSON editor. Compact files expand for reading and save compactly. Save with Ctrl+S or Cmd+S. Opening a file leaves its contents untouched.
 
 ### `view <input.csv> [--no-open]`
 
@@ -468,7 +473,7 @@ concurrency.
 
 ## Pipelines are shell scripts
 
-There is no built-in pipeline format. Save complex chains as PowerShell, Bash, or batch scripts — they're already shareable, version-controllable, and composable with the rest of your toolbox.
+There is no built-in pipeline format. Save complex chains as PowerShell, Bash, or batch scripts â€” they're already shareable, version-controllable, and composable with the rest of your toolbox.
 
 ## Building
 
@@ -565,7 +570,7 @@ release runner.
 | [indicators](https://github.com/p-ranav/indicators) v2.3 | [Pranav](https://github.com/p-ranav) | Terminal progress bars for long-running imports | FetchContent; omitted from Obsidian helper builds |
 | [zlib](https://github.com/madler/zlib) v1.3.1 | [Mark Adler](https://github.com/madler) and contributors | Optional gzip and ZIP/deflate decompression for compressed CSV inputs | System package if available; FetchContent fallback; omitted when `CSVZALL_ENABLE_COMPRESSED_INPUT=OFF` |
 | [keychain](https://github.com/hrantzsch/keychain) v1.3.1 | [hrantzsch](https://github.com/hrantzsch) | Optional OS credential storage for PostgreSQL passwords | System package if available; FetchContent fallback; Linux requires libsecret |
-| [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [Sébastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite (built with `SQLITE_ENABLE_MATH_FUNCTIONS`) | FetchContent, with a local CMake patch |
+| [SQLiteCpp](https://github.com/SRombauts/SQLiteCpp) v3.3.2 | [SÃ©bastien Rombauts](https://github.com/SRombauts) | SQLite C++ wrapper using bundled SQLite (built with `SQLITE_ENABLE_MATH_FUNCTIONS`) | FetchContent, with a local CMake patch |
 | [sqlean](https://github.com/nalgeon/sqlean) 0.28.5 (MIT) | [Anton Zhiyanov](https://github.com/nalgeon) and contributors | SQL functions compiled into every csvzall SQLite connection: the `fuzzy`, `stats`, `text`, `crypto`, `uuid`, and `regexp` modules | FetchContent (pinned tag); module sources compiled statically; `cmake/sqlean_patches.cmake` writes patched copies of two files into the build tree |
 | [PCRE2](https://github.com/PCRE2Project/pcre2) 10.42 (BSD-3-Clause) | [Philip Hazel](https://github.com/PhilipHazel) and contributors | Regular-expression engine behind `REGEXP` and the `regexp_*` SQL functions | Vendored inside sqlean's `regexp` module; compiled statically with Unicode support, without JIT |
 | [SQLite `sqlite3ext.h`](https://github.com/sqlite/sqlite/blob/version-3.46.1/src/sqlite3ext.h) 3.46.1 | [SQLite developers](https://sqlite.org/crew.html) | Loadable-extension header for the test extension used by `--load-extension` tests | Test-only download with a pinned SHA-256; skipped when offline |
@@ -585,8 +590,9 @@ release runner.
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) v0.18.5 | [Yuji Hirose](https://github.com/yhirose) and contributors | Embedded local HTTP server for the `view` command | Vendored single header under `vendor/httplib` |
 | [esbuild](https://esbuild.github.io/) 0.25.12 | Evan Wallace and contributors | Bundles native viewer JavaScript at build time | CMake downloads a checksum-pinned host binary on Windows, macOS and Linux x64/arm64, or accepts `CSVZALL_ESBUILD_EXECUTABLE` |
 | [AG Grid Community](https://www.ag-grid.com/javascript-data-grid/getting-started/) v32.3.9 | [AG Grid Ltd.](https://www.ag-grid.com/) | Interactive browser table for the `view` command | The npm package's `dist/ag-grid-community.min.noStyle.js`, `styles/ag-grid.css`, and `styles/ag-theme-alpine.css` are vendored under `vendor/ag-grid` and embedded at build time |
+| [CodeMirror 6](https://codemirror.net/) | [Marijn Haverbeke and contributors](https://github.com/codemirror) | JSON text editing and highlighting | Offline bundle built from the locked packages in `vendor/codemirror-json` with `npm ci && npm run build` |
 | [Popright](https://github.com/vincentlaucsb/popright) v0.1.2 | [Vincent La](https://github.com/vincentlaucsb) | Context menu and dropdown menu primitives for the native `view` command and csvzall Browser web app | Vendored npm package under `vendor/popright`, embedded into csvzall at build time and linked into the browser editor Vite app via a local file dependency |
-| [Tabler Icons](https://github.com/tabler/tabler-icons) | [Paweł Kuna](https://github.com/codecalm) and contributors | Viewer toolbar and context menu icons | Selected inline SVG paths in `src/viewer/viewer.js` |
+| [Tabler Icons](https://github.com/tabler/tabler-icons) | [PaweÅ‚ Kuna](https://github.com/codecalm) and contributors | Viewer toolbar and context menu icons | Selected inline SVG paths in `src/viewer/viewer.js` |
 
 ### Browser editor
 
@@ -627,7 +633,7 @@ release runner.
 
 - Data flows on **stdout**, diagnostics on **stderr**. Every command is safe to pipe.
 - `-` as the input path means stdin. All commands accept it.
-- `filter` and `derive` use SQL syntax — standard `WHERE` clauses and SQL expressions.
+- `filter` and `derive` use SQL syntax â€” standard `WHERE` clauses and SQL expressions.
 - SQLite-backed commands support PCRE2 `REGEXP` and `regexp_*` functions;
   NULL input does not match, and NULL or invalid patterns fail the query.
 - `merge` is the keyed rerunnable import primitive; `append` is only exact-header concatenation.

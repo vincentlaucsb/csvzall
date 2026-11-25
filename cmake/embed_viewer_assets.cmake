@@ -8,6 +8,11 @@ if(NOT DEFINED VIEWER_SOURCE_DIR OR NOT DEFINED AG_GRID_SOURCE_DIR OR NOT DEFINE
 endif()
 
 set(_assets
+  "/json-editor.html|${VIEWER_SOURCE_DIR}/modules/json-editor.html|text/html|json_editor_0"
+  "/assets/modules/json-editor.css|${VIEWER_SOURCE_DIR}/modules/json-editor.css|text/css|json_editor_1"
+  "/assets/modules/json-editor.mjs|${VIEWER_SOURCE_DIR}/modules/json-editor.mjs|application/javascript|json_editor_2"
+  "/assets/modules/json-document.mjs|${VIEWER_SOURCE_DIR}/modules/json-document.mjs|application/javascript|json_editor_3"
+  "/assets/modules/codemirror-json.mjs|${VIEWER_SOURCE_DIR}/modules/codemirror-json.mjs|application/javascript|json_editor_4"
   "/assets/modules/features/style.mjs|${VIEWER_SOURCE_DIR}/modules/features/style.mjs|application/javascript|viewer_feature_style_mjs"
   "/assets/modules/features/charts.css|${VIEWER_SOURCE_DIR}/modules/features/charts.css|text/css|viewer_feature_charts_css"
   "/assets/modules/features/sql.css|${VIEWER_SOURCE_DIR}/modules/features/sql.css|text/css|viewer_feature_sql_css"

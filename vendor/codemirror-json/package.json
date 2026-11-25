@@ -1,0 +1,15 @@
+{
+  "name": "csvzall-vendored-json-editor",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node build.mjs" },
+  "dependencies": {
+    "@codemirror/commands": "6.8.1",
+    "@codemirror/lang-json": "6.0.2",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/state": "6.5.0",
+    "@codemirror/view": "6.38.6",
+    "@lezer/highlight": "1.2.5"
+  },
+  "devDependencies": { "esbuild": "0.25.5" }
+}
