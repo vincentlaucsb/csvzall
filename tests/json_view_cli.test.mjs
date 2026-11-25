@@ -93,6 +93,7 @@ test('Reset restores the last successful save, then follows an external edit wit
 
 test('hosted JSON debounces AutoSave and uses the same revision check as manual Save', async () => {
   let disk = '1', writes = 0;
+  let pendingRead;
   const nodes = new Map();
   const posted = [];
   const timers = new Map();
@@ -114,7 +115,7 @@ test('hosted JSON debounces AutoSave and uses the same revision check as manual 
         writes++;
         if (options.headers['If-Match'] !== disk) return { ok: false, text: async () => 'The JSON file changed on disk.' };
         disk = options.body;
-      }
+      } else if (pendingRead) await pendingRead;
       return { ok: true, json: () => ({ text: disk, revision: disk, name: 'example.json', editable: true }) };
     },
   });
@@ -146,6 +147,19 @@ test('hosted JSON debounces AutoSave and uses the same revision check as manual 
   assert.equal(disk, '3');
   assert.equal(writes, 1);
   assert.equal(timers.size, 0);
+
+  let releaseRead;
+  pendingRead = new Promise(resolve => { releaseRead = resolve; });
+  win.dispatchEvent(new Event('focus'));
+  await new Promise(resolve => setImmediate(resolve));
+  edit('4');
+  await runTimer();
+  sendPolicy(false, true);
+  releaseRead();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(writes, 1, 'a queued automatic save honors a policy update before writing');
+  assert.equal(disk, '3');
+  sendPolicy(true, true);
 
   edit('4');
   disk = '5';

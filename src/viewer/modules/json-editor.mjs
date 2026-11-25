@@ -48,7 +48,7 @@ export async function openJsonEditor(win, createEditor = createJsonEditor) {
   }, {
     win,
     canSave: () => source.editable && state.dirty && pendingSaves === 0,
-    save: () => save().catch(error => { reportError(error); throw error; }),
+    save: () => save(true).catch(error => { reportError(error); throw error; }),
   });
   const update = (doc, edited = false) => {
     const dirty = !doc.eq(saved);
@@ -61,12 +61,13 @@ export async function openJsonEditor(win, createEditor = createJsonEditor) {
     if (edited) autosave.edited();
     else autosave.schedule();
   };
-  const save = () => {
+  const save = (automatic = false) => {
     autosave.cancel();
     pendingSaves++;
     button.disabled = true;
     reset.disabled = true;
     return enqueue(async () => {
+      if (automatic && !autosave.enabled) return false;
       const doc = editor.state.doc;
       if (doc.eq(saved)) return true;
       const result = await request({ method: 'POST', headers: { 'If-Match': revision, 'Content-Type': 'text/plain;charset=utf-8' },
